@@ -50,7 +50,7 @@ public final class ConfigLoader {
     }
 
     private static void merge(ObjectNode target, ObjectNode overlay) {
-        overlay.fields().forEachRemaining(entry -> {
+        overlay.properties().forEach(entry -> {
             var existing = target.get(entry.getKey());
             if (existing instanceof ObjectNode existingObject && entry.getValue() instanceof ObjectNode overlayObject) {
                 merge(existingObject, overlayObject);
