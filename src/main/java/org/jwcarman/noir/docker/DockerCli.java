@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 import org.jwcarman.noir.exec.Command;
 import org.jwcarman.noir.exec.CommandResult;
 import org.jwcarman.noir.exec.CommandRunner;
+import org.jwcarman.noir.exec.ToolMissingException;
 
 /**
  * {@link ContainerPort} backed by the {@code docker} CLI. Containers run non-root, without new
@@ -71,21 +72,37 @@ public final class DockerCli implements ContainerPort {
     CommandResult r;
     try {
       r = runner.run(command);
+    } catch (RuntimeException e) {
+      // Whatever went wrong on our side, the container may still be running and writing into its
+      // mounts: remove it before reporting. Failures here are infrastructure (retried, then
+      // blocking), except a missing docker binary, which waiting will not fix.
+      try {
+        remove(name);
+      } catch (RuntimeException rmFailure) {
+        e.addSuppressed(rmFailure);
+      }
+      if (e instanceof DockerException || e instanceof ToolMissingException) {
+        throw e;
+      }
+      throw new DockerException("docker run " + name + " failed: " + e.getMessage(), e);
     } finally {
       deleteQuietly(envFile);
     }
     if (r.timedOut()) {
-      var rm =
-          runner.run(Command.of("docker", "rm", "-f", name).withTimeout(Duration.ofMinutes(1)));
-      // A container that is still running could keep writing into its mounts after we move on.
-      if (!rm.ok() && !rm.stderr().contains("No such container")) {
-        throw new DockerException(
-            "timed-out container " + name + " could not be removed: " + rm.tail(10));
-      }
+      remove(name);
     } else if (r.exitCode() == 125 || daemonDown(r)) {
       throw failure("docker run", r);
     }
     return new ContainerResult(r.exitCode(), r.stdout(), r.stderr(), r.timedOut(), imageId);
+  }
+
+  /** {@code docker rm -f}; a container that cannot be removed is an error. */
+  private void remove(String name) {
+    var rm = runner.run(Command.of("docker", "rm", "-f", name).withTimeout(Duration.ofMinutes(1)));
+    // A container that is still running could keep writing into its mounts after we move on.
+    if (!rm.ok() && !rm.stderr().contains("No such container")) {
+      throw new DockerException("container " + name + " could not be removed: " + rm.tail(10));
+    }
   }
 
   @Override

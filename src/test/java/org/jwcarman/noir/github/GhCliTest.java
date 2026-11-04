@@ -15,7 +15,7 @@ class GhCliTest {
   final GitHubPort gh = new GhCli(runner);
 
   static CommandResult ok(String stdout) {
-    return new CommandResult(0, stdout, "", false);
+    return new CommandResult(0, stdout, "", false, false);
   }
 
   @Test
@@ -141,7 +141,7 @@ class GhCliTest {
     runner.whenArgvStartsWith(
         List.of("gh", "api"),
         new CommandResult(
-            4, "", "To get started with GitHub CLI, please run:  gh auth login\n", false));
+            4, "", "To get started with GitHub CLI, please run:  gh auth login\n", false, false));
     assertThatThrownBy(() -> gh.defaultBranch("jwcarman/demo"))
         .isInstanceOf(GitHubException.class)
         .hasMessage("GitHub CLI is not authenticated; run: gh auth login");
@@ -150,7 +150,7 @@ class GhCliTest {
   @Test
   void otherFailuresCarryTail() {
     runner.whenArgvStartsWith(
-        List.of("gh", "api"), new CommandResult(1, "", "HTTP 404: Not Found\n", false));
+        List.of("gh", "api"), new CommandResult(1, "", "HTTP 404: Not Found\n", false, false));
     assertThatThrownBy(() -> gh.defaultBranch("jwcarman/nope"))
         .hasMessage("gh api failed: HTTP 404: Not Found");
   }

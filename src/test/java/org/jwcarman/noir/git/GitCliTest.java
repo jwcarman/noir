@@ -59,7 +59,7 @@ class GitCliTest {
         new org.jwcarman.noir.exec.FakeCommandRunner()
             .whenArgvStartsWith(
                 java.util.List.of("git"),
-                new org.jwcarman.noir.exec.CommandResult(0, "", "", false));
+                new org.jwcarman.noir.exec.CommandResult(0, "", "", false, false));
     new GitCli(runner).fetch(Path.of("/repo"), "main");
     var c = runner.commands().getFirst();
     assertThat(c.env()).containsEntry("GIT_TERMINAL_PROMPT", "0");

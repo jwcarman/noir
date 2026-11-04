@@ -63,10 +63,28 @@ class BundleRepoTest {
   }
 
   @Test
+  void truncatedPatchIsNeverReturned() {
+    var fake =
+        new FakeCommandRunner()
+            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false, false))
+            .whenArgvStartsWith(List.of("git", "-C"), new CommandResult(0, "", "", false, false));
+    try (var repo = BundleRepo.open(fake, fakeBundle(), tmp)) {
+      fake.whenArgvStartsWith(
+          List.of("git", "-C", repo.dir().toString(), "log"),
+          new CommandResult(0, "+partial", "", false, true));
+      assertThatThrownBy(() -> repo.patchSince("base", "br"))
+          .isInstanceOf(PatchTooLargeException.class);
+      var log = fake.commands().get(fake.commands().size() - 1);
+      assertThat(log.argv()).contains("log");
+      assertThat(log.outputLimit()).isEqualTo(BundleRepo.MAX_PATCH_BYTES);
+    }
+  }
+
+  @Test
   void everyGitInvocationUsesHardenedEnv() {
     var fake =
         new FakeCommandRunner()
-            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "abc\n", "", false));
+            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "abc\n", "", false, false));
     try (var repo = BundleRepo.open(fake, fakeBundle(), tmp)) {
       repo.commitsSince("base", "br");
       repo.patchSince("base", "br");
@@ -89,9 +107,10 @@ class BundleRepoTest {
     var work = Files.createDirectories(tmp.resolve("w"));
     var fake =
         new FakeCommandRunner()
-            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false))
+            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false, false))
             .whenArgvStartsWith(
-                List.of("git", "-C"), new CommandResult(128, "", "fatal: bad bundle", false));
+                List.of("git", "-C"),
+                new CommandResult(128, "", "fatal: bad bundle", false, false));
     // init has no -C so it succeeds; fetch fails
     assertThatThrownBy(() -> BundleRepo.open(fake, fakeBundle(), work))
         .isInstanceOf(GitException.class)
@@ -105,7 +124,7 @@ class BundleRepoTest {
   void closeIsIdempotent() {
     var fake =
         new FakeCommandRunner()
-            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false));
+            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false, false));
     var repo = BundleRepo.open(fake, fakeBundle(), tmp.resolve("w2"));
     assertThat(repo.dir()).exists();
     repo.close();

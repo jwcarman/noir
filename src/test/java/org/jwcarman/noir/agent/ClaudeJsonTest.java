@@ -54,6 +54,24 @@ class ClaudeJsonTest {
   }
 
   @Test
+  void resultLineIsFoundInTheTailAfterAFloodOfOutput() {
+    var json =
+        "{\"is_error\":false,\"num_turns\":3,\"result\":\"ok\","
+            + "\"modelUsage\":{\"claude-opus-5-5\":{}}}";
+    var r =
+        new org.jwcarman.noir.exec.ProcessCommandRunner()
+            .run(
+                org.jwcarman.noir.exec.Command.of(
+                        "sh", "-c", "yes noise | head -c 40000002; printf '%s\\n' \"$0\"", json)
+                    .withOutputLimit(1024 * 1024));
+    assertThat(r.truncated()).isTrue();
+    var parsed = ClaudeJson.parse(new ContainerResult(0, r.stdout(), "", false, "id"), null);
+    assertThat(parsed.error()).isFalse();
+    assertThat(parsed.turns()).isEqualTo(3);
+    assertThat(parsed.model()).isEqualTo("claude-opus-5-5");
+  }
+
+  @Test
   void invalidKeyResultCarriesMessage() {
     var json =
         "{\"is_error\":true,\"num_turns\":1,\"total_cost_usd\":0,\"api_error_status\":401,"

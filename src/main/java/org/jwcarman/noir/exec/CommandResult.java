@@ -2,8 +2,13 @@ package org.jwcarman.noir.exec;
 
 import java.util.Arrays;
 
-/** Outcome of a {@link Command}. */
-public record CommandResult(int exitCode, String stdout, String stderr, boolean timedOut) {
+/**
+ * Outcome of a {@link Command}. {@code stdout} and {@code stderr} are the last {@link
+ * Command#outputLimit()} bytes of each stream; {@code truncated} says that earlier output was
+ * dropped from at least one of them.
+ */
+public record CommandResult(
+    int exitCode, String stdout, String stderr, boolean timedOut, boolean truncated) {
 
   public boolean ok() {
     return exitCode == 0 && !timedOut;

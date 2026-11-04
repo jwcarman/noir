@@ -25,6 +25,9 @@ public final class BundleRepo implements AutoCloseable {
           "GIT_CONFIG_NOSYSTEM", "1",
           "GIT_CONFIG_GLOBAL", "/dev/null");
 
+  /** The most patch output noir reads; a larger patch is refused, never scanned in part. */
+  public static final long MAX_PATCH_BYTES = 256L * 1024 * 1024;
+
   private final CommandRunner runner;
   private final Path dir;
 
@@ -81,8 +84,14 @@ public final class BundleRepo implements AutoCloseable {
     return out.lines().map(String::trim).filter(s -> !s.isEmpty()).toList();
   }
 
+  /**
+   * The full patch beyond {@code baseSha}. Output over {@link #MAX_PATCH_BYTES} is refused with
+   * {@link PatchTooLargeException}: a truncated patch is never returned (or scanned).
+   */
   public String patchSince(String baseSha, String branch) {
-    return git(
+    var result =
+        git(
+            MAX_PATCH_BYTES,
             "log",
             "-p",
             "--binary",
@@ -91,8 +100,12 @@ public final class BundleRepo implements AutoCloseable {
             "--no-color",
             "--no-ext-diff",
             "--no-textconv",
-            baseSha + ".." + branch)
-        .stdout();
+            baseSha + ".." + branch);
+    if (result.truncated()) {
+      throw new PatchTooLargeException(
+          "patch " + baseSha + ".." + branch + " exceeds " + MAX_PATCH_BYTES + " bytes");
+    }
+    return result.stdout();
   }
 
   public Path dir() {
@@ -114,13 +127,21 @@ public final class BundleRepo implements AutoCloseable {
 
   /** Runs git against this repo with the hardened environment; extra leading args allowed. */
   CommandResult git(String... args) {
+    return git(Command.DEFAULT_OUTPUT_LIMIT, args);
+  }
+
+  private CommandResult git(long outputLimit, String... args) {
     var argv = new ArrayList<String>(List.of("git", "-C", dir.toString()));
     argv.addAll(List.of(args));
-    return run(runner, argv);
+    return run(runner, argv, outputLimit);
   }
 
   static CommandResult run(CommandRunner runner, List<String> argv) {
-    var result = runner.run(Command.of(argv).withEnv(GIT_ENV));
+    return run(runner, argv, Command.DEFAULT_OUTPUT_LIMIT);
+  }
+
+  private static CommandResult run(CommandRunner runner, List<String> argv, long outputLimit) {
+    var result = runner.run(Command.of(argv).withEnv(GIT_ENV).withOutputLimit(outputLimit));
     if (!result.ok()) {
       var detail = result.tail(20);
       var verb = argv.get(argv.indexOf("-C") >= 0 ? argv.indexOf("-C") + 2 : 1);

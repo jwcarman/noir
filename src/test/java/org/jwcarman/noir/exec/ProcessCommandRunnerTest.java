@@ -45,12 +45,35 @@ class ProcessCommandRunnerTest {
   }
 
   @Test
+  void floodedOutputKeepsABoundedTailWithoutFailing() {
+    var limit = 1024 * 1024;
+    var r =
+        runner.run(
+            Command.of("sh", "-c", "yes | head -c 100000000; echo END >&2").withOutputLimit(limit));
+    assertThat(r.exitCode()).isZero();
+    assertThat(r.truncated()).isTrue();
+    assertThat(r.stdout()).hasSize(limit).startsWith("y\n").endsWith("y\n");
+    assertThat(r.stderr()).isEqualTo("END\n");
+  }
+
+  @Test
+  void outputExactlyAtTheLimitIsNotTruncated() {
+    var r = runner.run(Command.of("sh", "-c", "printf 0123456789").withOutputLimit(10));
+    assertThat(r.stdout()).isEqualTo("0123456789");
+    assertThat(r.truncated()).isFalse();
+    var over = runner.run(Command.of("sh", "-c", "printf 0123456789A").withOutputLimit(10));
+    assertThat(over.stdout()).isEqualTo("123456789A");
+    assertThat(over.truncated()).isTrue();
+  }
+
+  @Test
   void capturesStdoutStderrAndExit() {
     var r = runner.run(Command.of("sh", "-c", "echo out; echo err >&2; exit 3"));
     assertThat(r.exitCode()).isEqualTo(3);
     assertThat(r.stdout()).isEqualTo("out\n");
     assertThat(r.stderr()).isEqualTo("err\n");
     assertThat(r.ok()).isFalse();
+    assertThat(r.truncated()).isFalse();
   }
 
   @Test
@@ -92,7 +115,7 @@ class ProcessCommandRunnerTest {
 
   @Test
   void tailCombinesStreams() {
-    assertThat(new CommandResult(1, "a\nb\n", "c\n", false).tail(2)).isEqualTo("b\nc");
+    assertThat(new CommandResult(1, "a\nb\n", "c\n", false, false).tail(2)).isEqualTo("b\nc");
   }
 
   @Test

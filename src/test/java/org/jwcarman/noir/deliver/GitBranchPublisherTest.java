@@ -39,7 +39,7 @@ class GitBranchPublisherTest {
   void productionUrlAndHardenedEnv() {
     var fake =
         new FakeCommandRunner()
-            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false));
+            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false, false));
     new GitBranchPublisher(fake, tmp).push("o/r", stubBundle(), "noir/1-x");
     var push = fake.commands().get(fake.commands().size() - 1);
     assertThat(push.argv())
@@ -61,11 +61,11 @@ class GitBranchPublisherTest {
   void pushFailureThrowsGitException() {
     var fake =
         new FakeCommandRunner()
-            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false))
-            .whenArgvStartsWith(List.of("git", "-C"), new CommandResult(0, "", "", false));
+            .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false, false))
+            .whenArgvStartsWith(List.of("git", "-C"), new CommandResult(0, "", "", false, false));
     var failing =
         new FakeCommandRunner()
-            .whenArgvStartsWith(List.of("git"), new CommandResult(1, "", "denied", false));
+            .whenArgvStartsWith(List.of("git"), new CommandResult(1, "", "denied", false, false));
     assertThatThrownBy(() -> new GitBranchPublisher(failing, tmp).push("o/r", stubBundle(), "br"))
         .isInstanceOf(GitException.class)
         .hasMessageContaining("denied");

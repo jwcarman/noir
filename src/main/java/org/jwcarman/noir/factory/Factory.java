@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 import org.jwcarman.noir.build.BuildRunner;
 import org.jwcarman.noir.commit.Commitments;
 import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.deliver.PatchTooLargeException;
 import org.jwcarman.noir.feedback.FeedbackInput;
 import org.jwcarman.noir.feedback.FeedbackRenderer;
 import org.jwcarman.noir.feedback.RequirementResult;
@@ -250,7 +251,13 @@ public final class Factory {
     var paths = ctx.attempt();
     var bundle = paths.bundle();
     // Before anything runs or leaves the machine: a credential in the patch blocks the item.
-    var patch = retry.call(() -> bundles.patchSince(bundle, spec.baseSha(), ctx.branch()));
+    String patch;
+    try {
+      patch = retry.call(() -> bundles.patchSince(bundle, spec.baseSha(), ctx.branch()));
+    } catch (PatchTooLargeException e) {
+      // Too large to scan in full; retrying will not shrink it. Block for a human.
+      throw new InfraFailure(e);
+    }
     if (patch.isBlank()) {
       // The attempt produced commits, so its patch cannot be empty: lost output is never a pass.
       throw new InfraFailure(new IllegalStateException("empty patch for an attempt with commits"));

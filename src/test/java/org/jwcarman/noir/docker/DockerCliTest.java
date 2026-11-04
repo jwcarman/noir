@@ -18,7 +18,7 @@ class DockerCliTest {
   final DockerCli docker = new DockerCli(runner, () -> "noir-test1");
 
   static CommandResult ok(String out) {
-    return new CommandResult(0, out, "", false);
+    return new CommandResult(0, out, "", false, false);
   }
 
   @Test
@@ -98,7 +98,11 @@ class DockerCliTest {
     runner.whenArgvStartsWith(
         List.of("docker", "run"),
         new CommandResult(
-            1, "", "failed to connect to the docker API at unix:///var/run/docker.sock\n", false));
+            1,
+            "",
+            "failed to connect to the docker API at unix:///var/run/docker.sock\n",
+            false,
+            false));
     assertThatThrownBy(() -> docker.run(ContainerSpec.of("img")))
         .isInstanceOf(DockerException.class)
         .hasMessage("Docker is not running; start Docker Desktop");
@@ -123,9 +127,40 @@ class DockerCliTest {
   }
 
   @Test
+  void runnerFailureStillRemovesTheContainerAndIsADockerException() {
+    runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
+    runner.whenArgvStartsWith(List.of("docker", "run"), ok(""));
+    runner.whenArgvStartsWith(List.of("docker", "rm"), ok(""));
+    runner.onRun(c -> {
+      if (c.argv().get(1).equals("run")) {
+        throw new IllegalStateException("Cannot read process output: java.lang.OutOfMemoryError");
+      }
+    });
+    assertThatThrownBy(() -> docker.run(ContainerSpec.of("img")))
+        .isInstanceOf(DockerException.class)
+        .hasCauseInstanceOf(IllegalStateException.class);
+    assertThat(runner.commands().get(2).argv()).containsExactly("docker", "rm", "-f", "noir-test1");
+  }
+
+  @Test
+  void dockerExceptionFromTheRunnerStillRemovesTheContainer() {
+    runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
+    runner.whenArgvStartsWith(List.of("docker", "run"), ok(""));
+    runner.whenArgvStartsWith(List.of("docker", "rm"), ok(""));
+    var boom = new DockerException("boom");
+    runner.onRun(c -> {
+      if (c.argv().get(1).equals("run")) {
+        throw boom;
+      }
+    });
+    assertThatThrownBy(() -> docker.run(ContainerSpec.of("img"))).isSameAs(boom);
+    assertThat(runner.commands().get(2).argv()).containsExactly("docker", "rm", "-f", "noir-test1");
+  }
+
+  @Test
   void timeoutRemovesContainer() {
     runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
-    runner.whenArgvStartsWith(List.of("docker", "run"), new CommandResult(-1, "", "", true));
+    runner.whenArgvStartsWith(List.of("docker", "run"), new CommandResult(-1, "", "", true, false));
     runner.whenArgvStartsWith(List.of("docker", "rm"), ok(""));
     var r = docker.run(ContainerSpec.of("img").withTimeout(Duration.ofSeconds(1)));
     assertThat(r.timedOut()).isTrue();
@@ -135,9 +170,9 @@ class DockerCliTest {
   @Test
   void timeoutWithFailedRemovalIsAnInfrastructureError() {
     runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
-    runner.whenArgvStartsWith(List.of("docker", "run"), new CommandResult(-1, "", "", true));
+    runner.whenArgvStartsWith(List.of("docker", "run"), new CommandResult(-1, "", "", true, false));
     runner.whenArgvStartsWith(
-        List.of("docker", "rm"), new CommandResult(1, "", "error: device busy\n", false));
+        List.of("docker", "rm"), new CommandResult(1, "", "error: device busy\n", false, false));
     assertThatThrownBy(() -> docker.run(ContainerSpec.of("img")))
         .isInstanceOf(DockerException.class)
         .hasMessageContaining("noir-test1")
@@ -147,10 +182,11 @@ class DockerCliTest {
   @Test
   void timeoutWhereTheContainerIsAlreadyGoneIsFine() {
     runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
-    runner.whenArgvStartsWith(List.of("docker", "run"), new CommandResult(-1, "", "", true));
+    runner.whenArgvStartsWith(List.of("docker", "run"), new CommandResult(-1, "", "", true, false));
     runner.whenArgvStartsWith(
         List.of("docker", "rm"),
-        new CommandResult(1, "", "Error response from daemon: No such container: x\n", false));
+        new CommandResult(
+            1, "", "Error response from daemon: No such container: x\n", false, false));
     assertThat(docker.run(ContainerSpec.of("img")).timedOut()).isTrue();
   }
 
@@ -169,7 +205,11 @@ class DockerCliTest {
     runner.whenArgvStartsWith(
         List.of("docker", "image", "inspect"),
         new CommandResult(
-            1, "", "Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n", false));
+            1,
+            "",
+            "Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n",
+            false,
+            false));
     assertThatThrownBy(() -> docker.imageId("img"))
         .isInstanceOf(DockerException.class)
         .hasMessage("Docker is not running; start Docker Desktop");
@@ -179,7 +219,7 @@ class DockerCliTest {
   void missingImageIsEmpty() {
     runner.whenArgvStartsWith(
         List.of("docker", "image", "inspect"),
-        new CommandResult(1, "", "Error: No such image: img\n", false));
+        new CommandResult(1, "", "Error: No such image: img\n", false, false));
     assertThat(docker.imageId("img")).isEmpty();
   }
 
@@ -196,7 +236,7 @@ class DockerCliTest {
   @Test
   void buildFailureCarriesTail(@TempDir Path dir) {
     runner.whenArgvStartsWith(
-        List.of("docker", "build"), new CommandResult(1, "", "step 3 failed\n", false));
+        List.of("docker", "build"), new CommandResult(1, "", "step 3 failed\n", false, false));
     assertThatThrownBy(() -> docker.build(dir, "t"))
         .isInstanceOf(DockerException.class)
         .hasMessageContaining("step 3 failed");

@@ -28,6 +28,7 @@ import org.jwcarman.noir.build.BuildRunner;
 import org.jwcarman.noir.commit.Commitments;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.deliver.FakeBranchPublisher;
+import org.jwcarman.noir.deliver.PatchTooLargeException;
 import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.feedback.FeedbackInput;
 import org.jwcarman.noir.feedback.FeedbackRenderer;
@@ -333,6 +334,21 @@ class FactoryTest {
   }
 
   @Test
+  void patchTooLargeToScanBlocksWithoutRetrying() {
+    bundles.tooLarge = true;
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
+    assertThat(item.blockedPhase()).isEqualTo(State.MEASURING);
+    assertThat(measure.calls).isZero();
+    assertThat(publisher.pushes()).isEmpty();
+    assertThat(gh.pullRequests()).isEmpty();
+    assertThat(sleeps).isEmpty();
+  }
+
+  @Test
   void persistentDockerFailureBlocksAsInfrastructure() {
     measure.modes = n -> MeasureMode.THROW;
 
@@ -542,6 +558,7 @@ class FactoryTest {
 
   static final class FakeBundles implements Bundles {
     String patch = "+class Counter {}\n";
+    boolean tooLarge;
 
     @Override
     public List<String> commitsSince(Path bundle, String baseSha, String branch) {
@@ -550,6 +567,9 @@ class FactoryTest {
 
     @Override
     public String patchSince(Path bundle, String baseSha, String branch) {
+      if (tooLarge) {
+        throw new PatchTooLargeException("patch exceeds 256 MiB");
+      }
       return patch;
     }
   }
