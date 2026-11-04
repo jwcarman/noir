@@ -135,7 +135,7 @@ public final class Sealer {
             0,
             Map.of("issue", issue, "commitmentSha256", hash, "baseSha", spec.baseSha())));
     moveIntoStore(draft, store.itemDir(spec.id()));
-    return new SealResult.Sealed(spec.id(), issue, hash);
+    return new SealResult.Sealed(spec.id(), spec.repo(), issue, hash);
   }
 
   /** Examiner outcome: the model that produced the sealed suite, or the last problems. */
