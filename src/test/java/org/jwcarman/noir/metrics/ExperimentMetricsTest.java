@@ -267,6 +267,13 @@ class ExperimentMetricsTest {
   }
 
   @Test
+  void exactPercentagesAreNotRoundedDownByFloatingPointError() {
+    // 57/100 as a double times 100 is 56.99999999999999
+    var r = ExperimentMetrics.compute(accepted(100, 43));
+    assertThat(r.render()).contains("not eligible: 57% accepted (need 90%)");
+  }
+
+  @Test
   void itemsWithoutNewEventsAreCountedButExcludedFromDerivedMetrics() {
     var r = ExperimentMetrics.compute(List.of(item("old", State.PR_OPEN, 0)));
     assertThat(r.items()).isEqualTo(1);

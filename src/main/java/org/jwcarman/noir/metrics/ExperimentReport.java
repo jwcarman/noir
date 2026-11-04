@@ -46,7 +46,12 @@ public record ExperimentReport(
         "First-pass rate",
         firstPassRate == null
             ? "n/a"
-            : percent(firstPassRate) + " (" + firstPassPassed + "/" + firstPassTotal + ")");
+            : percent(firstPassPassed, firstPassTotal)
+                + " ("
+                + firstPassPassed
+                + "/"
+                + firstPassTotal
+                + ")");
     line(
         sb,
         "Rework cycles",
@@ -88,9 +93,10 @@ public record ExperimentReport(
     }
     if (autoMerge.acceptedRate() < autoMerge.requiredRate()) {
       return "not eligible: "
-          + percent(autoMerge.acceptedRate())
+          + percent(accepted, completed)
           + " accepted (need "
-          + percent(autoMerge.requiredRate())
+          + Math.round(autoMerge.requiredRate() * 100)
+          + "%"
           + ")";
     }
     return "not eligible: "
@@ -103,9 +109,12 @@ public record ExperimentReport(
     sb.append(String.format("  %-20s %s%n", label, value));
   }
 
-  /** Whole percent, rounded down so a shown rate never reaches a threshold it misses. */
-  private static String percent(double rate) {
-    return new BigDecimal(rate * 100).setScale(0, RoundingMode.FLOOR) + "%";
+  /**
+   * Whole percent from exact counts, rounded down so a shown rate never reaches a threshold it
+   * misses. Integer arithmetic avoids floating-point error (0.57 * 100 is 56.99999999999999).
+   */
+  private static String percent(int part, int whole) {
+    return part * 100 / whole + "%";
   }
 
   private static String money(BigDecimal v) {
