@@ -8,14 +8,15 @@ public record ClassCoverage(
     int linesCovered,
     int linesMissed,
     List<MethodCrap> methods,
-    String sourceFile) {
+    String sourceFile,
+    boolean lacksDebugInfo) {
   public ClassCoverage {
     methods = List.copyOf(methods);
   }
 
   public ClassCoverage(
       String className, int linesCovered, int linesMissed, List<MethodCrap> methods) {
-    this(className, linesCovered, linesMissed, methods, "");
+    this(className, linesCovered, linesMissed, methods, "", false);
   }
 
   /** Package of the top-level class, dotted. */

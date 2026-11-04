@@ -278,9 +278,15 @@ class MeasureJudgeTest {
   }
 
   @Test
-  void deletedChangedClassWithoutClassFileIsSkipped() {
-    var r = MeasureJudge.judge(a, BAR, List.of("com.example.Calc", "com.example.Gone"));
-    assertThat(r).isInstanceOf(MeasureOutcome.Passed.class);
+  void changedFileWithNoMatchingClassIsContractViolation() {
+    var s =
+        (MeasureOutcome.Shortfall)
+            MeasureJudge.judge(a, BAR, List.of("com.example.Calc", "com.example.Gone"));
+    assertThat(s.input())
+        .isEqualTo(
+            new FeedbackInput.ContractViolation(
+                List.of(
+                    "src/main/java/com/example/Gone.java produced no class matching its directory; the package declaration must match the directory")));
   }
 
   @Test
@@ -324,11 +330,49 @@ class MeasureJudgeTest {
   }
 
   @Test
-  void classWithLinesButNoPitEntryScoresZero() throws IOException {
+  void mutantFreeClassWithLinesPasses() throws IOException {
     write("mutations.xml", "<mutations/>");
-    var s = (MeasureOutcome.Shortfall) MeasureJudge.judge(a, BAR, CHANGED);
-    var q = (FeedbackInput.QualityShortfall) s.input();
-    assertThat(q.classes().get(0).mutationScore()).isEqualTo(0.0);
+    var r = MeasureJudge.judge(a, BAR, CHANGED);
+    assertThat(r).isInstanceOf(MeasureOutcome.Passed.class);
+    assertThat(r.m().mutationScore()).isEqualTo(1.0);
+  }
+
+  @Test
+  void javaSourceOutsideStandardRootsIsContractViolation() throws IOException {
+    write("changed.txt", "src/main/java/com/example/Calc.java\nsrc/main/other/X.java\nREADME.md\n");
+    assertThat(shortfall())
+        .isEqualTo(
+            new FeedbackInput.ContractViolation(
+                List.of(
+                    "Java sources must live under src/main/java or src/test/java: src/main/other/X.java")));
+  }
+
+  private static final String DEBUG_MSG =
+      "Compile with debug information (javac -g); line coverage could not be measured: ";
+
+  @Test
+  void jacocoClassWithInstructionsButNoLinesIsBuildFailure() throws IOException {
+    write(
+        "jacoco.xml",
+        "<report name='x'><package name='com/example'>"
+            + "<class name='com/example/Calc' sourcefilename='Calc.java'>"
+            + "<counter type='INSTRUCTION' missed='3' covered='0'/>"
+            + "<counter type='LINE' missed='0' covered='0'/></class></package></report>");
+    assertThat(shortfall())
+        .isEqualTo(new FeedbackInput.BuildFailed(DEBUG_MSG + "com.example.Calc"));
+  }
+
+  @Test
+  void jacocoClassWithEmptySourceFilenameIsBuildFailure() throws IOException {
+    write(
+        "jacoco.xml",
+        "<report name='x'><package name='com/example'>"
+            + "<class name='com/example/Other' sourcefilename=''>"
+            + "<counter type='LINE' missed='1' covered='0'/></class>"
+            + "<class name='com/example/Calc' sourcefilename='Calc.java'>"
+            + "<counter type='LINE' missed='0' covered='1'/></class></package></report>");
+    assertThat(shortfall())
+        .isEqualTo(new FeedbackInput.BuildFailed(DEBUG_MSG + "com.example.Other"));
   }
 
   @Test

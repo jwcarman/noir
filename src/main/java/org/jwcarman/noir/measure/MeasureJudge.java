@@ -35,7 +35,18 @@ public final class MeasureJudge {
     requireInfra("forbidden", forbiddenStep);
     requireInfra("changed", changedStep);
     requireInfra("deps", deps);
-    a.require("changed.txt");
+    var misplaced =
+        lines(a.require("changed.txt")).stream()
+            .map(String::strip)
+            .filter(l ->
+                l.endsWith(".java")
+                    && !l.startsWith("src/main/java/")
+                    && !l.startsWith("src/test/java/"))
+            .map(l -> "Java sources must live under src/main/java or src/test/java: " + l)
+            .toList();
+    if (!misplaced.isEmpty()) {
+      return violation(misplaced);
+    }
     var holdout = lines(a.require("holdout-sources.txt"));
     if (!holdout.isEmpty()) {
       return violation(
@@ -108,6 +119,8 @@ public final class MeasureJudge {
     }
     var measured = new LinkedHashMap<String, ClassCoverage>();
     boolean anyClassFile = false;
+    var unmatched = new ArrayList<String>();
+    var changedPackages = new java.util.HashSet<String>();
     for (var name : changedClasses) {
       int dot = name.lastIndexOf('.');
       var pkg = dot < 0 ? "" : name.substring(0, dot);
@@ -117,8 +130,29 @@ public final class MeasureJudge {
               .filter(c -> c.packageName().equals(pkg) && c.sourceFile().equals(source))
               .toList();
       found.forEach(c -> measured.putIfAbsent(c.className(), c));
+      changedPackages.add(pkg);
       if (found.isEmpty()) {
-        anyClassFile |= hasClassFiles(a, pkg, name.substring(dot + 1));
+        if (hasClassFiles(a, pkg, name.substring(dot + 1))) {
+          anyClassFile = true;
+        } else {
+          unmatched.add(
+              "src/main/java/"
+                  + name.replace('.', '/')
+                  + ".java produced no class matching its directory; "
+                  + "the package declaration must match the directory");
+        }
+      }
+    }
+    if (!unmatched.isEmpty()) {
+      return violation(unmatched);
+    }
+    for (var cov : coverage.values()) {
+      if (changedPackages.contains(cov.packageName()) && cov.lacksDebugInfo()) {
+        return new MeasureOutcome.Shortfall(
+            new FeedbackInput.BuildFailed(
+                "Compile with debug information (javac -g); line coverage could not be measured: "
+                    + cov.className()),
+            MeasureOutcome.Metrics.empty());
       }
     }
     if (coverage.isEmpty() && anyClassFile) {
@@ -141,7 +175,7 @@ public final class MeasureJudge {
       var summary = pit.get(cov.className());
       double score;
       if (summary == null || summary.total() == 0) {
-        score = classLines > 0 ? 0.0 : 1.0;
+        score = 1.0;
       } else {
         score = summary.score();
         detected += summary.detected();
