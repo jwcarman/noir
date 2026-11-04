@@ -11,7 +11,8 @@ public record TestOutcome(String testId, Set<String> tags, Result result, String
     PASSED,
     FAILED,
     TIMED_OUT,
-    FLAKY
+    FLAKY,
+    SKIPPED
   }
 
   public TestOutcome {

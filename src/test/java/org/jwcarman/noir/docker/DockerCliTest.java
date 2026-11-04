@@ -22,19 +22,35 @@ class DockerCliTest {
   }
 
   @Test
-  void runArgvIsHardenedAndHidesEnvValues(@TempDir Path dir) throws Exception {
+  void runArgvIsHardenedAndKeepsEnvOutOfArgvAndClientEnv(@TempDir Path dir) throws Exception {
     runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
     runner.whenArgvStartsWith(List.of("docker", "run"), ok("ok"));
+    var envFileSeen = new String[2];
+    runner.onRun(c -> {
+      var i = c.argv().indexOf("--env-file");
+      if (i >= 0) {
+        var f = Path.of(c.argv().get(i + 1));
+        try {
+          envFileSeen[0] = java.nio.file.Files.readString(f);
+          envFileSeen[1] =
+              java.nio.file.attribute.PosixFilePermissions.toString(
+                  java.nio.file.Files.getPosixFilePermissions(f));
+        } catch (java.io.IOException e) {
+          throw new java.io.UncheckedIOException(e);
+        }
+      }
+    });
     var spec =
         ContainerSpec.of("noir-builder:0.1.0", "sh", "-c", "true")
             .withMounts(List.of(Mount.ro(dir, "/work/in")))
-            .withEnv(Map.of("ANTHROPIC_API_KEY", "sk-secret"))
+            .withEnv(Map.of("ANTHROPIC_API_KEY", "sk-secret", "HOME", "/home/noir"))
             .withNetwork(false)
             .withLimits(new NoirConfig.Limits(2.0, "4g", 512))
             .withWorkdir("/work")
             .withStdin("PROMPT".getBytes());
     var r = docker.run(spec);
     var run = runner.commands().get(1);
+    var envFile = run.argv().get(run.argv().indexOf("--env-file") + 1);
     assertThat(run.argv())
         .containsExactly(
             "docker",
@@ -60,17 +76,40 @@ class DockerCliTest {
             "/work",
             "-v",
             dir.toRealPath() + ":/work/in:ro",
-            "-e",
-            "ANTHROPIC_API_KEY",
+            "--env-file",
+            envFile,
             "noir-builder:0.1.0",
             "sh",
             "-c",
             "true");
     assertThat(String.join(" ", run.argv())).doesNotContain("sk-secret");
-    assertThat(run.env()).containsEntry("ANTHROPIC_API_KEY", "sk-secret");
+    assertThat(run.env()).as("the docker client's own environment is untouched").isEmpty();
+    assertThat(envFileSeen[0]).isEqualTo("ANTHROPIC_API_KEY=sk-secret\nHOME=/home/noir\n");
+    assertThat(envFileSeen[1]).isEqualTo("rw-------");
+    assertThat(Path.of(envFile)).doesNotExist();
     assertThat(new String(run.stdin())).isEqualTo("PROMPT");
     assertThat(r.imageId()).isEqualTo("sha256:abc");
     assertThat(r.stdout()).isEqualTo("ok");
+  }
+
+  @Test
+  void newerDaemonDownMessageIsExplained() {
+    runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
+    runner.whenArgvStartsWith(
+        List.of("docker", "run"),
+        new CommandResult(
+            1, "", "failed to connect to the docker API at unix:///var/run/docker.sock\n", false));
+    assertThatThrownBy(() -> docker.run(ContainerSpec.of("img")))
+        .isInstanceOf(DockerException.class)
+        .hasMessage("Docker is not running; start Docker Desktop");
+  }
+
+  @Test
+  void envValuesWithNewlinesAreRejected() {
+    runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
+    assertThatThrownBy(() -> docker.run(ContainerSpec.of("img").withEnv(Map.of("X", "a\nb"))))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("X");
   }
 
   @Test

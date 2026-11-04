@@ -29,10 +29,11 @@ public final class JUnitXmlReports {
       var cases = Xml.parse(file).getElementsByTagName("testcase");
       for (int i = 0; i < cases.getLength(); i++) {
         var tc = (Element) cases.item(i);
+        var id = tc.getAttribute("classname") + "#" + tc.getAttribute("name");
         if (tc.getElementsByTagName("skipped").getLength() > 0) {
+          outcomes.add(new TestOutcome(id, Set.of(), TestOutcome.Result.SKIPPED, null));
           continue;
         }
-        var id = tc.getAttribute("classname") + "#" + tc.getAttribute("name");
         var problem = firstChild(tc, "failure");
         if (problem == null) {
           problem = firstChild(tc, "error");

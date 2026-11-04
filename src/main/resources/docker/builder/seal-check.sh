@@ -3,12 +3,18 @@
 # <step>.log and <step>.exit per step, JUnit XML reports, and PIT's mutations.xml.
 # noir's SealJudge decides what they mean.
 #
-# Inputs (read-only mounts): /work/base.bundle, /work/stubs, /work/holdout, /work/reference
+# Usage: seal-check.sh prepare   (network on)  clone, assumptions, stub build, dependencies
+#        seal-check.sh check     (network off) holdout compile/run, reference build/runs, PIT
+# State shared between phases lives in /work/out (repo, Maven cache, dependency jars).
+#
+# Inputs (read-only mounts): /work/base.bundle, /work/stubs, and for "check" also
+# /work/holdout and /work/reference.
 # Env: BASE_SHA, HOLDOUT_PKG, TARGET_CLASSES (comma-separated), TEST_TIMEOUT (e.g. 10s), RERUNS
 set -u
 
 OUT=/work/out
-REPO=/tmp/repo
+REPO=/work/out/repo
+M2=/work/out/m2
 LAUNCHER=/opt/noir/lib/junit/junit-platform-console-standalone.jar
 DEPENDENCY_PLUGIN=org.apache.maven.plugins:maven-dependency-plugin:3.11.0
 HELP_PLUGIN=org.apache.maven.plugins:maven-help-plugin:3.5.2
@@ -40,22 +46,21 @@ assumptions() {
   fi
   echo yes >"$OUT/pom.txt"
   if grep -q "<modules>" pom.xml; then echo yes >"$OUT/modules.txt"; else echo no >"$OUT/modules.txt"; fi
-  mvn -B -q "$HELP_PLUGIN:evaluate" -Dexpression=maven.compiler.release -DforceStdout >"$OUT/release.txt"
+  mvn -B -q -Dmaven.repo.local="$M2" "$HELP_PLUGIN:evaluate" -Dexpression=maven.compiler.release -DforceStdout >"$OUT/release.txt"
 }
 
 stub_build() {
   cp -R /work/stubs/. "$REPO/" && cd "$REPO" \
-    && mvn -B -DskipTests compile "$DEPENDENCY_PLUGIN:copy-dependencies" \
+    && mvn -B -Dmaven.repo.local="$M2" -DskipTests compile "$DEPENDENCY_PLUGIN:copy-dependencies" \
       -DincludeScope=runtime -DoutputDirectory="$OUT/deps"
 }
 
 holdout_compile() {
   mkdir -p "$OUT/holdout-classes"
-  local sources
-  sources=$(find /work/holdout -name '*.java')
-  [ -n "$sources" ] || { echo "no holdout sources"; return 1; }
-  # shellcheck disable=SC2086
-  javac -d "$OUT/holdout-classes" -cp "$REPO/target/classes:$(deps :):$LAUNCHER" $sources
+  find /work/holdout -name '*.java' >"$OUT/holdout-sources.txt"
+  [ -s "$OUT/holdout-sources.txt" ] || { echo "no holdout sources"; return 1; }
+  javac -d "$OUT/holdout-classes" -cp "$REPO/target/classes:$(deps :):$LAUNCHER" \
+    @"$OUT/holdout-sources.txt"
 }
 
 holdout_run() { # holdout_run <reports-dir-name>
@@ -69,7 +74,7 @@ holdout_run() { # holdout_run <reports-dir-name>
 
 ref_build() {
   cp -R /work/reference/. "$REPO/" && cd "$REPO" && rm -rf target/classes \
-    && mvn -B -o -DskipTests compile
+    && mvn -B -o -Dmaven.repo.local="$M2" -DskipTests compile
 }
 
 pit() {
@@ -88,10 +93,18 @@ pit() {
     --timestampedReports=false
 }
 
-run clone clone || exit 0
-run assumptions assumptions || exit 0
-[ "$(cat "$OUT/pom.txt" 2>/dev/null)" = yes ] || exit 0
-run stub-build stub_build || exit 0
+prepare_phase() {
+  run clone clone || exit 0
+  run assumptions assumptions || exit 0
+  [ "$(cat "$OUT/pom.txt" 2>/dev/null)" = yes ] || exit 0
+  run stub-build stub_build || exit 0
+  exit 0
+}
+
+[ "${1:-}" = prepare ] && prepare_phase
+[ "${1:-}" = check ] || { echo "usage: seal-check.sh prepare|check" >&2; exit 2; }
+[ "$(cat "$OUT/stub-build.exit" 2>/dev/null)" = 0 ] || exit 0
+
 run holdout-compile holdout_compile || exit 0
 run stub-run holdout_run stub-run # failures are expected here
 run ref-build ref_build || exit 0

@@ -31,6 +31,7 @@ public final class Examiner {
       Path attemptDir,
       Path draftDir) {
     try {
+      deleteRecursively(attemptDir);
       Files.createDirectories(attemptDir.resolve("out/holdout"));
       Files.createDirectories(attemptDir.resolve("out/reference"));
       var prompt = ExaminerPrompt.user(spec, stubs, previousProblems);
@@ -47,6 +48,28 @@ public final class Examiner {
                   ex.maxTurns(),
                   ex.wallClock(),
                   config.limits()));
+      Files.writeString(
+          attemptDir.resolve("agent.log"),
+          "exitCode="
+              + result.exitCode()
+              + " error="
+              + result.error()
+              + " timedOut="
+              + result.timedOut()
+              + " turns="
+              + result.turns()
+              + " costUsd="
+              + result.costUsd()
+              + " model="
+              + result.model()
+              + "\n\n"
+              + result.resultText()
+              + "\n");
+      if (result.error() && !hasJavaFiles(attemptDir.resolve("out"))) {
+        throw new ExaminerFailedException(
+            "Examiner agent failed: "
+                + (result.timedOut() ? "timed out" : result.resultText().strip()));
+      }
       var holdout = draftDir.resolve("holdout");
       var reference = draftDir.resolve("reference");
       replace(attemptDir.resolve("out/holdout"), holdout, "holdout");
@@ -54,6 +77,12 @@ public final class Examiner {
       return new ExaminerOutput(result, holdout, reference);
     } catch (IOException e) {
       throw new UncheckedIOException(e);
+    }
+  }
+
+  private static boolean hasJavaFiles(Path dir) throws IOException {
+    try (var paths = Files.walk(dir)) {
+      return paths.anyMatch(p -> p.toString().endsWith(".java"));
     }
   }
 

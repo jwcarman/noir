@@ -79,6 +79,34 @@ class SealCommandTest {
   }
 
   @Test
+  void examinerFailureIsOneLine() {
+    int code =
+        run(
+            (id, dir) -> {
+              throw new org.jwcarman.noir.seal.ExaminerFailedException(
+                  "Examiner agent failed: Invalid API key");
+            },
+            "seal",
+            "nr-01JBX4ZQ8K3V0M7N2P5R6S9T1W");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).isEqualTo("Examiner agent failed: Invalid API key\n");
+  }
+
+  @Test
+  void unexpectedIoErrorsAreOneLine() {
+    int code =
+        run(
+            (id, dir) -> {
+              throw new java.io.UncheckedIOException(
+                  "Cannot move a to b", new java.io.IOException("disk full"));
+            },
+            "seal",
+            "nr-01JBX4ZQ8K3V0M7N2P5R6S9T1W");
+    assertThat(code).isEqualTo(2);
+    assertThat(err.toString()).isEqualTo("Cannot move a to b\n");
+  }
+
+  @Test
   void missingCredentialsAreOneLine() {
     int code =
         run(

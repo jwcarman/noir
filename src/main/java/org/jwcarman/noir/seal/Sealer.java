@@ -160,6 +160,7 @@ public final class Sealer {
       data.put("problems", problems.size());
       if (out != null) {
         data.put("model", out.agent().model());
+        data.put("imageId", out.agent().imageId());
         data.put("costUsd", out.agent().costUsd());
         data.put("turns", out.agent().turns());
         data.put("agentError", out.agent().error());

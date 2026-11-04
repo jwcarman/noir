@@ -28,6 +28,26 @@ class ClaudeJsonTest {
   }
 
   @Test
+  void modelIdComesFromModelUsage() {
+    var json =
+        "{\"is_error\":false,\"num_turns\":2,\"total_cost_usd\":0.2,\"result\":\"ok\","
+            + "\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":10}}}";
+    var r = ClaudeJson.parse(new ContainerResult(0, json, "", false, "id"), null);
+    assertThat(r.model()).isEqualTo("claude-opus-5-5");
+  }
+
+  @Test
+  void invalidKeyResultCarriesMessage() {
+    var json =
+        "{\"is_error\":true,\"num_turns\":1,\"total_cost_usd\":0,\"api_error_status\":401,"
+            + "\"result\":\"Invalid API key · Fix external API key\",\"modelUsage\":{}}";
+    var r = ClaudeJson.parse(new ContainerResult(0, json, "", false, "id"), null);
+    assertThat(r.error()).isTrue();
+    assertThat(r.resultText()).isEqualTo("Invalid API key · Fix external API key");
+    assertThat(r.model()).isEqualTo("default");
+  }
+
+  @Test
   void errorResultIsError() {
     var json =
         "{\"is_error\":true,\"num_turns\":100,\"total_cost_usd\":2.5,\"result\":\"max turns\"}";

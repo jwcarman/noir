@@ -225,6 +225,53 @@ class SealerTest {
   }
 
   @Test
+  void agentFailureIsInfrastructureNotTestProblems() {
+    var failing =
+        new org.jwcarman.noir.agent.AgentPort() {
+          int calls;
+
+          @Override
+          public org.jwcarman.noir.agent.AgentResult run(org.jwcarman.noir.agent.AgentRequest r) {
+            calls++;
+            return new org.jwcarman.noir.agent.AgentResult(
+                0,
+                true,
+                false,
+                java.math.BigDecimal.ZERO,
+                1,
+                "default",
+                "Invalid API key · Fix external API key",
+                "sha256:img");
+          }
+        };
+    var s =
+        new Sealer(
+            store,
+            gitCli,
+            github,
+            new Examiner(failing, NoirConfig.defaults()),
+            (in, out) -> SealArtifactsFixture.good(out),
+            NoirConfig.defaults(),
+            Clock.systemUTC());
+    assertThatThrownBy(() -> s.seal(ID, clone))
+        .isInstanceOf(ExaminerFailedException.class)
+        .hasMessage("Examiner agent failed: Invalid API key · Fix external API key");
+    assertThat(failing.calls).isEqualTo(1);
+    assertThat(store.draftDir(ID).resolve("examiner/attempt-1/agent.log"))
+        .content()
+        .contains("Invalid API key");
+    assertThat(github.issues()).isEmpty();
+  }
+
+  @Test
+  void attemptEventRecordsModelAndImage() {
+    sealer.seal(ID, clone);
+    assertThat(store.readEvents(ID).getFirst().data())
+        .containsEntry("model", "scripted")
+        .containsEntry("imageId", "scripted");
+  }
+
+  @Test
   void missingDraft() {
     assertThatThrownBy(() -> sealer.seal("nr-01JBX4ZQ8K3V0M7N2P5R6S9T1X", clone))
         .isInstanceOf(SealException.class)

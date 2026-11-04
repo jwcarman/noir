@@ -17,6 +17,10 @@ public final class ClaudeJson {
       return new AgentResult(
           r.exitCode(), true, r.timedOut(), BigDecimal.ZERO, 0, model, r.tail(40), r.imageId());
     }
+    var usage = node.path("modelUsage");
+    if (usage.isObject() && usage.fieldNames().hasNext()) {
+      model = usage.fieldNames().next();
+    }
     var cost = node.path("total_cost_usd");
     return new AgentResult(
         r.exitCode(),

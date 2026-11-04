@@ -50,6 +50,10 @@ final class SealCommand implements Callable<Integer> {
         | GitHubException
         | GitException
         | SealException
+        | org.jwcarman.noir.seal.ExaminerFailedException
+        | org.jwcarman.noir.commit.SealedFileException
+        | java.io.UncheckedIOException
+        | IllegalArgumentException
         | IllegalStateException e) {
       err.println(e.getMessage());
       err.flush();

@@ -20,7 +20,8 @@ class JUnitXmlReportsTest {
             org.assertj.core.groups.Tuple.tuple("noir.holdout.x.CounterTest#passes()", PASSED),
             org.assertj.core.groups.Tuple.tuple("noir.holdout.x.CounterTest#fails()", FAILED),
             org.assertj.core.groups.Tuple.tuple("noir.holdout.x.CounterTest#errors()", FAILED),
-            org.assertj.core.groups.Tuple.tuple("noir.holdout.x.CounterTest#hangs()", TIMED_OUT));
+            org.assertj.core.groups.Tuple.tuple("noir.holdout.x.CounterTest#hangs()", TIMED_OUT),
+            org.assertj.core.groups.Tuple.tuple("noir.holdout.x.CounterTest#skipped()", SKIPPED));
     assertThat(JUnitXmlReports.parse(dir).get(1).message()).isEqualTo("expected: <1> but was: <2>");
   }
 

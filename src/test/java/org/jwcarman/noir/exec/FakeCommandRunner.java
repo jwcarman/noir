@@ -9,6 +9,13 @@ public final class FakeCommandRunner implements CommandRunner {
 
   private final List<Rule> rules = new ArrayList<>();
   private final List<Command> commands = new ArrayList<>();
+  private java.util.function.Consumer<Command> onRun = c -> {};
+
+  /** Called with each command at the moment it runs (e.g. to inspect temp files it references). */
+  public FakeCommandRunner onRun(java.util.function.Consumer<Command> hook) {
+    this.onRun = hook;
+    return this;
+  }
 
   public FakeCommandRunner whenArgvStartsWith(List<String> prefix, CommandResult result) {
     rules.add(new Rule(List.copyOf(prefix), result));
@@ -22,6 +29,7 @@ public final class FakeCommandRunner implements CommandRunner {
   @Override
   public CommandResult run(Command command) {
     commands.add(command);
+    onRun.accept(command);
     for (int i = rules.size() - 1; i >= 0; i--) {
       var rule = rules.get(i);
       var argv = command.argv();

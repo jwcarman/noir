@@ -98,6 +98,30 @@ class SealJudgeTest {
   }
 
   @Test
+  void skippedTestsAreRejected() {
+    file(
+        "stub-run/TEST-junit-jupiter.xml",
+        "<testsuite>"
+            + tc("a()", false)
+            + "<testcase classname=\"noir.holdout.x.T\" name=\"b()\"><skipped/></testcase></testsuite>");
+    assertThat(judge())
+        .containsExactly(
+            "holdout test is skipped (disabled or a failed assumption): noir.holdout.x.T#b()");
+  }
+
+  @Test
+  void skippedAgainstReferenceIsRejected() {
+    file(
+        "ref-run-1/TEST-junit-jupiter.xml",
+        "<testsuite>"
+            + tc("a()", true)
+            + "<testcase classname=\"noir.holdout.x.T\" name=\"b()\"><skipped/></testcase></testsuite>");
+    assertThat(judge())
+        .containsExactly(
+            "holdout test is skipped (disabled or a failed assumption): noir.holdout.x.T#b()");
+  }
+
+  @Test
   void referenceDoesNotCompile() {
     exit("ref-build", 1);
     log("ref-build", "Counter.java: error");

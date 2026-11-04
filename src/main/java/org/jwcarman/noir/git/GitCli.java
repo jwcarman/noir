@@ -19,7 +19,12 @@ public final class GitCli implements GitPort {
 
   @Override
   public void fetch(Path repoDir, String branch) {
-    git(repoDir, "fetch", "--quiet", "origin", branch);
+    git(
+        repoDir,
+        "fetch",
+        "--quiet",
+        "origin",
+        "+refs/heads/" + branch + ":refs/remotes/origin/" + branch);
   }
 
   @Override
@@ -62,7 +67,7 @@ public final class GitCli implements GitPort {
   private CommandResult git(Path repoDir, String... args) {
     var argv = new ArrayList<String>(List.of("git", "-C", repoDir.toString()));
     argv.addAll(List.of(args));
-    var result = runner.run(Command.of(argv));
+    var result = runner.run(Command.of(argv).withEnv(java.util.Map.of("GIT_TERMINAL_PROMPT", "0")));
     if (!result.ok()) {
       var detail = result.tail(20);
       throw new GitException(

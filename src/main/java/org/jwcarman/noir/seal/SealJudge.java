@@ -38,6 +38,14 @@ public final class SealJudge {
       return List.of("no holdout tests were discovered");
     }
     for (var o : stubOutcomes) {
+      if (o.result() == TestOutcome.Result.SKIPPED) {
+        problems.add(skipped(o.testId()));
+      }
+    }
+    if (!problems.isEmpty()) {
+      return problems;
+    }
+    for (var o : stubOutcomes) {
       if (o.result() == TestOutcome.Result.PASSED) {
         problems.add("holdout test passes against the stubs (vacuous): " + o.testId());
       }
@@ -74,6 +82,7 @@ public final class SealJudge {
   private static void checkReferenceRuns(
       SealArtifacts a, List<TestOutcome> expectedTests, List<String> problems) {
     Map<String, Set<Boolean>> resultsByTest = new LinkedHashMap<>();
+    var skippedTests = new LinkedHashSet<String>();
     expectedTests.forEach(o -> resultsByTest.put(o.testId(), new LinkedHashSet<>()));
     int runs = 0;
     for (int n = 1;
@@ -87,6 +96,8 @@ public final class SealJudge {
       for (var o : JUnitXmlReports.parse(a.path("ref-run-" + n))) {
         if (o.result() == TestOutcome.Result.PASSED) {
           passed.add(o.testId());
+        } else if (o.result() == TestOutcome.Result.SKIPPED) {
+          skippedTests.add(o.testId());
         }
       }
       resultsByTest.forEach((id, seen) -> seen.add(passed.contains(id)));
@@ -95,7 +106,11 @@ public final class SealJudge {
       problems.add("seal check did not complete step ref-run-1:\n" + a.logTail("ref-run-1", TAIL));
       return;
     }
+    skippedTests.forEach(id -> problems.add(skipped(id)));
     resultsByTest.forEach((id, seen) -> {
+      if (skippedTests.contains(id)) {
+        return;
+      }
       if (seen.equals(Set.of(false))) {
         problems.add("holdout test fails against the reference implementation: " + id);
       } else if (seen.size() > 1) {
@@ -126,6 +141,10 @@ public final class SealJudge {
               summary.detected(),
               summary.total()));
     }
+  }
+
+  private static String skipped(String testId) {
+    return "holdout test is skipped (disabled or a failed assumption): " + testId;
   }
 
   private static boolean compiled(

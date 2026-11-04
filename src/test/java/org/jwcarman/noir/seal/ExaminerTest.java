@@ -83,6 +83,19 @@ class ExaminerTest {
   }
 
   @Test
+  void staleAttemptOutputIsCleared() {
+    var attemptDir = tmp.resolve("attempt-1");
+    write(attemptDir.resolve("out/holdout/Stale.java"), "class Stale {}");
+    var agent =
+        new ScriptedAgent((n, work) -> write(work.resolve("out/holdout/Fresh.java"), "class F {}"));
+    var draft = tmp.resolve("draft");
+    new Examiner(agent, NoirConfig.defaults())
+        .attempt(Specs.valid(), List.of(), List.of(), attemptDir, draft);
+    assertThat(draft.resolve("holdout/Stale.java")).doesNotExist();
+    assertThat(draft.resolve("holdout/Fresh.java")).exists();
+  }
+
+  @Test
   void passesExaminerSettingsToAgentAndRecordsPrompt() {
     var agent = new ScriptedAgent((n, work) -> {});
     var attemptDir = tmp.resolve("attempt-1");

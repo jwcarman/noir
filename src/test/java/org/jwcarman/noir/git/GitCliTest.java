@@ -40,6 +40,41 @@ class GitCliTest {
   }
 
   @Test
+  void fetchUpdatesDefaultBranchEvenWithNarrowRefspec(@TempDir Path tmp) throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), "jwcarman/demo");
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("clone"));
+    git(clone, "remote", "set-branches", "origin", "feat");
+    var other = GitFixtures.cloneOf(origin, tmp.resolve("other"));
+    Files.writeString(other.resolve("new.txt"), "y");
+    git(other, "add", ".");
+    git(other, "commit", "-qm", "remote change");
+    git(other, "push", "-q", "origin", "main");
+    gitPort.fetch(clone, "main");
+    assertThat(gitPort.revParse(clone, "origin/main")).isEqualTo(gitPort.revParse(other, "HEAD"));
+  }
+
+  @Test
+  void neverPromptsForCredentials() {
+    var runner =
+        new org.jwcarman.noir.exec.FakeCommandRunner()
+            .whenArgvStartsWith(
+                java.util.List.of("git"),
+                new org.jwcarman.noir.exec.CommandResult(0, "", "", false));
+    new GitCli(runner).fetch(Path.of("/repo"), "main");
+    var c = runner.commands().getFirst();
+    assertThat(c.env()).containsEntry("GIT_TERMINAL_PROMPT", "0");
+    assertThat(c.argv())
+        .containsExactly(
+            "git",
+            "-C",
+            "/repo",
+            "fetch",
+            "--quiet",
+            "origin",
+            "+refs/heads/main:refs/remotes/origin/main");
+  }
+
+  @Test
   void parsesOriginRepo(@TempDir Path tmp) {
     var clone =
         GitFixtures.cloneOf(
