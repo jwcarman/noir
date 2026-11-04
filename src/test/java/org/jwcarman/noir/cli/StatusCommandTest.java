@@ -165,6 +165,27 @@ class StatusCommandTest {
     assertThat(node.at("/metrics/items").asInt()).isZero();
   }
 
+  @Test
+  void unreadableItemIsSkippedByMetrics() throws Exception {
+    store.writeWorkItem(WorkItem.sealed(ID, "jwcarman/demo", 7));
+    var noWorkItem = "nr-01JBX4ZQ8K3V0M7N2P5R6S9T1X";
+    java.nio.file.Files.createDirectories(store.itemDir(noWorkItem));
+    var badEvents = "nr-01JBX4ZQ8K3V0M7N2P5R6S9T1Y";
+    store.writeWorkItem(WorkItem.sealed(badEvents, "jwcarman/demo", 8));
+    java.nio.file.Files.writeString(
+        store.itemDir(badEvents).resolve("events.jsonl"), "{not json\n{\"v\":1}\n");
+
+    var node = Json.mapper().readTree(run("status", "--json"));
+
+    assertThat(node.at("/items").size()).isEqualTo(3);
+    assertThat(node.at("/metrics/items").asInt()).isEqualTo(1);
+    assertThat(node.at("/metrics/byState/SEALED").asInt()).isEqualTo(1);
+    assertThat(run("status"))
+        .contains(noWorkItem)
+        .contains("UNREADABLE")
+        .contains("Experiment (1 item)");
+  }
+
   private String run(String... args) {
     var out = new StringWriter();
     var ops =

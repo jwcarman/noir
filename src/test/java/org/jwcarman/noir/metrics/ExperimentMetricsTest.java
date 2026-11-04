@@ -261,13 +261,6 @@ class ExperimentMetricsTest {
   }
 
   @Test
-  void unreadableItemIsSkippedByMetrics() {
-    // StatusCommand drops unreadable items before computing; metrics see only readable ones.
-    var r = ExperimentMetrics.compute(List.of(item("a", State.SEALED, 0)));
-    assertThat(r.items()).isEqualTo(1);
-  }
-
-  @Test
   void rendersExampleBlock() {
     var r =
         ExperimentMetrics.compute(
