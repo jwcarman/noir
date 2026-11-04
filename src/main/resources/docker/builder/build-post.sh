@@ -8,7 +8,8 @@
 # git executes code named there. Instead this builds a fresh repository in /tmp/fresh (noir-owned,
 # not under /work) from /work/input.bundle (noir's own bundle, re-copied by the host just before
 # this step), copies the builder's working tree into it without any .git (directory or file, at
-# any depth; symlinks are stored as symlinks and never followed), and commits that. The builder's
+# any depth; symlinks are stored as symlinks and never followed; at most 1 GiB apparent size,
+# sparse files kept sparse), and commits that. The builder's
 # own history is discarded: an attempt is one commit on top of the previous attempt's bundle.
 #
 # If this cannot complete, it writes /work/post-error.txt instead of a bundle and exits 0: the
@@ -43,14 +44,31 @@ else
   g checkout -q -b "$BRANCH" "$BASE_SHA" || fail "cannot create $BRANCH at $BASE_SHA"
 fi
 
-# 2. Replace the fresh working tree with the builder's, minus every .git (any case). tar does not
-# follow symlinks when archiving (they are stored as links) and refuses unsafe names on extraction.
+# 2. Replace the fresh working tree with the builder's. /work/repo must be a real directory: a
+# missing or symlinked repository is NO_OUTPUT, not a commit that deletes everything.
+REPO=/work/repo
+[ -d "$REPO" ] && [ ! -L "$REPO" ] || fail "$REPO is missing or not a directory"
+
+# The copy lands in this container's writable layer on the Docker host's disk, so its size is
+# bounded before copying. du measures exactly what tar copies below, by apparent size (a sparse
+# file costs the agent no blocks but would cost git its full length), counting every hard link
+# separately (-l) and never following symlinks (they are copied as links). It excludes every .git
+# and only the top-level target (git never commits it). A tree du cannot fully read is refused.
+LIMIT=$((1024 * 1024 * 1024))
+SIZE=$(timeout 120 du -s -l --apparent-size -B1 --exclude=.git --exclude="$REPO/target" "$REPO" \
+  2>/dev/null) || fail "cannot measure the working tree"
+SIZE=${SIZE%%[[:space:]]*}
+[[ $SIZE =~ ^[0-9]+$ ]] || fail "cannot measure the working tree"
+[ "$SIZE" -le "$LIMIT" ] || fail "working tree too large: $SIZE bytes (limit $LIMIT)"
+
+# Copy minus every .git (any case) and the top-level target. tar does not follow symlinks when
+# archiving (they are stored as links), keeps holes (-S, so sparse files stay sparse on extract)
+# and refuses unsafe names on extraction.
 find "$FRESH" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} + \
   || fail "cannot clear the fresh working tree"
-if [ -d /work/repo ] && [ ! -L /work/repo ]; then
-  tar -C /work/repo --ignore-case --exclude=.git -cf - . | tar -C "$FRESH" --no-same-owner -xf - \
-    || fail "cannot copy the working tree"
-fi
+tar -C "$REPO" -S --ignore-case --exclude=.git --no-ignore-case --exclude=./target -cf - . \
+  | tar -C "$FRESH" --no-same-owner -xf - \
+  || fail "cannot copy the working tree"
 
 # 3. One commit with everything that changed.
 g add -A -- . ':(exclude)target' || fail "git add failed"

@@ -116,14 +116,16 @@ public final class ContainerBuildRunner implements BuildRunner {
       if (!post.timedOut() && DOCKER_EXITS.contains(post.exitCode())) {
         require("post", post); // Docker itself could not run the step: infrastructure
       }
-      // Anything else (killed, crashed, hung) happened while git ran in the agent's repository:
-      // the builder's failure, recorded as NO_OUTPUT with the post step's log tail.
+      // Anything else (killed, crashed, hung) happened while post was copying or committing the
+      // agent's working tree, whose contents the builder controls: the builder's failure, recorded
+      // as NO_OUTPUT with the post step's log tail.
       postFailed(attemptDir, post);
       return new BuildOutcome(bundle, false, result);
     }
     if (Files.exists(attemptDir.resolve("post-error.txt"), LinkOption.NOFOLLOW_LINKS)) {
-      // The agent left the repository unusable or rewrote history past the base commit: the
-      // attempt produced nothing noir can measure (NO_OUTPUT), which is the builder's failure.
+      // The agent left nothing post can capture (no /work/repo, a symlink in its place, or a
+      // working tree over the size limit): the attempt produced nothing noir can measure
+      // (NO_OUTPUT), which is the builder's failure.
       return new BuildOutcome(bundle, false, result);
     }
     if (!Files.isRegularFile(bundle, LinkOption.NOFOLLOW_LINKS)) {

@@ -390,4 +390,147 @@ class ContainerBuildRunnerIT {
           .doesNotContain("Author: evil");
     }
   }
+
+  static final long GIB = 1024L * 1024 * 1024;
+
+  /** A sparse file: its apparent size costs the agent no disk blocks. */
+  static void sparse(Path file, long size) {
+    try {
+      Files.createDirectories(file.getParent());
+      try (var f = new java.io.RandomAccessFile(file.toFile(), "rw")) {
+        f.setLength(size);
+      }
+    } catch (java.io.IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
+  }
+
+  String postError(Path attempt) throws Exception {
+    return Files.readString(attempt.resolve("post-error.txt"));
+  }
+
+  @Test
+  void sparseFileOverTheLimitIsNoOutput() throws Exception {
+    var attempt = tmp.resolve("attempt");
+    var outcome =
+        buildWith(
+            new ScriptedAgent((n, work) -> {
+              BuildFixtures.write(
+                  work.resolve("repo"), Map.of(COUNTER_PATH, BuildFixtures.reference()));
+              sparse(work.resolve("repo/huge.bin"), GIB + 1);
+            }),
+            attempt);
+    assertThat(outcome.producedCommits()).isFalse();
+    assertThat(postError(attempt)).contains("working tree too large");
+  }
+
+  @Test
+  void sparseFileInANestedTargetCountsTowardTheLimit() throws Exception {
+    var attempt = tmp.resolve("attempt");
+    var outcome =
+        buildWith(
+            new ScriptedAgent(
+                (n, work) -> sparse(work.resolve("repo/sub/target/huge.bin"), GIB + 1)),
+            attempt);
+    assertThat(outcome.producedCommits()).isFalse();
+    assertThat(postError(attempt)).contains("working tree too large");
+  }
+
+  @Test
+  void hardLinksCountOncePerLink() throws Exception {
+    var attempt = tmp.resolve("attempt");
+    var outcome =
+        buildWith(
+            new ScriptedAgent((n, work) -> {
+              var repo = work.resolve("repo");
+              sparse(repo.resolve("a.bin"), 400L * 1024 * 1024);
+              try {
+                Files.createLink(repo.resolve("b.bin"), repo.resolve("a.bin"));
+                Files.createLink(repo.resolve("c.bin"), repo.resolve("a.bin"));
+              } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+              }
+            }),
+            attempt);
+    assertThat(outcome.producedCommits()).isFalse();
+    assertThat(postError(attempt)).contains("working tree too large");
+  }
+
+  @Test
+  void topLevelTargetIsNotMeasuredOrCopied() {
+    var outcome =
+        buildWith(
+            new ScriptedAgent((n, work) -> {
+              BuildFixtures.write(
+                  work.resolve("repo"), Map.of(COUNTER_PATH, BuildFixtures.reference()));
+              sparse(work.resolve("repo/target/huge.bin"), 2 * GIB);
+            }),
+            tmp.resolve("attempt"));
+    assertThat(outcome.producedCommits()).isTrue();
+    assertThat(onlyNewCommit(outcome)).contains("+++ b/" + COUNTER_PATH).doesNotContain("target/");
+  }
+
+  @Test
+  void sparseFileUnderTheLimitIsCommittedQuickly() throws Exception {
+    long start = System.nanoTime();
+    var outcome =
+        buildWith(
+            new ScriptedAgent(
+                (n, work) -> sparse(work.resolve("repo/data.bin"), 100L * 1024 * 1024)),
+            tmp.resolve("attempt"));
+    var elapsed = java.time.Duration.ofNanos(System.nanoTime() - start);
+    assertThat(outcome.producedCommits()).isTrue();
+    assertThat(onlyNewCommit(outcome)).contains("b/data.bin");
+    // 100 MB of zeros compresses to almost nothing; the copy keeps the holes.
+    assertThat(Files.size(outcome.bundle())).isLessThan(5L * 1024 * 1024);
+    assertThat(elapsed).isLessThan(java.time.Duration.ofMinutes(2));
+  }
+
+  @Test
+  void symlinksToLargeFilesAreStoredAsLinks() throws Exception {
+    var outcome =
+        buildWith(
+            new ScriptedAgent((n, work) -> {
+              sparse(work.resolve("outside.bin"), 4 * GIB);
+              try {
+                Files.createSymbolicLink(work.resolve("repo/big"), Path.of("/work/outside.bin"));
+                Files.createSymbolicLink(work.resolve("repo/zero"), Path.of("/dev/zero"));
+              } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+              }
+            }),
+            tmp.resolve("attempt"));
+    assertThat(outcome.producedCommits()).isTrue();
+    assertThat(onlyNewCommit(outcome))
+        .contains("new file mode 120000")
+        .contains("+/work/outside.bin")
+        .contains("+/dev/zero");
+  }
+
+  @Test
+  void missingRepositoryIsNoOutput() throws Exception {
+    var attempt = tmp.resolve("attempt");
+    var outcome =
+        buildWith(new ScriptedAgent((n, work) -> deleteTree(work.resolve("repo"))), attempt);
+    assertThat(outcome.producedCommits()).isFalse();
+    assertThat(postError(attempt)).contains("/work/repo");
+  }
+
+  @Test
+  void symlinkedRepositoryIsNoOutput() throws Exception {
+    var attempt = tmp.resolve("attempt");
+    var outcome =
+        buildWith(
+            new ScriptedAgent((n, work) -> {
+              try {
+                Files.move(work.resolve("repo"), work.resolve("elsewhere"));
+                Files.createSymbolicLink(work.resolve("repo"), Path.of("elsewhere"));
+              } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+              }
+            }),
+            attempt);
+    assertThat(outcome.producedCommits()).isFalse();
+    assertThat(postError(attempt)).contains("/work/repo");
+  }
 }
