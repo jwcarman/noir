@@ -231,7 +231,10 @@ Persisted states: `SEALED`, `BUILDING`, `MEASURING`, `GRADING`, `REWORK`,
 | GRADING | holdout fails to compile despite API conformance | — | record holdout defect; label `noir:blocked` | BLOCKED |
 | any active | infrastructure failure persists past backoff | — | label `noir:blocked` | BLOCKED |
 | SEALED / REWORK / active | issue closed, or `noir cancel <id>` | — | stop containers; label removed | CANCELLED |
-| BLOCKED | `noir resume <id>` | — | restart the phase that blocked | (that phase) |
+| BLOCKED | `noir resume <id>` | blocked by infrastructure or secret scan (not holdout defect) | restart the phase that blocked | (that phase) |
+
+A holdout-defect block cannot be resumed (the sealed suite is immutable); the
+author cancels the item and re-specifies it.
 
 Every transition appends an event. Default retry budget: **3 rework cycles**
 (4 attempts total).
