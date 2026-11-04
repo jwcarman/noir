@@ -7,14 +7,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.ContainerPort;
@@ -138,6 +141,7 @@ public final class ContainerMeasureRunner implements MeasureRunner {
       var build =
           phase(
               log,
+              spec.id(),
               "build",
               List.of(bundle, Mount.rw(buildDir, "/work/build")),
               buildEnv,
@@ -150,6 +154,7 @@ public final class ContainerMeasureRunner implements MeasureRunner {
           "analyze",
           phase(
               log,
+              spec.id(),
               "analyze",
               List.of(
                   bundle,
@@ -177,6 +182,7 @@ public final class ContainerMeasureRunner implements MeasureRunner {
         var pit =
             phase(
                 log,
+                spec.id(),
                 "pit",
                 List.of(Mount.ro(buildDir, "/work/build"), Mount.rw(pitDir, "/work/pit")),
                 Map.of(
@@ -248,6 +254,7 @@ public final class ContainerMeasureRunner implements MeasureRunner {
 
   private ContainerResult phase(
       StringBuilder log,
+      String itemId,
       String name,
       List<Mount> mounts,
       Map<String, String> env,
@@ -255,6 +262,7 @@ public final class ContainerMeasureRunner implements MeasureRunner {
       Duration timeout) {
     var spec =
         ContainerSpec.of(config.images().builder(), SCRIPT, name)
+            .withItem(itemId)
             .withMounts(mounts)
             .withEnv(env)
             .withNetwork(network)
@@ -488,16 +496,52 @@ public final class ContainerMeasureRunner implements MeasureRunner {
         : text.lines().map(String::strip).filter(l -> !l.isEmpty()).toList();
   }
 
-  private static void deleteRecursively(Path dir) {
-    if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+  /**
+   * Deletes a tree the builder's code wrote into, which may hold directories it made unreadable or
+   * unwritable: each directory is first given owner rwx, then emptied. Links are never followed (a
+   * symlink is deleted, not its target), and the walk is iterative, so depth cannot overflow the
+   * stack.
+   */
+  private static void deleteRecursively(Path root) {
+    if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) {
       return;
     }
-    try (var paths = Files.walk(dir)) {
-      for (var p : paths.sorted(Comparator.reverseOrder()).toList()) {
-        Files.delete(p);
+    var stack = new ArrayDeque<Path>();
+    stack.push(root);
+    try {
+      while (!stack.isEmpty()) {
+        var p = stack.peek();
+        if (!Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
+          Files.delete(p);
+          stack.pop();
+          continue;
+        }
+        // p is a real directory (checked without following links), and no container that could
+        // swap it for a link is running any more. (A NOFOLLOW attribute view cannot chmod a
+        // directory on macOS.)
+        var perms = EnumSet.copyOf(Files.getPosixFilePermissions(p, LinkOption.NOFOLLOW_LINKS));
+        if (perms.addAll(OWNER_RWX)) {
+          Files.setPosixFilePermissions(p, perms);
+        }
+        var children = new ArrayList<Path>();
+        try (var entries = Files.newDirectoryStream(p)) {
+          entries.forEach(children::add);
+        }
+        if (children.isEmpty()) {
+          Files.delete(p);
+          stack.pop();
+        } else {
+          children.forEach(stack::push);
+        }
       }
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
   }
+
+  private static final Set<PosixFilePermission> OWNER_RWX =
+      EnumSet.of(
+          PosixFilePermission.OWNER_READ,
+          PosixFilePermission.OWNER_WRITE,
+          PosixFilePermission.OWNER_EXECUTE);
 }

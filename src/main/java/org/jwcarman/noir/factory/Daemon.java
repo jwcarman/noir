@@ -9,6 +9,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.docker.ContainerPort;
+import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.github.GitHubPort;
 import org.jwcarman.noir.lifecycle.Lifecycle;
 import org.jwcarman.noir.lifecycle.State;
@@ -44,12 +46,16 @@ public final class Daemon {
      * @param itemId the item the error concerns, or {@code null} for a repo-level failure
      */
     void error(String itemId, String message);
+
+    /** Something the operator should fix that is not an error, such as a skipped item. */
+    void warning(String message);
   }
 
   private static final String READY = "noir:ready";
 
   private final Store store;
   private final GitHubPort gh;
+  private final ContainerPort docker;
   private final ItemDriver driver;
   private final Reconciler reconciler;
   private final NoirConfig config;
@@ -58,9 +64,15 @@ public final class Daemon {
   private final Set<String> secrets;
   private final Listener listener;
 
+  /** Items already warned about, so a polling daemon warns once per item, not once per pass. */
+  private final Set<String> warned = new HashSet<>();
+
+  private boolean swept;
+
   public Daemon(
       Store store,
       GitHubPort gh,
+      ContainerPort docker,
       ItemDriver driver,
       Reconciler reconciler,
       NoirConfig config,
@@ -70,6 +82,7 @@ public final class Daemon {
       Listener listener) {
     this.store = store;
     this.gh = gh;
+    this.docker = docker;
     this.driver = driver;
     this.reconciler = reconciler;
     this.config = config;
@@ -93,8 +106,17 @@ public final class Daemon {
     }
   }
 
-  /** One pass: reconcile, then drive every eligible item. Returns how many items moved. */
+  /**
+   * One pass: reconcile, then drive every eligible item. Returns how many items moved. The first
+   * pass first removes every container left by an earlier noir that was killed outright (the caller
+   * holds the instance lock, so none of them belongs to a live run); a failure to do so propagates,
+   * since a leftover builder could still be writing into an attempt directory.
+   */
   public int runOnce() {
+    if (!swept) {
+      docker.removeLabelled(DockerCli.RUN_LABEL);
+      swept = true;
+    }
     var ids = store.itemIds();
     for (var id : ids) {
       try {
@@ -122,6 +144,14 @@ public final class Daemon {
         items.add(store.readWorkItem(id));
       } catch (RuntimeException e) {
         // Already reported by reconciliation, which reads every item first.
+      }
+    }
+    for (var item : items) {
+      if (item.state() == State.SEALED
+          && !config.repos().contains(item.repo())
+          && warned.add(item.id())) {
+        listener.warning(
+            item.id() + " skipped: repo " + item.repo() + " is not in ~/.noir/config.yaml repos");
       }
     }
     var ready = new HashMap<String, Set<Integer>>();

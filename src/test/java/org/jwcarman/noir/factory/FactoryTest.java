@@ -98,6 +98,7 @@ class FactoryTest {
         grade,
         bundles,
         NoirConfig.defaults(),
+        "sha256:grader-image-id",
         Clock.fixed(Instant.parse("2026-11-04T00:00:00Z"), ZoneOffset.UTC),
         new Retry(6, Duration.ofSeconds(2), Duration.ofSeconds(60), sleeps::add),
         secrets);
@@ -137,6 +138,8 @@ class FactoryTest {
         .contains("R1: 3/3 passed")
         .contains("Builder model: claude-test")
         .contains("Examiner model: examiner-model")
+        .contains("Grader image: `sha256:grader-image-id`")
+        .doesNotContain("noir-grader:")
         .contains(
             "`" + Commitments.sha256(Commitments.read(itemDir.resolve("commitment.json"))) + "`");
     assertThat(publisher.pushes())
@@ -405,6 +408,109 @@ class FactoryTest {
     assertThat(delivery.labels).containsExactly("noir:building", "noir:blocked");
   }
 
+  static AgentResult invalidKey() {
+    return new AgentResult(
+        1,
+        true,
+        false,
+        BigDecimal.ZERO,
+        1,
+        "claude-test",
+        "Invalid API key \u00b7 Fix external API key",
+        "sha256:builder");
+  }
+
+  @Test
+  void agentErrorThatConsumedNothingBlocksAsInfrastructure() {
+    build.produces = n -> false;
+    build.agent = n -> invalidKey();
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
+    assertThat(item.blockedPhase()).isEqualTo(State.BUILDING);
+    assertThat(item.attempt()).isEqualTo(1);
+    assertThat(build.calls).hasSize(6);
+    assertThat(sleeps).hasSize(5);
+    assertThat(gh.issue(1).comments()).isEmpty();
+    assertThat(gh.pullRequests()).isEmpty();
+    assertThat(delivery.labels).containsExactly("noir:building", "noir:blocked");
+    assertThat(eventTypes()).contains("infra_failure").doesNotContain("build_attempt");
+    assertThat(attempt(1).feedback()).doesNotExist();
+  }
+
+  @Test
+  void agentErrorWithNoResultJsonBlocksAsInfrastructure() {
+    build.produces = n -> false;
+    // What ClaudeJson reports when the container printed no result object and exited non-zero.
+    build.agent =
+        n -> new AgentResult(1, true, false, BigDecimal.ZERO, 0, "default", "boom", "sha256:b");
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
+    assertThat(gh.issue(1).comments()).isEmpty();
+  }
+
+  @Test
+  void transientAgentInfraErrorIsRetriedWithoutUsingAnAttempt() {
+    build.produces = n -> n != 1;
+    build.agent =
+        n ->
+            n == 1
+                ? invalidKey()
+                : new AgentResult(
+                    0, false, false, new BigDecimal("1.25"), 10, "claude-test", "done", "sha");
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.PR_OPEN);
+    assertThat(item.attempt()).isEqualTo(1);
+    assertThat(build.calls).hasSize(2);
+    assertThat(sleeps).containsExactly(Duration.ofSeconds(2));
+  }
+
+  @Test
+  void agentThatDidWorkThenErroredIsStillABuilderOutcome() {
+    build.produces = n -> false;
+    build.agent =
+        n ->
+            new AgentResult(
+                1, true, false, new BigDecimal("0.40"), 1, "claude-test", "API Error", "sha");
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.FAILED);
+    assertThat(build.calls).hasSize(4);
+    assertThat(sleeps).isEmpty();
+    assertThat(Files.exists(attempt(1).feedback())).isTrue();
+  }
+
+  @Test
+  void agentThatTimedOutWithNothingReportedIsStillABuilderOutcome() {
+    build.produces = n -> false;
+    build.agent = n -> new AgentResult(137, true, true, BigDecimal.ZERO, 0, "default", "", "sha");
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.FAILED);
+    assertThat(sleeps).isEmpty();
+  }
+
+  @Test
+  void agentErrorAfterSeveralTurnsIsStillABuilderOutcome() {
+    build.produces = n -> false;
+    build.agent =
+        n -> new AgentResult(1, true, false, BigDecimal.ZERO, 5, "claude-test", "error", "sha");
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.FAILED);
+    assertThat(sleeps).isEmpty();
+  }
+
   // ---- fakes -------------------------------------------------------------------------------
 
   /** Records every label applied, in order, then delegates. */
@@ -444,6 +550,7 @@ class FactoryTest {
     final List<BuildCall> calls = new ArrayList<>();
     IntFunction<Boolean> produces = n -> true;
     String model = "claude-test";
+    IntFunction<AgentResult> agent = null;
 
     @Override
     public BuildOutcome run(
@@ -456,10 +563,12 @@ class FactoryTest {
       calls.add(new BuildCall(inputBundle, feedback, attemptDir));
       var bundle = attemptDir.resolve("out.bundle");
       write(bundle, "# v2 git bundle\nattempt " + calls.size() + "\n");
-      var agent =
-          new AgentResult(
-              0, false, false, new BigDecimal("1.25"), 10, model, "done", "sha256:builder");
-      return new BuildOutcome(bundle, produces.apply(calls.size()), agent);
+      var result =
+          this.agent != null
+              ? this.agent.apply(calls.size())
+              : new AgentResult(
+                  0, false, false, new BigDecimal("1.25"), 10, model, "done", "sha256:builder");
+      return new BuildOutcome(bundle, produces.apply(calls.size()), result);
     }
   }
 

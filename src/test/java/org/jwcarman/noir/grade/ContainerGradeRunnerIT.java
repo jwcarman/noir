@@ -63,6 +63,11 @@ class ContainerGradeRunnerIT {
     public void build(Path contextDir, String tag) {
       docker.build(contextDir, tag);
     }
+
+    @Override
+    public int removeLabelled(String label) {
+      return docker.removeLabelled(label);
+    }
   }
 
   static Path fixture(String name) throws URISyntaxException {

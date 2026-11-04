@@ -10,7 +10,13 @@ import org.jwcarman.noir.feedback.RequirementResult;
 class PullRequestBodyTest {
   static final PullRequestBody.Provenance PROV =
       new PullRequestBody.Provenance(
-          "0123abc", 2, "f00d", "claude-opus", "claude-examiner", "sha256:b1", "noir-grader:0.1.0");
+          "0123abc",
+          2,
+          "f00d",
+          "claude-opus",
+          "claude-examiner",
+          "sha256:b1",
+          "sha256:9f86d081884c");
   static final List<RequirementResult> RESULTS =
       List.of(new RequirementResult("R1", 4, 4), new RequirementResult("R2", 3, 3));
 
@@ -43,7 +49,7 @@ class PullRequestBodyTest {
             - Builder model: claude-opus
             - Examiner model: claude-examiner
             - Builder image: `sha256:b1`
-            - Grader image: `noir-grader:0.1.0`
+            - Grader image: `sha256:9f86d081884c`
             """);
   }
 

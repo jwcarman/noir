@@ -188,6 +188,7 @@ class CancelResumeCommandTest {
         new Daemon(
             store,
             gh,
+            new org.jwcarman.noir.docker.FakeContainerPort(spec -> null),
             id -> {
               throw new IllegalStateException("boom");
             },
@@ -202,6 +203,9 @@ class CancelResumeCommandTest {
 
               @Override
               public void error(String itemId, String message) {}
+
+              @Override
+              public void warning(String message) {}
             });
     daemon.runOnce();
     assertThat(store.readWorkItem(A).state()).isEqualTo(State.BLOCKED);

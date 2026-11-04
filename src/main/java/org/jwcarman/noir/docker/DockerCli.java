@@ -20,6 +20,12 @@ import org.jwcarman.noir.exec.ToolMissingException;
  * privileges, with resource limits, and never with the Docker socket mounted (spec §6.2).
  */
 public final class DockerCli implements ContainerPort {
+  /**
+   * Every container noir runs carries this label, so containers orphaned by a hard kill of noir can
+   * be found and removed at the next {@code noir run}.
+   */
+  public static final String RUN_LABEL = "noir.run=1";
+
   private static final List<String> DAEMON_DOWN =
       List.of("Cannot connect to the Docker daemon", "failed to connect to the docker API");
 
@@ -51,6 +57,10 @@ public final class DockerCli implements ContainerPort {
     argv.addAll(List.of("--memory", spec.limits().memory()));
     argv.addAll(List.of("--pids-limit", String.valueOf(spec.limits().pids())));
     argv.addAll(List.of("--network", spec.network() ? "bridge" : "none"));
+    argv.addAll(List.of("--label", RUN_LABEL));
+    for (var label : new java.util.TreeMap<>(spec.labels()).entrySet()) {
+      argv.addAll(List.of("--label", label.getKey() + "=" + label.getValue()));
+    }
     if (spec.workdir() != null) {
       argv.addAll(List.of("-w", spec.workdir()));
     }
@@ -103,6 +113,28 @@ public final class DockerCli implements ContainerPort {
     if (!rm.ok() && !rm.stderr().contains("No such container")) {
       throw new DockerException("container " + name + " could not be removed: " + rm.tail(10));
     }
+  }
+
+  @Override
+  public int removeLabelled(String label) {
+    var ps =
+        runner.run(
+            Command.of("docker", "ps", "-aq", "--filter", "label=" + label)
+                .withTimeout(Duration.ofMinutes(1)));
+    if (!ps.ok() || daemonDown(ps)) {
+      throw failure("docker ps", ps);
+    }
+    var ids = ps.stdout().lines().map(String::strip).filter(l -> !l.isEmpty()).toList();
+    if (ids.isEmpty()) {
+      return 0;
+    }
+    var argv = new ArrayList<>(List.of("docker", "rm", "-f"));
+    argv.addAll(ids);
+    var rm = runner.run(Command.of(argv).withTimeout(Duration.ofMinutes(5)));
+    if (!rm.ok()) {
+      throw failure("docker rm", rm);
+    }
+    return ids.size();
   }
 
   @Override

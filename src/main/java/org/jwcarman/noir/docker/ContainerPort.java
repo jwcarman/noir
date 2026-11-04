@@ -11,4 +11,10 @@ public interface ContainerPort {
   Optional<String> imageId(String image);
 
   void build(Path contextDir, String tag);
+
+  /**
+   * Force-removes every container, running or stopped, carrying {@code label} ({@code key=value});
+   * returns how many there were.
+   */
+  int removeLabelled(String label);
 }

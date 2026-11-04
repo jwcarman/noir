@@ -40,7 +40,7 @@ final class RunCommand implements Callable<Integer> {
     }
   }
 
-  /** One line per transition on stdout; per-item errors on stderr. */
+  /** One line per transition on stdout; errors and warnings on stderr. */
   private static Daemon.Listener printer(PrintWriter out, PrintWriter err) {
     return new Daemon.Listener() {
       @Override
@@ -52,6 +52,12 @@ final class RunCommand implements Callable<Integer> {
       @Override
       public void error(String itemId, String message) {
         err.println(itemId == null ? message : itemId + ": " + message);
+        err.flush();
+      }
+
+      @Override
+      public void warning(String message) {
+        err.println(message);
         err.flush();
       }
     };

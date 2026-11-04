@@ -10,6 +10,8 @@ import java.util.function.Function;
 public final class FakeContainerPort implements ContainerPort {
   private final Function<ContainerSpec, ContainerResult> handler;
   private final List<ContainerSpec> specs = new ArrayList<>();
+  private final List<String> removedLabels = new ArrayList<>();
+  private RuntimeException removeFailure;
 
   public FakeContainerPort(Function<ContainerSpec, ContainerResult> handler) {
     this.handler = handler;
@@ -32,4 +34,22 @@ public final class FakeContainerPort implements ContainerPort {
 
   @Override
   public void build(Path contextDir, String tag) {}
+
+  /** Labels passed to {@link #removeLabelled}, in order. */
+  public List<String> removedLabels() {
+    return removedLabels;
+  }
+
+  public void failRemoveLabelled(RuntimeException e) {
+    removeFailure = e;
+  }
+
+  @Override
+  public int removeLabelled(String label) {
+    removedLabels.add(label);
+    if (removeFailure != null) {
+      throw removeFailure;
+    }
+    return 0;
+  }
 }

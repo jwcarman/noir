@@ -17,6 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.jwcarman.noir.agent.ScriptedAgent;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.ContainerResult;
+import org.jwcarman.noir.docker.ContainerSpec;
 import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.docker.FakeContainerPort;
 import org.jwcarman.noir.spec.Specs;
@@ -69,6 +70,14 @@ class ContainerBuildRunnerTest {
                   Map.entry("BRANCH", "noir/1-x"), Map.entry("BASE_SHA", Specs.valid().baseSha()));
         });
     assertThat(agent.requests()).hasSize(1);
+  }
+
+  @Test
+  void everyContainerAndTheAgentCarryTheItemLabel() {
+    run();
+    var item = Map.of(ContainerSpec.ITEM_LABEL, Specs.ID);
+    assertThat(port.specs()).hasSize(2).allSatisfy(s -> assertThat(s.labels()).isEqualTo(item));
+    assertThat(agent.requests().getFirst().labels()).isEqualTo(item);
   }
 
   @Test

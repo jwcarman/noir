@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -125,6 +126,9 @@ class ContainerMeasureRunnerTest {
         .containsEntry("BASE_SHA", Specs.valid().baseSha())
         .containsEntry("BRANCH", "noir/1-x");
     assertThat(phase("pit").env()).containsEntry("TARGET_CLASSES", "com.example.api.Foo");
+    assertThat(port.specs())
+        .allSatisfy(s ->
+            assertThat(s.labels()).containsExactly(Map.entry(ContainerSpec.ITEM_LABEL, Specs.ID)));
     assertThat(port.specs())
         .allSatisfy(s ->
             assertThat(s.env().keySet())
@@ -251,25 +255,72 @@ class ContainerMeasureRunnerTest {
   @Test
   void failedCleanupDoesNotMaskTheOriginalError() throws IOException {
     results.put("analyze", new ContainerResult(2, "", "boom", false, "sha"));
-    var locked = tmp.resolve("measure.scratch/build/locked");
-    writes.get("build").put("locked/file", "x");
+    // A read-only parent: the scratch tree cannot be unlinked from it, whatever its own modes.
+    var parent = tmp.resolve("ro");
+    Files.createDirectories(parent);
     port =
         new FakeContainerPort(spec -> {
           var phase = spec.command().get(1);
           var rw = spec.mounts().stream().filter(m -> !m.readOnly()).findFirst().orElseThrow();
           writes.getOrDefault(phase, Map.of()).forEach((k, v) -> write(rw.host().resolve(k), v));
           if (phase.equals("build")) {
-            locked.toFile().setWritable(false);
+            parent.toFile().setWritable(false);
           }
           return results.getOrDefault(phase, OK);
         });
     try {
-      assertThatThrownBy(this::run)
+      assertThatThrownBy(() ->
+              new ContainerMeasureRunner(port, NoirConfig.defaults())
+                  .run(
+                      Specs.valid().withApiStubs(List.of("src/main/java/com/example/api/Foo.java")),
+                      tmp.resolve("attempt.bundle"),
+                      "noir/1-x",
+                      tmp.resolve("stubs"),
+                      parent.resolve("measure")))
           .isInstanceOf(DockerException.class)
           .hasMessageContaining("analyze container exited 2")
           .satisfies(e -> assertThat(e.getSuppressed()).isNotEmpty());
     } finally {
-      locked.toFile().setWritable(true);
+      parent.toFile().setWritable(true);
+    }
+  }
+
+  @Test
+  void scratchWithAnUnreadableDirectoryIsCleanedUp() throws IOException {
+    var outside = tmp.resolve("outside");
+    Files.createDirectories(outside);
+    Files.writeString(outside.resolve("keep.txt"), "x");
+    Files.setPosixFilePermissions(outside, PosixFilePermissions.fromString("r-x------"));
+    port =
+        new FakeContainerPort(spec -> {
+          var phase = spec.command().get(1);
+          var rw = spec.mounts().stream().filter(m -> !m.readOnly()).findFirst().orElseThrow();
+          writes.getOrDefault(phase, Map.of()).forEach((k, v) -> write(rw.host().resolve(k), v));
+          if (phase.equals("build")) {
+            try {
+              var locked = rw.host().resolve("locked/inner");
+              Files.createDirectories(locked);
+              Files.writeString(locked.resolve("file"), "x");
+              Files.createSymbolicLink(rw.host().resolve("link"), outside);
+              Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+              Files.setPosixFilePermissions(
+                  locked.getParent(), PosixFilePermissions.fromString("---------"));
+            } catch (IOException e) {
+              throw new UncheckedIOException(e);
+            }
+          }
+          return results.getOrDefault(phase, OK);
+        });
+    try {
+      run();
+
+      assertThat(tmp.resolve("measure.scratch")).doesNotExist();
+      // The symlink was removed, never followed: its target keeps its mode and contents.
+      assertThat(Files.getPosixFilePermissions(outside))
+          .isEqualTo(PosixFilePermissions.fromString("r-x------"));
+      assertThat(outside.resolve("keep.txt")).exists();
+    } finally {
+      Files.setPosixFilePermissions(outside, PosixFilePermissions.fromString("rwx------"));
     }
   }
 

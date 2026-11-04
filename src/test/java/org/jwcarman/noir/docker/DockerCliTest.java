@@ -47,6 +47,7 @@ class DockerCliTest {
             .withNetwork(false)
             .withLimits(new NoirConfig.Limits(2.0, "4g", 512))
             .withWorkdir("/work")
+            .withLabels(Map.of(ContainerSpec.ITEM_LABEL, "nr-01ABC"))
             .withStdin("PROMPT".getBytes());
     var r = docker.run(spec);
     var run = runner.commands().get(1);
@@ -72,6 +73,10 @@ class DockerCliTest {
             "512",
             "--network",
             "none",
+            "--label",
+            "noir.run=1",
+            "--label",
+            "noir.item=nr-01ABC",
             "-w",
             "/work",
             "-v",
@@ -240,5 +245,60 @@ class DockerCliTest {
     assertThatThrownBy(() -> docker.build(dir, "t"))
         .isInstanceOf(DockerException.class)
         .hasMessageContaining("step 3 failed");
+  }
+
+  @Test
+  void everyContainerIsLabelledAsNoirsEvenWithoutAnItem() {
+    runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
+    runner.whenArgvStartsWith(List.of("docker", "run"), ok("ok"));
+    docker.run(ContainerSpec.of("img", "true"));
+    var argv = runner.commands().get(1).argv();
+    assertThat(argv).containsSequence("--label", "noir.run=1");
+    assertThat(argv).filteredOn(a -> a.equals("--label")).hasSize(1);
+  }
+
+  @Test
+  void removeLabelledRemovesEveryMatchingContainer() {
+    runner.whenArgvStartsWith(List.of("docker", "ps"), ok("abc123\ndef456\n"));
+    runner.whenArgvStartsWith(List.of("docker", "rm"), ok("abc123\ndef456\n"));
+
+    int removed = docker.removeLabelled(DockerCli.RUN_LABEL);
+
+    assertThat(removed).isEqualTo(2);
+    assertThat(runner.commands())
+        .extracting(c -> c.argv())
+        .containsExactly(
+            List.of("docker", "ps", "-aq", "--filter", "label=noir.run=1"),
+            List.of("docker", "rm", "-f", "abc123", "def456"));
+  }
+
+  @Test
+  void removeLabelledWithNothingLeftRunsNoRm() {
+    runner.whenArgvStartsWith(List.of("docker", "ps"), ok("\n"));
+
+    assertThat(docker.removeLabelled(DockerCli.RUN_LABEL)).isZero();
+    assertThat(runner.commands()).hasSize(1);
+  }
+
+  @Test
+  void removeLabelledFailureIsADockerException() {
+    runner.whenArgvStartsWith(List.of("docker", "ps"), ok("abc123\n"));
+    runner.whenArgvStartsWith(
+        List.of("docker", "rm"), new CommandResult(1, "", "permission denied", false, false));
+
+    assertThatThrownBy(() -> docker.removeLabelled(DockerCli.RUN_LABEL))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("permission denied");
+  }
+
+  @Test
+  void removeLabelledListingFailureIsADockerException() {
+    runner.whenArgvStartsWith(
+        List.of("docker", "ps"),
+        new CommandResult(1, "", "Cannot connect to the Docker daemon", false, false));
+
+    assertThatThrownBy(() -> docker.removeLabelled(DockerCli.RUN_LABEL))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("Docker is not running");
   }
 }

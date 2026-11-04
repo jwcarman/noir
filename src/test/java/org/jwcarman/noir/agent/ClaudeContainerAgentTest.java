@@ -24,16 +24,18 @@ class ClaudeContainerAgentTest {
         new ClaudeContainerAgent(docker, Map.of("CLAUDE_CODE_OAUTH_TOKEN", "tok"))
             .run(
                 new AgentRequest(
-                    "noir-builder:0.1.0",
-                    "SYS",
-                    "PROMPT",
-                    work,
-                    null,
-                    100,
-                    Duration.ofMinutes(30),
-                    NoirConfig.defaults().limits()));
+                        "noir-builder:0.1.0",
+                        "SYS",
+                        "PROMPT",
+                        work,
+                        null,
+                        100,
+                        Duration.ofMinutes(30),
+                        NoirConfig.defaults().limits())
+                    .withLabels(Map.of("noir.item", "nr-1")));
     var spec = docker.specs().getFirst();
     assertThat(spec.image()).isEqualTo("noir-builder:0.1.0");
+    assertThat(spec.labels()).containsExactly(Map.entry("noir.item", "nr-1"));
     assertThat(spec.command())
         .containsExactly(
             "claude",

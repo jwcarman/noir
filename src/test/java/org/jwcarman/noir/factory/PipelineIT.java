@@ -66,10 +66,12 @@ class PipelineIT {
           "noir.holdout",
           "nr_01jbx4zq8k3v0m7n2p5r6s9t1w");
 
+  static String graderImageId;
+
   @BeforeAll
   static void images() {
     Images.ensureBuilder(docker, config.images().builder());
-    Images.ensureGrader(docker, config.images().grader());
+    graderImageId = Images.ensureGrader(docker, config.images().grader());
   }
 
   @TempDir Path tmp;
@@ -147,6 +149,7 @@ class PipelineIT {
             new ContainerGradeRunner(docker, config),
             new GitBundles(runner, scratch),
             config,
+            graderImageId,
             Clock.systemUTC(),
             new Retry(1, Duration.ZERO, Duration.ZERO, d -> {}),
             Set.of(SECRET));

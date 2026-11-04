@@ -87,19 +87,20 @@ public final class ContainerBuildRunner implements BuildRunner {
       throw new UncheckedIOException(e);
     }
 
-    require("prep", docker.run(gitStep("/opt/noir/bin/build-prep.sh", attemptDir, env)));
+    require("prep", docker.run(gitStep("/opt/noir/bin/build-prep.sh", attemptDir, env, spec.id())));
 
     AgentResult result =
         agent.run(
             new AgentRequest(
-                config.images().builder(),
-                BuilderPrompt.system(),
-                BuilderPrompt.user(spec, stubs, feedback),
-                attemptDir,
-                null,
-                config.budgets().turns(),
-                config.budgets().wallClock(),
-                config.limits()));
+                    config.images().builder(),
+                    BuilderPrompt.system(),
+                    BuilderPrompt.user(spec, stubs, feedback),
+                    attemptDir,
+                    null,
+                    config.budgets().turns(),
+                    config.budgets().wallClock(),
+                    config.limits())
+                .withLabels(Map.of(ContainerSpec.ITEM_LABEL, spec.id())));
 
     // The agent could have planted the post step's outputs or replaced input.bundle; the post step
     // must start from noir's own bundle, and only it may write its outputs.
@@ -110,7 +111,7 @@ public final class ContainerBuildRunner implements BuildRunner {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
-    var post = docker.run(gitStep("/opt/noir/bin/build-post.sh", attemptDir, env));
+    var post = docker.run(gitStep("/opt/noir/bin/build-post.sh", attemptDir, env, spec.id()));
     var bundle = attemptDir.resolve("out.bundle");
     if (!post.ok()) {
       if (!post.timedOut() && DOCKER_EXITS.contains(post.exitCode())) {
@@ -151,8 +152,10 @@ public final class ContainerBuildRunner implements BuildRunner {
     }
   }
 
-  private ContainerSpec gitStep(String script, Path attemptDir, Map<String, String> env) {
+  private ContainerSpec gitStep(
+      String script, Path attemptDir, Map<String, String> env, String itemId) {
     return ContainerSpec.of(config.images().builder(), script)
+        .withItem(itemId)
         .withMounts(List.of(Mount.rw(attemptDir, "/work")))
         .withWorkdir("/work")
         .withEnv(env)

@@ -80,7 +80,7 @@ final class Wiring {
     var runner = new ProcessCommandRunner();
     var docker = new DockerCli(runner);
     Images.ensureBuilder(docker, config.images().builder());
-    Images.ensureGrader(docker, config.images().grader());
+    var graderImageId = Images.ensureGrader(docker, config.images().grader());
     var tmp = tempRoot(home);
     var store = new Store(home);
     var gh = new GhCli(runner);
@@ -96,11 +96,13 @@ final class Wiring {
             new ContainerGradeRunner(docker, config),
             new GitBundles(runner, tmp),
             config,
+            graderImageId,
             clock,
             Retry.forConfig(config, sleeper),
             secrets);
     var reconciler = new Reconciler(store, gh, delivery, clock);
-    return new Daemon(store, gh, factory, reconciler, config, sleeper, clock, secrets, listener);
+    return new Daemon(
+        store, gh, docker, factory, reconciler, config, sleeper, clock, secrets, listener);
   }
 
   /** Every credential value in the environment that agents could receive. */

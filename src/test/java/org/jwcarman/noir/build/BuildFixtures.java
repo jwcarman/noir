@@ -172,5 +172,10 @@ public final class BuildFixtures {
     public void build(Path contextDir, String tag) {
       delegate.build(contextDir, tag);
     }
+
+    @Override
+    public int removeLabelled(String label) {
+      return delegate.removeLabelled(label);
+    }
   }
 }

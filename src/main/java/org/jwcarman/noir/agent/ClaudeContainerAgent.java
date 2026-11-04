@@ -48,6 +48,7 @@ public final class ClaudeContainerAgent implements AgentPort {
             .withNetwork(true)
             .withLimits(request.limits())
             .withTimeout(request.wallClock())
+            .withLabels(request.labels())
             .withStdin(request.prompt().getBytes(UTF_8));
     return ClaudeJson.parse(docker.run(spec), request.model());
   }

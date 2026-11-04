@@ -1,6 +1,7 @@
 package org.jwcarman.noir.factory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -20,6 +21,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.jwcarman.noir.NoirHome;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.deliver.FakeBranchPublisher;
+import org.jwcarman.noir.docker.DockerException;
+import org.jwcarman.noir.docker.FakeContainerPort;
 import org.jwcarman.noir.github.FakeGitHub;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.spec.Spec;
@@ -42,6 +45,7 @@ class DaemonTest {
   final List<Duration> sleeps = new ArrayList<>();
   final List<String> reported = new ArrayList<>();
   Retry.Sleeper sleeper = sleeps::add;
+  final FakeContainerPort docker = new FakeContainerPort(spec -> null);
   Delivery reconcileDelivery;
 
   final Daemon.Listener listener =
@@ -54,6 +58,11 @@ class DaemonTest {
         @Override
         public void error(String itemId, String message) {
           reported.add("error " + itemId + ": " + message);
+        }
+
+        @Override
+        public void warning(String message) {
+          reported.add("warning " + message);
         }
       };
 
@@ -85,7 +94,7 @@ class DaemonTest {
             defaults.examiner());
     var reconciler = new Reconciler(store, gh, reconcileDelivery, clock);
     return new Daemon(
-        store, gh, driver, reconciler, config, sleeper, clock, Set.of(SECRET), listener);
+        store, gh, docker, driver, reconciler, config, sleeper, clock, Set.of(SECRET), listener);
   }
 
   /** Reconciliation that never touches labels, so the daemon's own label filter is observable. */
@@ -130,6 +139,53 @@ class DaemonTest {
     assertThat(store.readWorkItem(A).state()).isEqualTo(State.PR_OPEN);
     assertThat(store.readWorkItem(B).state()).isEqualTo(State.SEALED);
     assertThat(store.readWorkItem(C).state()).isEqualTo(State.SEALED);
+  }
+
+  @Test
+  void warnsOnceForASealedItemWhoseRepoIsNotConfigured() {
+    freezeLabels();
+    item(A, REPO, issue(REPO, "noir:ready"), State.SEALED);
+    item(C, OTHER_REPO, issue(OTHER_REPO, "noir:ready"), State.SEALED);
+    item(B, OTHER_REPO, issue(OTHER_REPO), State.FAILED);
+    var daemon = daemon();
+
+    daemon.runOnce();
+    daemon.runOnce();
+
+    assertThat(reported)
+        .filteredOn(r -> r.startsWith("warning"))
+        .containsExactly(
+            "warning "
+                + C
+                + " skipped: repo "
+                + OTHER_REPO
+                + " is not in ~/.noir/config.yaml repos");
+    assertThat(store.readWorkItem(C).state()).isEqualTo(State.SEALED);
+  }
+
+  @Test
+  void removesLeftoverNoirContainersOnceBeforeTheFirstPass() {
+    item(A, REPO, issue(REPO), State.GRADING);
+    // Checked inside the drive: an AssertionError is not caught as an item failure.
+    driver.failures.put(A, id -> assertThat(docker.removedLabels()).containsExactly("noir.run=1"));
+    var daemon = daemon();
+    assertThat(docker.removedLabels()).isEmpty();
+
+    daemon.runOnce();
+    daemon.runOnce();
+
+    assertThat(docker.removedLabels()).containsExactly("noir.run=1");
+  }
+
+  @Test
+  void failingSweepStopsTheRunBeforeAnyWork() {
+    item(A, REPO, issue(REPO), State.GRADING);
+    docker.failRemoveLabelled(new DockerException("Docker is not running; start Docker Desktop"));
+
+    assertThatThrownBy(() -> daemon().runOnce())
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("Docker is not running");
+    assertThat(driver.driven).isEmpty();
   }
 
   @Test

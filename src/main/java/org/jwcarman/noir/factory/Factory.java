@@ -18,10 +18,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.jwcarman.noir.agent.AgentResult;
 import org.jwcarman.noir.build.BuildRunner;
 import org.jwcarman.noir.commit.Commitments;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.deliver.PatchTooLargeException;
+import org.jwcarman.noir.docker.DockerException;
+import org.jwcarman.noir.exec.CommandResult;
 import org.jwcarman.noir.feedback.FeedbackInput;
 import org.jwcarman.noir.feedback.FeedbackRenderer;
 import org.jwcarman.noir.feedback.RequirementResult;
@@ -69,11 +72,14 @@ public final class Factory implements ItemDriver {
   private final GradeRunner grader;
   private final Bundles bundles;
   private final NoirConfig config;
+  private final String graderImageId;
   private final Clock clock;
   private final Retry retry;
   private final Set<String> secrets;
 
   /**
+   * @param graderImageId the id of the grader image (from {@code Images.ensureGrader}), published
+   *     as provenance in pull requests
    * @param secrets the credential values given to the builder (from {@code AgentAuth}); an attempt
    *     whose patch contains any of them is blocked ({@code SECRET_FOUND}) and never pushed
    */
@@ -85,6 +91,7 @@ public final class Factory implements ItemDriver {
       GradeRunner grader,
       Bundles bundles,
       NoirConfig config,
+      String graderImageId,
       Clock clock,
       Retry retry,
       Set<String> secrets) {
@@ -95,6 +102,7 @@ public final class Factory implements ItemDriver {
     this.grader = grader;
     this.bundles = bundles;
     this.config = config;
+    this.graderImageId = graderImageId;
     this.clock = clock;
     this.retry = retry;
     this.secrets =
@@ -198,8 +206,19 @@ public final class Factory implements ItemDriver {
     var input = inputBundle(ctx.itemDir(), n);
     var feedback = previousFeedback(ctx.itemDir(), n);
     var outcome =
-        retry.call(() ->
-            builder.run(ctx.spec(), stubs, input, ctx.branch(), feedback, ctx.attempt().build()));
+        retry.call(() -> {
+          var o =
+              builder.run(ctx.spec(), stubs, input, ctx.branch(), feedback, ctx.attempt().build());
+          if (consumedNothing(o.agent())) {
+            throw new DockerException(
+                "builder agent failed before doing any work (exit "
+                    + o.agent().exitCode()
+                    + "): "
+                    + CommandResult.tail(
+                        Objects.requireNonNullElse(o.agent().resultText(), "").strip(), 5));
+          }
+          return o;
+        });
     var agent = outcome.agent();
     var cost = agent.costUsd() == null ? BigDecimal.ZERO : agent.costUsd();
     var budget = config.budgets().costUsd();
@@ -216,6 +235,17 @@ public final class Factory implements ItemDriver {
     boolean produced = outcome.producedCommits();
     return new Step(
         new Trigger.AgentExited(produced), produced ? null : new FeedbackInput.NoOutput());
+  }
+
+  /**
+   * An agent that errored without timing out and without consuming anything (no cost, at most one
+   * turn; also what a run with no result JSON and a non-zero exit parses to) never reached the
+   * model: a bad or expired key, an API outage, a credit limit. That is infrastructure (spec §9.4),
+   * retried and then blocked, never the builder's NO_OUTPUT.
+   */
+  static boolean consumedNothing(AgentResult agent) {
+    var cost = agent.costUsd() == null ? BigDecimal.ZERO : agent.costUsd();
+    return agent.error() && !agent.timedOut() && cost.signum() == 0 && agent.turns() <= 1;
   }
 
   /**
@@ -435,7 +465,7 @@ public final class Factory implements ItemDriver {
             built.map(e -> str(e.data().get("model"))).orElse(null),
             commitment.examinerModel(),
             built.map(e -> str(e.data().get("imageId"))).orElse(null),
-            config.images().grader());
+            graderImageId);
     var metrics =
         latest(events, "measurement", attempt)
             .filter(e -> e.data().containsKey("lineCoverage"))

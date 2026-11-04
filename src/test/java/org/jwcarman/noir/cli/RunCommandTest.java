@@ -57,6 +57,7 @@ class RunCommandTest {
               listener.transition(new StateChange(A, State.MEASURING, State.GRADING));
               listener.error(A, "docker daemon not reachable");
               listener.error(null, "GitHub listing failed");
+              listener.warning(A + " skipped: repo o/r is not in ~/.noir/config.yaml repos");
             },
             "run",
             "--once");
@@ -64,7 +65,11 @@ class RunCommandTest {
     assertThat(out.toString())
         .isEqualTo(A + " BUILDING → MEASURING\n" + A + " MEASURING → GRADING\n");
     assertThat(err.toString())
-        .isEqualTo(A + ": docker daemon not reachable\nGitHub listing failed\n");
+        .isEqualTo(
+            A
+                + ": docker daemon not reachable\nGitHub listing failed\n"
+                + A
+                + " skipped: repo o/r is not in ~/.noir/config.yaml repos\n");
   }
 
   @Test
