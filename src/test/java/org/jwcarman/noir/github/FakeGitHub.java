@@ -25,6 +25,7 @@ public final class FakeGitHub implements GitHubPort {
   private String defaultBranch = "main";
   private boolean failNextCreateIssue;
   private boolean failNextComment;
+  private boolean failNextSetNoirLabel;
 
   public FakeGitHub withDefaultBranch(String branch) {
     this.defaultBranch = branch;
@@ -37,6 +38,10 @@ public final class FakeGitHub implements GitHubPort {
 
   public void failNextComment() {
     failNextComment = true;
+  }
+
+  public void failNextSetNoirLabel() {
+    failNextSetNoirLabel = true;
   }
 
   public void failNextCreatePullRequest() {
@@ -118,6 +123,10 @@ public final class FakeGitHub implements GitHubPort {
 
   @Override
   public void setNoirLabel(String repo, int issue, Optional<String> label) {
+    if (failNextSetNoirLabel) {
+      failNextSetNoirLabel = false;
+      throw new GitHubException("simulated setNoirLabel failure");
+    }
     var labels = issue(issue).labels();
     NoirLabels.ALL.forEach(l -> labels.remove(l.name()));
     label.ifPresent(labels::add);

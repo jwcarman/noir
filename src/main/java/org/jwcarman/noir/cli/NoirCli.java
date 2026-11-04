@@ -3,7 +3,9 @@ package org.jwcarman.noir.cli;
 import java.io.PrintWriter;
 import java.nio.file.Path;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.jwcarman.noir.NoirHome;
+import org.jwcarman.noir.github.GitHubPort;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -13,11 +15,28 @@ import picocli.CommandLine.Option;
     mixinStandardHelpOptions = true,
     version = "noir 0.1.0",
     description = "A dark software factory.",
-    subcommands = {StatusCommand.class, DraftCommand.class, SealCommand.class})
+    subcommands = {
+      StatusCommand.class,
+      DraftCommand.class,
+      SealCommand.class,
+      RunCommand.class,
+      CancelCommand.class,
+      ResumeCommand.class
+    })
 public final class NoirCli implements Runnable {
 
+  /** The effectful operations behind the commands; tests replace them. */
+  record Operations(
+      Function<NoirHome, SealOperation> sealers,
+      Function<NoirHome, RunOperation> runners,
+      Supplier<GitHubPort> github) {
+    static Operations real() {
+      return new Operations(Wiring::sealOperation, Wiring::runOperation, Wiring::github);
+    }
+  }
+
   private final NoirHome defaultHome;
-  private final Function<NoirHome, SealOperation> sealers;
+  private final Operations ops;
 
   @Option(
       names = "--home",
@@ -25,14 +44,23 @@ public final class NoirCli implements Runnable {
       scope = CommandLine.ScopeType.INHERIT)
   private Path homeOverride;
 
-  NoirCli(NoirHome defaultHome, Function<NoirHome, SealOperation> sealers) {
+  NoirCli(NoirHome defaultHome, Operations ops) {
     this.defaultHome = defaultHome;
-    this.sealers = sealers;
+    this.ops = ops;
   }
 
   /** The sealing operation for the effective home (real wiring unless a test injects one). */
   SealOperation sealer() {
-    return sealers.apply(home());
+    return ops.sealers().apply(home());
+  }
+
+  /** The daemon for the effective home. */
+  RunOperation runner() {
+    return ops.runners().apply(home());
+  }
+
+  GitHubPort github() {
+    return ops.github().get();
   }
 
   /** The effective noir home: {@code --home} if given, else the default. */
@@ -46,7 +74,7 @@ public final class NoirCli implements Runnable {
   }
 
   public static int execute(NoirHome home, PrintWriter out, PrintWriter err, String... args) {
-    return execute(home, out, err, Wiring::sealOperation, args);
+    return execute(home, out, err, Operations.real(), args);
   }
 
   static int execute(
@@ -55,7 +83,13 @@ public final class NoirCli implements Runnable {
       PrintWriter err,
       Function<NoirHome, SealOperation> sealers,
       String... args) {
-    var cmd = new CommandLine(new NoirCli(home, sealers));
+    var real = Operations.real();
+    return execute(home, out, err, new Operations(sealers, real.runners(), real.github()), args);
+  }
+
+  static int execute(
+      NoirHome home, PrintWriter out, PrintWriter err, Operations ops, String... args) {
+    var cmd = new CommandLine(new NoirCli(home, ops));
     cmd.setOut(out);
     cmd.setErr(err);
     int code = cmd.execute(args);

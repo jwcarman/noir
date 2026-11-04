@@ -1,0 +1,189 @@
+package org.jwcarman.noir.factory;
+
+import java.time.Clock;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.github.GitHubPort;
+import org.jwcarman.noir.lifecycle.State;
+import org.jwcarman.noir.store.Event;
+import org.jwcarman.noir.store.Store;
+import org.jwcarman.noir.store.WorkItem;
+
+/**
+ * The {@code noir run} loop (spec §6.1, §9.3). Each pass reconciles every item against GitHub, then
+ * picks up work — {@code SEALED} items whose open issue in a configured repo is labelled {@code
+ * noir:ready}, plus every {@code REWORK} and active item — and drives each one, oldest id first and
+ * one at a time, until it is terminal or {@code BLOCKED}.
+ *
+ * <p>The daemon drives items one {@link ItemDriver#advance} at a time so that it can report every
+ * transition to its {@link Listener} without the factory knowing about output.
+ *
+ * <p>A failure in one item never stops the pass: any {@link RuntimeException} is recorded as a
+ * {@code daemon_error} event (secret values removed), reported, and the issue is labelled {@code
+ * noir:blocked} on a best-effort basis. The item's state is left as it is, so it is retried on the
+ * next pass (whose reconciliation restores the label of its state). Errors propagate.
+ *
+ * <p>A thread interrupt stops the daemon between transitions; the interrupt flag is kept.
+ */
+public final class Daemon {
+  /** Receives what the daemon does. Messages are single-line and free of secret values. */
+  public interface Listener {
+    void transition(StateChange change);
+
+    /**
+     * @param itemId the item the error concerns, or {@code null} for a repo-level failure
+     */
+    void error(String itemId, String message);
+  }
+
+  private static final String READY = "noir:ready";
+
+  private final Store store;
+  private final GitHubPort gh;
+  private final ItemDriver driver;
+  private final Reconciler reconciler;
+  private final NoirConfig config;
+  private final Retry.Sleeper sleeper;
+  private final Clock clock;
+  private final Set<String> secrets;
+  private final Listener listener;
+
+  public Daemon(
+      Store store,
+      GitHubPort gh,
+      ItemDriver driver,
+      Reconciler reconciler,
+      NoirConfig config,
+      Retry.Sleeper sleeper,
+      Clock clock,
+      Set<String> secrets,
+      Listener listener) {
+    this.store = store;
+    this.gh = gh;
+    this.driver = driver;
+    this.reconciler = reconciler;
+    this.config = config;
+    this.sleeper = sleeper;
+    this.clock = clock;
+    this.secrets =
+        secrets.stream()
+            .filter(s -> s != null && !s.isBlank())
+            .collect(Collectors.toUnmodifiableSet());
+    this.listener = listener;
+  }
+
+  /** Runs passes separated by {@code pollInterval} until the thread is interrupted. */
+  public void runForever() {
+    while (!interrupted()) {
+      runOnce();
+      if (interrupted()) {
+        return;
+      }
+      sleeper.sleep(config.pollInterval());
+    }
+  }
+
+  /** One pass: reconcile, then drive every eligible item. Returns how many items moved. */
+  public int runOnce() {
+    var ids = store.itemIds();
+    for (var id : ids) {
+      try {
+        reconciler.reconcile(id).ifPresent(listener::transition);
+      } catch (RuntimeException e) {
+        itemError(id, null, "reconcile", e);
+      }
+    }
+    int advanced = 0;
+    for (var item : eligible(ids)) {
+      if (interrupted()) {
+        break;
+      }
+      if (drive(item)) {
+        advanced++;
+      }
+    }
+    return advanced;
+  }
+
+  private List<WorkItem> eligible(List<String> ids) {
+    var items = new ArrayList<WorkItem>();
+    for (var id : ids) {
+      try {
+        items.add(store.readWorkItem(id));
+      } catch (RuntimeException e) {
+        // Already reported by reconciliation, which reads every item first.
+      }
+    }
+    var ready = new HashMap<String, Set<Integer>>();
+    for (var repo : config.repos()) {
+      if (items.stream().anyMatch(i -> i.state() == State.SEALED && repo.equals(i.repo()))) {
+        try {
+          ready.put(repo, new HashSet<>(gh.openIssuesWithLabel(repo, READY)));
+        } catch (RuntimeException e) {
+          listener.error(null, repo + ": " + Secrets.describe(e, secrets));
+        }
+      }
+    }
+    return items.stream().filter(i -> eligible(i, ready)).toList();
+  }
+
+  private static boolean eligible(WorkItem item, Map<String, Set<Integer>> ready) {
+    return switch (item.state()) {
+      case SEALED -> ready.getOrDefault(item.repo(), Set.of()).contains(item.issueNumber());
+      case REWORK, BUILDING, MEASURING, GRADING -> true;
+      default -> false;
+    };
+  }
+
+  /** Advances until terminal, {@code BLOCKED}, failure or interrupt; true if anything moved. */
+  private boolean drive(WorkItem item) {
+    boolean moved = false;
+    var current = item;
+    while (!current.state().terminal() && current.state() != State.BLOCKED && !interrupted()) {
+      WorkItem next;
+      try {
+        next = driver.advance(current.id());
+      } catch (RuntimeException e) {
+        itemError(current.id(), current, "drive", e);
+        break;
+      }
+      listener.transition(new StateChange(current.id(), current.state(), next.state()));
+      moved = true;
+      current = next;
+    }
+    return moved;
+  }
+
+  /**
+   * Records and reports a failure for one item; for a drive failure also labels the issue {@code
+   * noir:blocked}. Every step is best effort: the daemon goes on with the next item regardless.
+   */
+  private void itemError(String id, WorkItem item, String during, RuntimeException e) {
+    var message = Secrets.describe(e, secrets);
+    listener.error(id, message);
+    try {
+      int attempt = item == null ? 0 : item.attempt();
+      store.appendEvent(
+          Event.of(clock, id, "daemon_error", attempt, Map.of("during", during, "error", message)));
+    } catch (RuntimeException ignored) {
+      // The store itself is failing; the listener already has the message.
+    }
+    if (item != null && item.issueNumber() != null) {
+      try {
+        gh.setNoirLabel(item.repo(), item.issueNumber(), State.BLOCKED.label());
+      } catch (RuntimeException ignored) {
+        // Best effort: reconciliation re-applies the stored state's label next pass anyway.
+      }
+    }
+  }
+
+  private static boolean interrupted() {
+    return Thread.currentThread().isInterrupted();
+  }
+}

@@ -61,7 +61,7 @@ import org.jwcarman.noir.store.WorkItem;
  * directory mounted into the builder, and only ever from {@link FeedbackRenderer}: holdout test
  * names, sources, and compiler output over the holdout suite never reach it.
  */
-public final class Factory {
+public final class Factory implements ItemDriver {
   private final Store store;
   private final Delivery delivery;
   private final BuildRunner builder;
@@ -129,6 +129,7 @@ public final class Factory {
   }
 
   /** Performs exactly one transition and returns the new work item. */
+  @Override
   public WorkItem advance(String itemId) {
     var item = store.readWorkItem(itemId);
     var from = item.state();

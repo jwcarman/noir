@@ -1,15 +1,34 @@
 package org.jwcarman.noir.cli;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
+import java.util.Map;
+import java.util.Set;
 import org.jwcarman.noir.NoirHome;
 import org.jwcarman.noir.agent.AgentAuth;
 import org.jwcarman.noir.agent.ClaudeContainerAgent;
+import org.jwcarman.noir.build.ContainerBuildRunner;
 import org.jwcarman.noir.config.ConfigLoader;
+import org.jwcarman.noir.deliver.GitBranchPublisher;
 import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.docker.Images;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
+import org.jwcarman.noir.factory.Daemon;
+import org.jwcarman.noir.factory.Factory;
+import org.jwcarman.noir.factory.GitBundles;
+import org.jwcarman.noir.factory.GitHubDelivery;
+import org.jwcarman.noir.factory.Reconciler;
+import org.jwcarman.noir.factory.Retry;
+import org.jwcarman.noir.factory.Secrets;
 import org.jwcarman.noir.git.GitCli;
 import org.jwcarman.noir.github.GhCli;
+import org.jwcarman.noir.github.GitHubPort;
+import org.jwcarman.noir.grade.ContainerGradeRunner;
+import org.jwcarman.noir.measure.ContainerMeasureRunner;
 import org.jwcarman.noir.seal.ContainerSealCheckRunner;
 import org.jwcarman.noir.seal.Examiner;
 import org.jwcarman.noir.seal.Sealer;
@@ -38,5 +57,84 @@ final class Wiring {
               Clock.systemUTC());
       return sealer.seal(draftId, repoDir);
     };
+  }
+
+  /**
+   * The daemon. When invoked it checks credentials, ensures the builder and grader images, then
+   * runs one pass or polls until interrupted. Any error message that would carry a credential value
+   * is redacted before it reaches the caller.
+   */
+  static RunOperation runOperation(NoirHome home) {
+    return (once, listener) -> {
+      var auth = AgentAuth.fromEnvironment(System.getenv());
+      Set<String> secrets = Set.copyOf(auth.values());
+      try {
+        var daemon = daemon(home, auth, secrets, listener);
+        if (once) {
+          daemon.runOnce();
+        } else {
+          daemon.runForever();
+        }
+      } catch (RuntimeException e) {
+        var message = e.getMessage() == null ? "" : e.getMessage();
+        if (secrets.stream().anyMatch(message::contains)) {
+          throw new IllegalStateException(Secrets.describe(e, secrets));
+        }
+        throw e;
+      }
+    };
+  }
+
+  private static Daemon daemon(
+      NoirHome home, Map<String, String> auth, Set<String> secrets, Daemon.Listener listener) {
+    var config = ConfigLoader.load(home.config());
+    var runner = new ProcessCommandRunner();
+    var docker = new DockerCli(runner);
+    Images.ensureBuilder(docker, config.images().builder());
+    Images.ensureGrader(docker, config.images().grader());
+    var tmp = tempRoot(home);
+    var store = new Store(home);
+    var gh = new GhCli(runner);
+    var clock = Clock.systemUTC();
+    Retry.Sleeper sleeper = Wiring::sleep;
+    var delivery = new GitHubDelivery(gh, new GitBranchPublisher(runner, tmp));
+    var factory =
+        new Factory(
+            store,
+            delivery,
+            new ContainerBuildRunner(docker, new ClaudeContainerAgent(docker, auth), config),
+            new ContainerMeasureRunner(docker, config),
+            new ContainerGradeRunner(docker, config),
+            new GitBundles(runner, tmp),
+            config,
+            clock,
+            Retry.forConfig(config, sleeper),
+            secrets);
+    var reconciler = new Reconciler(store, gh, delivery, clock);
+    return new Daemon(store, gh, factory, reconciler, config, sleeper, clock, secrets, listener);
+  }
+
+  static GitHubPort github() {
+    return new GhCli(new ProcessCommandRunner());
+  }
+
+  /** noir's scratch directory for host-side git work; absolute, as the bundle tools require. */
+  private static Path tempRoot(NoirHome home) {
+    var tmp = home.root().resolve("tmp").toAbsolutePath();
+    try {
+      Files.createDirectories(tmp);
+    } catch (IOException e) {
+      throw new UncheckedIOException("Cannot create " + tmp, e);
+    }
+    return tmp;
+  }
+
+  /** Sleeps; an interrupt ends the sleep early and stays set, so the daemon loop stops. */
+  private static void sleep(Duration d) {
+    try {
+      Thread.sleep(d);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 }
