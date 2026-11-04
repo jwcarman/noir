@@ -83,8 +83,11 @@ class ContainerGradeRunnerIT {
   record Graded(GradeOutcome outcome, Recording recording) {}
 
   Graded grade(Path classes) throws Exception {
+    return grade(classes, Files.createDirectories(tmp.resolve("deps")));
+  }
+
+  Graded grade(Path classes, Path deps) throws Exception {
     var holdout = fixture("holdout-good");
-    var deps = Files.createDirectories(tmp.resolve("deps"));
     var tags =
         TagIndex.of(HoldoutAnalyzer.analyze(Specs.valid(), holdout, Set.of("com.example.api")));
     var recording = new Recording();
@@ -234,5 +237,117 @@ class ContainerGradeRunnerIT {
         .isEqualTo(
             new GradeOutcome.Failed(
                 List.of(new RequirementResult("R1", 0, 0), new RequirementResult("R2", 0, 0))));
+  }
+
+  static final GradeOutcome ZERO =
+      new GradeOutcome.Failed(
+          List.of(new RequirementResult("R1", 0, 0), new RequirementResult("R2", 0, 0)));
+
+  Path referenceClasses() throws Exception {
+    var classes = tmp.resolve("classes");
+    javac(classes, javaFiles(fixture("reference")));
+    return classes;
+  }
+
+  @Test
+  void correctCounterWithForbiddenActionsStillPassesAndIsDenied() throws Exception {
+    var src = Files.createDirectories(tmp.resolve("sneaky-src/com/example/api"));
+    Files.writeString(
+        src.resolve("Counter.java"),
+        """
+        package com.example.api;
+
+        public class Counter {
+          static {
+            try {
+              java.nio.file.Files.writeString(
+                  java.nio.file.Path.of("/work/out/run-1/TEST-junit-jupiter.xml"), "<testsuite/>");
+            } catch (Throwable t) {
+              t.printStackTrace();
+            }
+            try {
+              Runtime.getRuntime().addShutdownHook(new Thread(() -> {}));
+            } catch (Throwable t) {
+              t.printStackTrace();
+            }
+            try {
+              Runtime.getRuntime().halt(0);
+            } catch (Throwable t) {
+              t.printStackTrace();
+            }
+          }
+
+          private int count;
+
+          public void increment() {
+            count++;
+          }
+
+          public int get() {
+            return count;
+          }
+
+          public void reset() {
+            count = 0;
+          }
+        }
+        """);
+    var classes = tmp.resolve("classes");
+    javac(classes, javaFiles(tmp.resolve("sneaky-src")));
+    var g = grade(classes);
+    assertThat(g.outcome())
+        .isEqualTo(
+            new GradeOutcome.Passed(
+                List.of(new RequirementResult("R1", 3, 3), new RequirementResult("R2", 1, 1))));
+    var artifacts = new GradeArtifacts(tmp.resolve("out"));
+    assertThat(artifacts.read("run-1.log")).contains("AccessControlException");
+    assertThat(artifacts.outcomes("run-1")).hasSize(4);
+  }
+
+  @Test
+  void builderJunitPlatformPropertiesFailsAsForbidden() throws Exception {
+    var classes = referenceClasses();
+    Files.writeString(
+        classes.resolve("junit-platform.properties"),
+        "junit.jupiter.execution.timeout.mode=disabled\n");
+    var g = grade(classes);
+    assertThat(g.outcome()).isEqualTo(ZERO);
+    assertThat(new GradeArtifacts(tmp.resolve("out")).read("forbidden.txt"))
+        .contains("junit-platform.properties");
+  }
+
+  @Test
+  void jarWithClassPathManifestFailsAsForbidden() throws Exception {
+    var classes = referenceClasses();
+    var deps = Files.createDirectories(tmp.resolve("deps"));
+    var content = Files.createDirectories(tmp.resolve("jar-content"));
+    Files.writeString(content.resolve("a.txt"), "a");
+    var manifest = tmp.resolve("m.mf");
+    Files.writeString(manifest, "Manifest-Version: 1.0\nClass-Path: other.jar\n");
+    var r =
+        new ProcessCommandRunner()
+            .run(
+                Command.of(
+                    "jar",
+                    "--create",
+                    "--file",
+                    deps.resolve("x.jar").toString(),
+                    "--manifest",
+                    manifest.toString(),
+                    "-C",
+                    content.toString(),
+                    "."));
+    assertThat(r.ok()).as(r.tail(20)).isTrue();
+    assertThat(grade(classes, deps).outcome()).isEqualTo(ZERO);
+    assertThat(new GradeArtifacts(tmp.resolve("out")).read("forbidden.txt")).contains("Class-Path");
+  }
+
+  @Test
+  void strayNonJarInDepsFailsAsForbidden() throws Exception {
+    var classes = referenceClasses();
+    var deps = Files.createDirectories(tmp.resolve("deps"));
+    Files.writeString(deps.resolve("notes.txt"), "x");
+    assertThat(grade(classes, deps).outcome()).isEqualTo(ZERO);
+    assertThat(new GradeArtifacts(tmp.resolve("out")).read("forbidden.txt")).contains("notes.txt");
   }
 }
