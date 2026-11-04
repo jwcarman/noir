@@ -7,6 +7,7 @@ import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.ArrayInitializerExpr;
 import com.github.javaparser.ast.expr.Expression;
@@ -73,6 +74,7 @@ public final class HoldoutAnalyzer {
     var parser =
         new JavaParser(
             new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
+    var tagsByTest = new LinkedHashMap<String, Set<String>>();
     int totalTests = 0;
     boolean parseFailure = false;
 
@@ -138,6 +140,7 @@ public final class HoldoutAnalyzer {
         }
         totalTests++;
         var tags = new LinkedHashSet<>(tagsOf(method));
+        tagsByTest.put(testKey(pkg, method), tags);
         if (tags.isEmpty()) {
           problems.add(where + ": test has no requirement tag");
         }
@@ -161,7 +164,18 @@ public final class HoldoutAnalyzer {
         }
       });
     }
-    return new HoldoutReport(problems.stream().distinct().toList(), counts, totalTests);
+    return new HoldoutReport(problems.stream().distinct().toList(), counts, totalTests, tagsByTest);
+  }
+
+  private static String testKey(String pkg, MethodDeclaration method) {
+    Node top = method;
+    for (var p = method.getParentNode(); p.isPresent(); p = p.get().getParentNode()) {
+      if (p.get() instanceof TypeDeclaration<?>) {
+        top = p.get();
+      }
+    }
+    var cls = top instanceof TypeDeclaration<?> t ? t.getNameAsString() : "";
+    return (pkg.isEmpty() ? "" : pkg + ".") + cls + "#" + method.getNameAsString();
   }
 
   private static void checkDeterminism(CompilationUnit cu, String rel, List<String> problems) {

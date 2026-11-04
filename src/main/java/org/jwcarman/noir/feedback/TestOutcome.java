@@ -18,4 +18,8 @@ public record TestOutcome(String testId, Set<String> tags, Result result, String
   public TestOutcome {
     tags = Set.copyOf(tags);
   }
+
+  public TestOutcome withTags(Set<String> newTags) {
+    return new TestOutcome(testId, newTags, result, message);
+  }
 }

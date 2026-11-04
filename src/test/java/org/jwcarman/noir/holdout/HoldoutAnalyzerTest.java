@@ -35,6 +35,10 @@ class HoldoutAnalyzerTest {
     assertThat(r.testsPerRequirement())
         .containsExactlyInAnyOrderEntriesOf(Map.of("R1", 2, "R2", 1));
     assertThat(r.totalTests()).isEqualTo(2);
+    var pkg = ItemId.holdoutPackage(Specs.ID);
+    assertThat(r.tagsByTest())
+        .containsExactlyInAnyOrderEntriesOf(
+            Map.of(pkg + ".ValidTest#a", Set.of("R1"), pkg + ".ValidTest#b", Set.of("R1", "R2")));
   }
 
   @Test
