@@ -26,7 +26,7 @@ interface change, not a redesign.
   additional intake channels, non-technical users) is added only once
   measurements justify it (§10).
 - **Trust is measured, not assumed.** Three layers: quality metrics
-  (coverage, mutation score) measured by noir, independent re-verification in
+  (coverage, mutation score, CRAP) measured by noir, independent re-verification in
   clean containers, and a sealed holdout acceptance suite the builder never
   sees.
 
@@ -43,8 +43,8 @@ interface change, not a redesign.
   determinism) and a public hash commitment.
 - Local daemon that builds work items in Docker containers using headless
   Claude Code.
-- Clean-container measurement of coverage (JaCoCo) and mutation score (PIT),
-  scoped to changed classes.
+- Clean-container measurement of coverage (JaCoCo), mutation score (PIT), and
+  CRAP score, scoped to changed classes.
 - Deterministic, network-isolated grader that runs the holdout suite.
 - Pull request (or draft PR on failure) as the endpoint.
 - Event log, `noir status`, optional `noir audit`, and an experiment protocol.
@@ -130,7 +130,7 @@ Schema (v1):
     }
   ],
   "constraints": ["..."],
-  "qualityBar": { "lineCoverage": 0.80, "mutationScore": 0.70 },
+  "qualityBar": { "lineCoverage": 0.80, "mutationScore": 0.70, "maxCrap": 30 },
   "apiStubs": ["src/main/java/.../Foo.java"]
 }
 ```
@@ -374,9 +374,30 @@ In order, stopping at the first failure:
    - Line coverage from JaCoCo, invoked by plugin coordinates on the command
      line (no POM changes needed in the target repo).
    - Mutation score from PIT with `targetClasses` set to the changed classes.
+   - **CRAP score** per method of the changed classes (§7.1). Any method above
+     `maxCrap` fails the bar.
    - Below the bar → `QUALITY_SHORTFALL`.
 4. **Export artifacts:** compiled main classes and the runtime dependency jars
    (`dependency:copy-dependencies`, runtime scope).
+
+### 7.1 CRAP score
+
+CRAP (Change Risk Anti-Patterns; Savoia and Evans, 2007) combines a method's
+cyclomatic complexity with its test coverage:
+
+```
+CRAP(m) = CC(m)² × (1 − cov(m))³ + CC(m)
+```
+
+- `CC(m)` is JaCoCo's `COMPLEXITY` counter for the method (covered + missed).
+- `cov(m)` is the method's **line** coverage from the same JaCoCo report, for
+  consistency with the coverage bar. A method with no line data is treated as
+  0% covered.
+- Computed by noir from `jacoco.xml`; no additional tool is required.
+- Default `maxCrap` is **30**, the threshold proposed by the metric's authors.
+  Synthetic methods (e.g. lambdas' `lambda$…`, record accessors JaCoCo reports)
+  are included as JaCoCo reports them; a high score on one is fixed the same way
+  (simplify or test it).
 
 **Limit:** the builder controls the POM, so a determined builder could
 influence measurement (e.g. coverage excludes). The quality bar is therefore a
@@ -414,7 +435,7 @@ contains only categorized, coarse information:
 |---|---|
 | `BUILD_FAILED` | Maven output tail (the builder's own build, no secrets involved) |
 | `CONTRACT_VIOLATION` | List of missing/changed public signatures vs. the visible stubs |
-| `QUALITY_SHORTFALL` | Measured coverage and mutation score vs. the bar, per changed class |
+| `QUALITY_SHORTFALL` | Measured coverage and mutation score vs. the bar, per changed class; every method over `maxCrap` with its CRAP, complexity, and coverage |
 | `BEHAVIOR_FAILURE` | Per-requirement counts, e.g. `R3: 3/5 passed` |
 | `NO_OUTPUT` | "The previous attempt produced no commits." |
 
@@ -430,7 +451,8 @@ noir (on the host, the only holder of GitHub credentials) acts:
 - **Retries exhausted** → if the branch has commits, push and open a **draft**
   PR; otherwise post an issue comment. Label `noir:failed`.
 
-PR body includes: base SHA, attempt count, coverage and mutation score,
+PR body includes: base SHA, attempt count, coverage, mutation score, and the
+highest CRAP score among changed methods,
 per-requirement holdout results, commitment hash reference, model IDs, and
 image digests. Holdout tests and the reference implementation are never
 pushed.
@@ -451,7 +473,7 @@ pushed.
 ### 9.2 Configuration
 
 `~/.noir/config.yaml`: repos; default quality bar (line coverage 0.80,
-mutation score 0.70); seal discrimination threshold (0.70); per-attempt budgets
+mutation score 0.70, max CRAP 30); seal discrimination threshold (0.70); per-attempt budgets
 (200 turns, 60 min, $10); rework retries (3); poll interval (60 s); container
 resource limits; image digests.
 
@@ -557,5 +579,14 @@ In rough order of expected value:
 4. Additional intake channels (dependency/CVE signals, CI failures, runtime
    monitoring, user-filed issues).
 5. Plain-language example confirmation → non-technical self-service users.
-6. Network egress restriction, concurrency, always-on host.
-7. noir building noir.
+6. **Acceptance mutation** as a seal check: mutate the example values in a
+   requirement and confirm the holdout tests derived from that example fail,
+   proving the examples are actually connected to the tests (idea from Robert C.
+   Martin's Acceptance-Pipeline-Specification). Complements the existing
+   PIT-on-reference discrimination check.
+7. **Duplication detection** as a builder-facing quality signal: structural
+   (AST-fingerprint) similarity between declarations in changed code, reported
+   in feedback (idea from Robert C. Martin's dry4java; implemented
+   independently, since that project carries no license).
+8. Network egress restriction, concurrency, always-on host.
+9. noir building noir.
