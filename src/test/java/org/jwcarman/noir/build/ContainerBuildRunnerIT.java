@@ -138,6 +138,36 @@ class ContainerBuildRunnerIT {
   }
 
   @Test
+  void laterAttemptWithNoNewWorkProducesNoCommits() {
+    var first =
+        buildWith(
+            new ScriptedAgent((n, work) ->
+                BuildFixtures.write(
+                    work.resolve("repo"), Map.of(COUNTER_PATH, BuildFixtures.reference()))),
+            tmp.resolve("a1"));
+    assertThat(first.producedCommits()).isTrue();
+
+    // Attempt 2 starts from attempt 1's bundle (already one commit beyond BASE_SHA) and changes
+    // nothing: "produced commits" is measured against the attempt's input head, not BASE_SHA.
+    var second =
+        new ContainerBuildRunner(docker, new ScriptedAgent((n, work) -> {}), config)
+            .run(
+                BuildFixtures.spec(base.sha()),
+                BuildFixtures.stubs(),
+                first.bundle(),
+                BRANCH,
+                Optional.empty(),
+                tmp.resolve("a2"));
+    assertThat(second.producedCommits()).isFalse();
+    assertThat(second.bundle()).isRegularFile();
+    try (var repo =
+        BundleRepo.open(
+            new ProcessCommandRunner(), second.bundle(), tmp.resolve("inspect").toAbsolutePath())) {
+      assertThat(repo.commitsSince(base.sha(), BRANCH)).hasSize(1);
+    }
+  }
+
+  @Test
   void noOutputMeansNoCommits() {
     var outcome =
         new ContainerBuildRunner(docker, new ScriptedAgent((n, work) -> {}), config)

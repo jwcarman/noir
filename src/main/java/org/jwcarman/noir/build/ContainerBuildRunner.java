@@ -173,7 +173,10 @@ public final class ContainerBuildRunner implements BuildRunner {
     }
   }
 
-  /** The commit count the post step recorded; it is untrusted, so it must be a plain integer. */
+  /**
+   * The number of commits this attempt added beyond its input head, as the post step recorded it;
+   * it is untrusted, so it must be a plain integer.
+   */
   private static int commits(Path file) {
     try {
       if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)

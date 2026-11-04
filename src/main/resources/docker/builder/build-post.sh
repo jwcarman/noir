@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # noir builder handoff (spec §6.4). Runs after the agent, with no network and no credentials.
 # Captures the agent's working tree as ONE commit, "noir: attempt work", on $BRANCH, and writes
-# /work/out.bundle (that branch) and /work/commits.txt (commits beyond $BASE_SHA).
+# /work/out.bundle (that branch) and /work/commits.txt (commits this attempt added beyond its input
+# head: the branch tip in input.bundle, or $BASE_SHA when the bundle has no such branch; 0 or 1).
 #
 # Git never runs in the builder-written repository: its .git (config, filter drivers, includes,
 # attribute files, nested repositories and gitlinks, submodule gitfiles) is attacker-controlled and
@@ -43,6 +44,7 @@ if g rev-parse -q --verify "refs/bundle/heads/$BRANCH^{commit}" >/dev/null; then
 else
   g checkout -q -b "$BRANCH" "$BASE_SHA" || fail "cannot create $BRANCH at $BASE_SHA"
 fi
+INPUT_HEAD=$(g rev-parse -q --verify "refs/heads/$BRANCH^{commit}") || fail "cannot resolve $BRANCH"
 
 # 2. Replace the fresh working tree with the builder's. /work/repo must be a real directory: a
 # missing or symlinked repository is NO_OUTPUT, not a commit that deletes everything.
@@ -76,4 +78,4 @@ if ! g diff --cached --quiet --no-ext-diff; then
   g commit -q --no-verify -m "noir: attempt work" || fail "git commit failed"
 fi
 g bundle create -q /work/out.bundle "refs/heads/$BRANCH" || fail "git bundle failed"
-g rev-list --count "$BASE_SHA..refs/heads/$BRANCH" >/work/commits.txt || fail "git rev-list failed"
+g rev-list --count "$INPUT_HEAD..refs/heads/$BRANCH" >/work/commits.txt || fail "git rev-list failed"
