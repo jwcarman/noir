@@ -183,7 +183,12 @@ public final class Factory implements ItemDriver {
     data.put("from", from.name());
     data.put("to", next.state().name());
     data.put("trigger", step.trigger().getClass().getSimpleName());
-    transition.failure().ifPresent(c -> data.put("failure", c.name()));
+    transition
+        .failure()
+        .ifPresent(c -> {
+          data.put("failure", c.name());
+          data.put("category", c.name());
+        });
     event(itemId, "transition", next.attempt(), data);
     return next;
   }

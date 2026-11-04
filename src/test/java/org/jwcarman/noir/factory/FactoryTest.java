@@ -198,6 +198,36 @@ class FactoryTest {
   }
 
   @Test
+  void measurementReworkTransitionCarriesItsCategory() {
+    measure.modes = n -> n == 1 ? MeasureMode.SHORTFALL : MeasureMode.PASS;
+
+    drive();
+
+    assertThat(transitionsTo("REWORK").getFirst())
+        .containsEntry("failure", "QUALITY_SHORTFALL")
+        .containsEntry("category", "QUALITY_SHORTFALL");
+  }
+
+  @Test
+  void gradeFailureTransitionCarriesBehaviorFailure() {
+    grade.modes = n -> GradeMode.FAIL;
+
+    drive();
+
+    assertThat(transitionsTo("REWORK").getFirst())
+        .containsEntry("failure", "BEHAVIOR_FAILURE")
+        .containsEntry("category", "BEHAVIOR_FAILURE");
+    assertThat(transitionsTo("FAILED").getLast()).containsEntry("category", "BEHAVIOR_FAILURE");
+  }
+
+  private List<java.util.Map<String, Object>> transitionsTo(String state) {
+    return store.readEvents(Specs.ID).stream()
+        .filter(e -> e.type().equals("transition") && state.equals(e.data().get("to")))
+        .map(Event::data)
+        .toList();
+  }
+
+  @Test
   void gradeFailingEveryAttemptEndsFailedWithADraftPullRequest() {
     grade.modes = n -> GradeMode.FAIL;
 
