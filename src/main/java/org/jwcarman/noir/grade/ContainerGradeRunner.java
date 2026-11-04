@@ -12,6 +12,7 @@ import java.util.Map;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.ContainerPort;
 import org.jwcarman.noir.docker.ContainerSpec;
+import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.docker.Mount;
 
 /**
@@ -51,7 +52,10 @@ public final class ContainerGradeRunner implements GradeRunner {
                     "SUITE_TIMEOUT", config.timeouts().suite().toSeconds() + "s"))
             .withNetwork(false)
             .withLimits(config.limits())
-            .withTimeout(Duration.ofMinutes(30));
+            .withTimeout(
+                Duration.ofMinutes(5)
+                    .plus(config.timeouts().suite().multipliedBy(3))
+                    .plus(Duration.ofMinutes(2)));
     var r = docker.run(spec);
     var log = new StringBuilder("== grade (exit ").append(r.exitCode());
     if (r.timedOut()) {
@@ -63,7 +67,39 @@ public final class ContainerGradeRunner implements GradeRunner {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
-    return new GradeArtifacts(outDir);
+    var artifacts = new GradeArtifacts(outDir);
+    if (!r.ok()) {
+      throw new DockerException(
+          "grader container "
+              + (r.timedOut() ? "timed out" : "exited " + r.exitCode())
+              + ":\n"
+              + r.tail(40));
+    }
+    requireSteps(artifacts);
+    return artifacts;
+  }
+
+  /** Every step the script should have finished must have recorded an exit. */
+  private static void requireSteps(GradeArtifacts a) {
+    require(a, "forbidden");
+    if (!a.read("forbidden.txt").isEmpty()) {
+      return;
+    }
+    require(a, "holdout-compile");
+    if (a.exit("holdout-compile").orElseThrow() != 0) {
+      return;
+    }
+    require(a, "run-1");
+    if (a.exit("run-1").orElseThrow() != 0) {
+      require(a, "run-2");
+      require(a, "run-3");
+    }
+  }
+
+  private static void require(GradeArtifacts a, String step) {
+    if (a.exit(step).isEmpty()) {
+      throw new DockerException("grader did not complete step " + step);
+    }
   }
 
   private static void deleteRecursively(Path dir) {

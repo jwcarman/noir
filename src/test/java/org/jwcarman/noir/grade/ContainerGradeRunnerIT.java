@@ -143,4 +143,96 @@ class ContainerGradeRunnerIT {
     assertThat(r1.passed()).isLessThan(r1.total());
     assertThat(g.recording().specs.get(0).network()).isFalse();
   }
+
+  @Test
+  void cheatingCounterCannotForgeTheResult() throws Exception {
+    var src = Files.createDirectories(tmp.resolve("cheat-src/com/example/api"));
+    Files.writeString(
+        src.resolve("Counter.java"),
+        """
+        package com.example.api;
+
+        public class Counter {
+          static {
+            try {
+              java.nio.file.Files.writeString(
+                  java.nio.file.Path.of("/work/out/run-1/TEST-junit-jupiter.xml"), "<testsuite/>");
+            } catch (Throwable t) {
+              // denied by the security manager
+            }
+            try {
+              Runtime.getRuntime().addShutdownHook(new Thread(() -> {}));
+            } catch (Throwable t) {
+              // denied by the security manager
+            }
+            try {
+              Runtime.getRuntime().halt(0);
+            } catch (Throwable t) {
+              // denied by the security manager
+            }
+          }
+
+          private int count;
+
+          public void increment() {
+            count += 2;
+          }
+
+          public int get() {
+            return count;
+          }
+
+          public void reset() {
+            count = 1;
+          }
+        }
+        """);
+    var classes = tmp.resolve("classes");
+    javac(classes, javaFiles(tmp.resolve("cheat-src")));
+    assertThat(grade(classes).outcome()).isInstanceOf(GradeOutcome.Failed.class);
+  }
+
+  @Test
+  void builderAnnotationProcessorDoesNotAffectHoldoutCompilation() throws Exception {
+    var src = Files.createDirectories(tmp.resolve("proc-src/com/example/evil"));
+    Files.writeString(
+        src.resolve("Boom.java"),
+        """
+        package com.example.evil;
+
+        public class Boom extends javax.annotation.processing.AbstractProcessor {
+          public Boom() {
+            throw new IllegalStateException("processor must never run");
+          }
+
+          @Override
+          public boolean process(
+              java.util.Set<? extends javax.lang.model.element.TypeElement> a,
+              javax.annotation.processing.RoundEnvironment r) {
+            return false;
+          }
+        }
+        """);
+    var classes = tmp.resolve("classes");
+    var sources = new ArrayList<>(javaFiles(fixture("reference")));
+    sources.addAll(javaFiles(tmp.resolve("proc-src")));
+    javac(classes, sources);
+    var services = Files.createDirectories(classes.resolve("META-INF/services"));
+    Files.writeString(
+        services.resolve("javax.annotation.processing.Processor"), "com.example.evil.Boom\n");
+    assertThat(grade(classes).outcome()).isInstanceOf(GradeOutcome.Passed.class);
+  }
+
+  @Test
+  void holdoutLookalikeInBuilderClassesFailsWithoutRunning() throws Exception {
+    var classes = tmp.resolve("classes");
+    javac(classes, javaFiles(fixture("reference")));
+    var shadow = Files.createDirectories(classes.resolve("noir/holdout"));
+    Files.writeString(shadow.resolve("Shadow.class"), "x");
+    var g = grade(classes);
+    assertThat(g.outcome())
+        .isEqualTo(
+            new GradeOutcome.Failed(
+                List.of(new RequirementResult("R1", 0, 0), new RequirementResult("R2", 0, 0))));
+  }
 }

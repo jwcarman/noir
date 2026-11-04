@@ -13,7 +13,7 @@ public final class Images {
       List.of("Dockerfile", "toolchain/pom.xml", "seal-check.sh");
 
   static final String GRADER_ROOT = "/docker/grader/";
-  static final List<String> GRADER_FILES = List.of("Dockerfile", "grade.sh");
+  static final List<String> GRADER_FILES = List.of("Dockerfile", "grade.sh", "grader.policy");
 
   private Images() {}
 
@@ -23,20 +23,16 @@ public final class Images {
    * Dockerfile shipped with this version of noir.
    */
   public static String ensureBuilder(ContainerPort docker, String tag) {
-    var context = extract(BUILDER_ROOT, BUILDER_FILES);
-    try {
-      docker.build(context, tag);
-    } finally {
-      deleteRecursively(context);
-    }
-    return docker
-        .imageId(tag)
-        .orElseThrow(() -> new DockerException("Image " + tag + " missing after build"));
+    return ensure(BUILDER_ROOT, BUILDER_FILES, docker, tag);
   }
 
   /** Builds the grader image under {@code tag} and returns its id (see {@link #ensureBuilder}). */
   public static String ensureGrader(ContainerPort docker, String tag) {
-    var context = extract(GRADER_ROOT, GRADER_FILES);
+    return ensure(GRADER_ROOT, GRADER_FILES, docker, tag);
+  }
+
+  private static String ensure(String root, List<String> files, ContainerPort docker, String tag) {
+    var context = extract(root, files);
     try {
       docker.build(context, tag);
     } finally {
