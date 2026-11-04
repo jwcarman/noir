@@ -41,7 +41,14 @@ public final class NoirCli implements Runnable {
         Function<NoirHome, RunOperation> runners,
         Supplier<GitHubPort> github,
         Supplier<Set<String>> secrets) {
-      this(sealers, runners, github, secrets, Wiring::dispositions);
+      this(
+          sealers,
+          runners,
+          github,
+          secrets,
+          home -> {
+            throw new IllegalStateException("dispositions not configured");
+          });
     }
 
     static Operations real() {

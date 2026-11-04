@@ -195,10 +195,14 @@ public final class GhCli implements GitHubPort {
     try {
       var json = Json.mapper().readTree(out);
       var mergedAt = json.path("mergedAt");
+      var head = json.required("headRefOid");
+      if (!head.isTextual() || head.asText().isBlank()) {
+        throw new GitHubException("gh pr view returned no head commit: " + out.trim());
+      }
       return new PullRequestState(
           json.required("number").intValue(),
           PullRequestState.Status.valueOf(json.required("state").asText()),
-          json.required("headRefOid").asText(),
+          head.asText(),
           mergedAt.isNull() || mergedAt.isMissingNode() ? null : Instant.parse(mergedAt.asText()));
     } catch (IOException | RuntimeException e) {
       throw new GitHubException("gh pr view returned unexpected output: " + out.trim());

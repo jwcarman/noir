@@ -12,6 +12,7 @@ import org.jwcarman.noir.json.Json;
 import org.jwcarman.noir.metrics.ExperimentMetrics;
 import org.jwcarman.noir.metrics.ExperimentReport;
 import org.jwcarman.noir.metrics.ItemHistory;
+import org.jwcarman.noir.store.InstanceLock;
 import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 import picocli.CommandLine.Command;
@@ -36,13 +37,7 @@ final class StatusCommand implements Callable<Integer> {
   @Override
   public Integer call() {
     if (refresh) {
-      var err = spec.commandLine().getErr();
-      try {
-        parent.dispositions().refresh(err::println);
-      } catch (RuntimeException e) {
-        err.println("refresh failed: " + Secrets.describe(e, parent.secrets()));
-      }
-      err.flush();
+      refresh();
     }
     var store = new Store(parent.home());
     var items = store.itemIds().stream().map(id -> read(store, id)).toList();
@@ -52,6 +47,25 @@ final class StatusCommand implements Callable<Integer> {
     out.print(json ? json(items, report) : table(items) + experiment(items, report));
     out.flush();
     return 0;
+  }
+
+  /**
+   * Records PR dispositions under the instance lock, so it never races a running daemon's writes.
+   * While {@code noir run} holds the lock the refresh is skipped: the daemon records them itself.
+   */
+  private void refresh() {
+    var err = spec.commandLine().getErr();
+    var secrets = parent.secrets();
+    try (var lock = InstanceLock.tryAcquire(parent.home().lock()).orElse(null)) {
+      if (lock == null) {
+        err.println("noir run is active; it records PR dispositions");
+      } else {
+        parent.dispositions().refresh(w -> err.println(Secrets.redact(w, secrets)));
+      }
+    } catch (RuntimeException e) {
+      err.println("refresh failed: " + Secrets.describe(e, secrets));
+    }
+    err.flush();
   }
 
   /** A work item, or the error that prevented reading it. Exactly one of the two is non-null. */
@@ -105,11 +119,20 @@ final class StatusCommand implements Callable<Integer> {
     try {
       return Json.mapper()
               .writerWithDefaultPrettyPrinter()
-              .writeValueAsString(Map.of("items", rows, "metrics", report.toMap()))
+              .writeValueAsString(document(rows, report))
           + "\n";
     } catch (JsonProcessingException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  /** The JSON document: {@code items} first, then {@code metrics}. */
+  private static Map<String, Object> document(
+      List<Map<String, Object>> rows, ExperimentReport report) {
+    var doc = new LinkedHashMap<String, Object>();
+    doc.put("items", rows);
+    doc.put("metrics", report.toMap());
+    return doc;
   }
 
   private static String table(List<Row> items) {

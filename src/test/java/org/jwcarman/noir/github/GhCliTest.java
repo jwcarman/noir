@@ -334,4 +334,18 @@ class GhCliTest {
     runner.whenArgvStartsWith(List.of("gh", "pr", "view"), ok("not json at all"));
     assertThatThrownBy(() -> gh.pullRequest("r/d", 7)).isInstanceOf(GitHubException.class);
   }
+
+  @Test
+  void pullRequestWithNullHeadIsAGitHubException() {
+    runner.whenArgvStartsWith(
+        List.of("gh", "pr", "view"),
+        ok("{\"number\":7,\"state\":\"MERGED\",\"headRefOid\":null,\"mergedAt\":null}"));
+    assertThatThrownBy(() -> gh.pullRequest("r/d", 7)).isInstanceOf(GitHubException.class);
+    var blankRunner = new FakeCommandRunner();
+    var blank = new GhCli(blankRunner);
+    blankRunner.whenArgvStartsWith(
+        List.of("gh", "pr", "view"),
+        ok("{\"number\":7,\"state\":\"MERGED\",\"headRefOid\":\" \",\"mergedAt\":null}"));
+    assertThatThrownBy(() -> blank.pullRequest("r/d", 7)).isInstanceOf(GitHubException.class);
+  }
 }

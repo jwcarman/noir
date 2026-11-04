@@ -20,11 +20,13 @@ import org.jwcarman.noir.github.FakeGitHub;
 import org.jwcarman.noir.json.Json;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.store.Event;
+import org.jwcarman.noir.store.InstanceLock;
 import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 
 class StatusCommandTest {
   static final String ID = "nr-01JBX4ZQ8K3V0M7N2P5R6S9T1W";
+  static final String SECRET = "sk-ant-secret-value";
   @TempDir Path tmp;
   Store store;
   final FakeGitHub gh = new FakeGitHub();
@@ -139,6 +141,52 @@ class StatusCommandTest {
   }
 
   @Test
+  void refreshWarningsAreRedacted() {
+    store.writeWorkItem(WorkItem.sealed(ID, "jwcarman/demo", 7).withState(State.PR_OPEN));
+    store.appendEvent(
+        Event.of(
+            Clock.systemUTC(),
+            ID,
+            "delivered",
+            1,
+            Map.of("pullRequest", 1, "draft", false, "deliveredAttempt", 1)));
+    gh.failPullRequests("bad token " + SECRET);
+
+    run("status", "--refresh");
+
+    assertThat(stderr.toString()).contains("[redacted]").doesNotContain(SECRET);
+  }
+
+  @Test
+  void refreshSkippedWhileDaemonHoldsTheLock() {
+    store.writeWorkItem(WorkItem.sealed(ID, "jwcarman/demo", 7));
+    try (var lock = InstanceLock.tryAcquire(new NoirHome(tmp).lock()).orElseThrow()) {
+      var out = run("status", "--refresh");
+      assertThat(out).contains(ID);
+    }
+    assertThat(refreshed).isEmpty();
+    assertThat(stderr.toString())
+        .isEqualTo("noir run is active; it records PR dispositions" + System.lineSeparator());
+  }
+
+  @Test
+  void refreshReleasesTheLock() {
+    run("status", "--refresh");
+    assertThat(refreshed).hasSize(1);
+    try (var lock = InstanceLock.tryAcquire(new NoirHome(tmp).lock()).orElse(null)) {
+      assertThat(lock).isNotNull();
+    }
+  }
+
+  @Test
+  void jsonPutsItemsBeforeMetrics() throws Exception {
+    store.writeWorkItem(WorkItem.sealed(ID, "jwcarman/demo", 7));
+    var names = new ArrayList<String>();
+    Json.mapper().readTree(run("status", "--json")).fieldNames().forEachRemaining(names::add);
+    assertThat(names).containsExactly("items", "metrics");
+  }
+
+  @Test
   void statusPrintsExperimentBlock() {
     store.writeWorkItem(WorkItem.sealed(ID, "jwcarman/demo", 7));
     var out = run("status");
@@ -196,7 +244,7 @@ class StatusCommandTest {
                   throw new AssertionError("run must not be invoked");
                 },
             () -> gh,
-            Set::of,
+            () -> Set.of(SECRET),
             home -> {
               refreshed.add(home);
               return new Dispositions(store, gh, new NoBundles(), Clock.systemUTC());

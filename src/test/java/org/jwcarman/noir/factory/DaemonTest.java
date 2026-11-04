@@ -148,6 +148,47 @@ class DaemonTest {
         .satisfies(e -> assertThat(e.data()).containsEntry("disposition", "modified"));
   }
 
+  void deliveredPullRequest(String id) {
+    int issue = issue(REPO, "noir:pr-open");
+    store.writeWorkItem(WorkItem.sealed(id, REPO, issue).withState(State.PR_OPEN).withAttempt(1));
+    int pr = gh.createPullRequest(REPO, "main", "noir/x", "t", "b", false);
+    store.appendEvent(
+        Event.of(
+            clock,
+            id,
+            "delivered",
+            1,
+            Map.of("pullRequest", pr, "draft", false, "deliveredAttempt", 1)));
+  }
+
+  @Test
+  void refreshWarningsAreRedacted() {
+    deliveredPullRequest(A);
+    gh.failPullRequests("bad token " + SECRET);
+
+    daemon().runOnce();
+
+    assertThat(reported)
+        .filteredOn(r -> r.startsWith("warning " + A))
+        .singleElement()
+        .asString()
+        .contains("[redacted]")
+        .doesNotContain(SECRET);
+  }
+
+  @Test
+  void repeatedRefreshWarningIsReportedOnce() {
+    deliveredPullRequest(A);
+    gh.failPullRequests("gh is down");
+    var d = daemon();
+
+    d.runOnce();
+    d.runOnce();
+    d.runOnce();
+
+    assertThat(reported).filteredOn(r -> r.startsWith("warning " + A)).hasSize(1);
+  }
+
   /** Reconciliation that never touches labels, so the daemon's own label filter is observable. */
   void freezeLabels() {
     reconcileDelivery =

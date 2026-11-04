@@ -29,6 +29,7 @@ public final class FakeGitHub implements GitHubPort {
   private boolean failNextCreateIssue;
   private boolean failNextComment;
   private boolean failNextSetNoirLabel;
+  private String pullRequestFailure;
 
   public FakeGitHub withDefaultBranch(String branch) {
     this.defaultBranch = branch;
@@ -49,6 +50,13 @@ public final class FakeGitHub implements GitHubPort {
 
   public void failNextCreatePullRequest() {
     failNextCreatePullRequest = true;
+  }
+
+  /**
+   * Every later {@link #pullRequest} call throws a {@link GitHubException} with {@code message}.
+   */
+  public void failPullRequests(String message) {
+    pullRequestFailure = message;
   }
 
   public List<Pr> pullRequests() {
@@ -160,6 +168,9 @@ public final class FakeGitHub implements GitHubPort {
 
   @Override
   public PullRequestState pullRequest(String repo, int number) {
+    if (pullRequestFailure != null) {
+      throw new GitHubException(pullRequestFailure);
+    }
     var state = prStates.get(number);
     if (state == null) {
       throw new GitHubException("no such pull request: " + number);

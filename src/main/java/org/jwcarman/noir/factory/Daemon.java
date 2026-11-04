@@ -64,7 +64,10 @@ public final class Daemon {
   private final Set<String> secrets;
   private final Listener listener;
 
-  /** Items already warned about, so a polling daemon warns once per item, not once per pass. */
+  /**
+   * Items (and disposition warnings, which carry the item id) already reported, so a polling daemon
+   * warns once per item, not once per pass.
+   */
   private final Set<String> warned = new HashSet<>();
 
   /** This run's container label; the first pass removes leftovers carrying it. */
@@ -145,12 +148,23 @@ public final class Daemon {
     return advanced;
   }
 
-  /** Records PR outcomes; a failure is a warning and never stops the pass. */
+  /**
+   * Records PR outcomes; a failure is a warning and never stops the pass. Warnings are redacted and
+   * each distinct one is reported once per daemon run, so a permanently failing item does not warn
+   * every poll.
+   */
   private void refreshDispositions() {
     try {
-      dispositions.refresh(listener::warning);
+      dispositions.refresh(this::dispositionWarning);
     } catch (RuntimeException e) {
-      listener.warning("dispositions: " + Secrets.describe(e, secrets));
+      dispositionWarning("dispositions: " + Secrets.describe(e, secrets));
+    }
+  }
+
+  private void dispositionWarning(String message) {
+    var redacted = Secrets.redact(message, secrets);
+    if (warned.add("pr_disposition " + redacted)) {
+      listener.warning(redacted);
     }
   }
 
