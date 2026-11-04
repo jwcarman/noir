@@ -66,6 +66,9 @@ public final class Sealer {
       throw new SealException("No draft " + draftId);
     }
     var spec = SpecJson.read(specFile);
+    if (store.readEvents(draft).stream().noneMatch(e -> e.type().equals("seal_requested"))) {
+      store.appendEvent(draft, Event.of(clock, spec.id(), "seal_requested", 0, Map.of()));
+    }
     var progress = readProgress(draft);
     if (progress.issueNumber() != null) {
       // The issue exists, so the suite is frozen: finish publishing without re-examining.

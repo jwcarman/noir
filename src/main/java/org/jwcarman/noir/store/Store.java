@@ -127,7 +127,12 @@ public final class Store {
    * interrupted append) is skipped; any other malformed line is an error.
    */
   public List<Event> readEvents(String id) {
-    var path = itemDir(id).resolve(EVENTS);
+    return readEvents(itemDir(id));
+  }
+
+  /** Reads the events in {@code dir} (an item directory or a draft directory). */
+  public List<Event> readEvents(Path dir) {
+    var path = dir.resolve(EVENTS);
     if (!Files.exists(path)) {
       return List.of();
     }

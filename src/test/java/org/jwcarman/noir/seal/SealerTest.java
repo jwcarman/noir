@@ -135,8 +135,18 @@ class SealerTest {
     assertThat(item.resolve("holdout/noir/holdout/T.java")).exists();
     assertThat(store.readEvents(ID))
         .extracting(Event::type)
-        .containsExactly("examiner_attempt", "sealed");
-    assertThat(store.readEvents(ID).getFirst().data()).containsEntry("ok", true);
+        .containsExactly("seal_requested", "examiner_attempt", "sealed");
+    assertThat(store.readEvents(ID).get(1).data()).containsEntry("ok", true);
+  }
+
+  @Test
+  void sealRecordsSealRequestedOnce() {
+    writeDraft(Specs.valid().withTitle(" "));
+    sealer.seal(ID, clone);
+    sealer.seal(ID, clone);
+    assertThat(store.readEvents(store.draftDir(ID)))
+        .extracting(Event::type)
+        .containsOnlyOnce("seal_requested");
   }
 
   @Test
@@ -157,7 +167,7 @@ class SealerTest {
         .contains("holdout test passes against the stubs (vacuous)");
     assertThat(store.readEvents(ID))
         .extracting(Event::type)
-        .containsExactly("examiner_attempt", "examiner_attempt", "sealed");
+        .containsExactly("seal_requested", "examiner_attempt", "examiner_attempt", "sealed");
   }
 
   @Test
@@ -266,7 +276,7 @@ class SealerTest {
   @Test
   void attemptEventRecordsModelAndImage() {
     sealer.seal(ID, clone);
-    assertThat(store.readEvents(ID).getFirst().data())
+    assertThat(store.readEvents(ID).get(1).data())
         .containsEntry("model", "scripted")
         .containsEntry("imageId", "scripted");
   }
