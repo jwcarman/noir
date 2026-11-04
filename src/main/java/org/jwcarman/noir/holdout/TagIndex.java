@@ -22,6 +22,11 @@ public record TagIndex(Map<String, Set<String>> tagsByTest) {
     var name = junitTestId.substring(hash + 1);
     int paren = name.indexOf('(');
     var method = paren < 0 ? name : name.substring(0, paren);
-    return tagsByTest.getOrDefault(junitTestId.substring(0, hash) + "#" + method, Set.of());
+    var cls = junitTestId.substring(0, hash);
+    int dollar = cls.indexOf('$');
+    if (dollar >= 0) {
+      cls = cls.substring(0, dollar);
+    }
+    return tagsByTest.getOrDefault(cls + "#" + method, Set.of());
   }
 }

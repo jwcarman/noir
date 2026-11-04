@@ -27,6 +27,11 @@ class TagIndexTest {
   }
 
   @Test
+  void nestedClassResolvesToTopLevel() {
+    assertThat(index.tagsFor("pkg.ValidTest$Inner#a()")).containsExactly("R1");
+  }
+
+  @Test
   void unknownIsEmpty() {
     assertThat(index.tagsFor("pkg.ValidTest#zzz()")).isEmpty();
     assertThat(index.tagsFor("pkg.Other#a()")).isEmpty();
