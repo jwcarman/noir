@@ -71,7 +71,12 @@ public final class Store {
   }
 
   public void appendEvent(Event event) {
-    var path = itemDir(event.itemId()).resolve(EVENTS);
+    appendEvent(itemDir(event.itemId()), event);
+  }
+
+  /** Appends an event to the log in {@code dir} (an item directory or a draft directory). */
+  public void appendEvent(Path dir, Event event) {
+    var path = dir.resolve(EVENTS);
     try {
       Files.createDirectories(path.getParent());
       var line = (Json.mapper().writeValueAsString(event) + "\n").getBytes(UTF_8);
