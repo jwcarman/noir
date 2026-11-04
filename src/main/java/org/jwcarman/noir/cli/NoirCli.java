@@ -11,7 +11,8 @@ import picocli.CommandLine.Option;
         name = "noir",
         mixinStandardHelpOptions = true,
         version = "noir 0.1.0",
-        description = "A dark software factory.")
+        description = "A dark software factory.",
+        subcommands = {StatusCommand.class})
 public final class NoirCli implements Runnable {
 
     private final NoirHome defaultHome;
