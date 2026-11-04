@@ -53,7 +53,7 @@ public record NoirConfig(
         Duration.ofSeconds(60),
         5,
         new Limits(2.0, "4g", 512),
-        new Images("noir-builder:0.1.0", null),
+        new Images("noir-builder:0.1.0", "noir-grader:0.1.0"),
         new Timeouts(Duration.ofSeconds(10), Duration.ofMinutes(10)),
         new Examiner(null, 100, Duration.ofMinutes(30), 3));
   }

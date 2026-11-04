@@ -12,6 +12,9 @@ public final class Images {
   static final List<String> BUILDER_FILES =
       List.of("Dockerfile", "toolchain/pom.xml", "seal-check.sh");
 
+  static final String GRADER_ROOT = "/docker/grader/";
+  static final List<String> GRADER_FILES = List.of("Dockerfile", "grade.sh");
+
   private Images() {}
 
   /**
@@ -21,6 +24,19 @@ public final class Images {
    */
   public static String ensureBuilder(ContainerPort docker, String tag) {
     var context = extract(BUILDER_ROOT, BUILDER_FILES);
+    try {
+      docker.build(context, tag);
+    } finally {
+      deleteRecursively(context);
+    }
+    return docker
+        .imageId(tag)
+        .orElseThrow(() -> new DockerException("Image " + tag + " missing after build"));
+  }
+
+  /** Builds the grader image under {@code tag} and returns its id (see {@link #ensureBuilder}). */
+  public static String ensureGrader(ContainerPort docker, String tag) {
+    var context = extract(GRADER_ROOT, GRADER_FILES);
     try {
       docker.build(context, tag);
     } finally {

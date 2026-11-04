@@ -28,7 +28,8 @@ class ConfigLoaderTest {
     assertThat(c.pollInterval()).isEqualTo(Duration.ofSeconds(60));
     assertThat(c.infraRetries()).isEqualTo(5);
     assertThat(c.limits()).isEqualTo(new NoirConfig.Limits(2.0, "4g", 512));
-    assertThat(c.images()).isEqualTo(new NoirConfig.Images("noir-builder:0.1.0", null));
+    assertThat(c.images())
+        .isEqualTo(new NoirConfig.Images("noir-builder:0.1.0", "noir-grader:0.1.0"));
     assertThat(c.examiner())
         .isEqualTo(new NoirConfig.Examiner(null, 100, Duration.ofMinutes(30), 3));
     assertThat(c.timeouts())
