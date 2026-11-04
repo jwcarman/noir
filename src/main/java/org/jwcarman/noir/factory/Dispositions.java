@@ -107,7 +107,10 @@ public final class Dispositions {
     return true;
   }
 
-  /** The tip of the delivered branch in the attempt's bundle, or null if it cannot be read. */
+  /**
+   * The tip of the delivered branch in the attempt's bundle, or null if the bundle file does not
+   * exist.
+   */
   private String deliveredTip(org.jwcarman.noir.store.WorkItem item, Event delivered) {
     if (!(delivered.data().get("deliveredAttempt") instanceof Number attempt)) {
       return null;
@@ -117,12 +120,10 @@ public final class Dispositions {
     if (!Files.isRegularFile(bundle)) {
       return null;
     }
-    try {
-      var spec = SpecJson.read(itemDir.resolve("spec.json"));
-      return bundles.tip(bundle, BranchNames.of(item.issueNumber(), spec.title()));
-    } catch (RuntimeException e) {
-      return null;
-    }
+    // Only a missing bundle means "unavailable"; any read failure propagates so the item is
+    // warned about and retried rather than permanently mis-recorded.
+    var spec = SpecJson.read(itemDir.resolve("spec.json"));
+    return bundles.tip(bundle, BranchNames.of(item.issueNumber(), spec.title()));
   }
 
   private static String oneLine(RuntimeException e) {

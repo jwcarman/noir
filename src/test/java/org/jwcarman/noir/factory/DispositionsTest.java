@@ -36,6 +36,7 @@ class DispositionsTest {
   final List<Integer> lookups = new ArrayList<>();
   final List<String> warnings = new ArrayList<>();
   Dispositions dispositions;
+  boolean tipFails;
 
   /** The fake, counting every pull request lookup. */
   GitHubPort counting() {
@@ -75,6 +76,9 @@ class DispositionsTest {
 
               @Override
               public String tip(Path bundle, String branch) {
+                if (tipFails) {
+                  throw new IllegalStateException("git exploded");
+                }
                 return TIP;
               }
             },
@@ -193,6 +197,23 @@ class DispositionsTest {
     assertThat(only(A).data())
         .containsEntry("disposition", "modified")
         .doesNotContainKey("deliveredSha");
+  }
+
+  @Test
+  void unreadableBundleWarnsAndRecordsNothing() {
+    int pr = delivered(A, false, true);
+    gh.merge(pr, TIP);
+    tipFails = true;
+
+    assertThat(dispositions.refresh(warnings::add)).isEmpty();
+
+    assertThat(warnings).hasSize(1);
+    assertThat(warnings.get(0)).startsWith(A).contains("git exploded");
+    assertThat(store.readEvents(A)).noneMatch(e -> e.type().equals("pr_disposition"));
+
+    tipFails = false;
+    assertThat(dispositions.refresh(warnings::add)).containsExactly(A);
+    assertThat(only(A).data()).containsEntry("disposition", "accepted");
   }
 
   @Test
