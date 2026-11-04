@@ -137,6 +137,11 @@ public final class DraftCheck {
   }
 
   private static void checkPlaceholders(Spec spec, List<String> problems) {
+    todo(spec.title(), "title", problems);
+    todo(spec.intent(), "intent", problems);
+    for (int i = 0; i < spec.constraints().size(); i++) {
+      todo(spec.constraints().get(i), "constraint " + (i + 1), problems);
+    }
     for (var r : spec.requirements()) {
       todo(r.statement(), r.id() + " statement", problems);
       for (int j = 0; j < r.examples().size(); j++) {

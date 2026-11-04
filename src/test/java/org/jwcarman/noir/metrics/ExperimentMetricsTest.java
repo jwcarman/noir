@@ -87,6 +87,19 @@ class ExperimentMetricsTest {
   }
 
   @Test
+  void prOpenWithoutGradeIsExcludedFromFirstPass() {
+    var r =
+        ExperimentMetrics.compute(
+            List.of(
+                item("a", State.PR_OPEN, 0, grade("a", 1, "passed")),
+                item("b", State.PR_OPEN, 0),
+                item("c", State.FAILED, 2)));
+    assertThat(r.firstPassPassed()).isEqualTo(1);
+    assertThat(r.firstPassTotal()).isEqualTo(2);
+    assertThat(r.firstPassRate()).isEqualTo(0.5);
+  }
+
+  @Test
   void reworkCyclesAverageTerminalItems() {
     var r =
         ExperimentMetrics.compute(
@@ -244,6 +257,13 @@ class ExperimentMetricsTest {
     assertThat(r.render()).contains("not eligible: 85% accepted (need 90%)");
     assertThat(ExperimentMetrics.compute(accepted(5, 0)).render())
         .contains("not eligible: 5/20 completed items");
+  }
+
+  @Test
+  void autoMergeTextNeverRoundsUpToThreshold() {
+    var r = ExperimentMetrics.compute(accepted(29, 3));
+    assertThat(r.autoMerge().eligible()).isFalse();
+    assertThat(r.render()).contains("not eligible: 89% accepted (need 90%)");
   }
 
   @Test

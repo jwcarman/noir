@@ -51,6 +51,23 @@ class DraftCheckTest {
   }
 
   @Test
+  void checkReportsTodoInIntent() {
+    var spec =
+        Specs.valid()
+            .withTitle("TODO title")
+            .withIntent("TODO")
+            .withConstraints(List.of("No new dependencies.", "TODO"))
+            .withBaseSha(null);
+    SpecJson.write(spec, draft.resolve("spec.json"));
+    assertThat(DraftCheck.check(draft))
+        .contains(
+            "title still contains a TODO placeholder",
+            "intent still contains a TODO placeholder",
+            "constraint 2 still contains a TODO placeholder")
+        .noneMatch(p -> p.startsWith("constraint 1 "));
+  }
+
+  @Test
   void checkReportsMissingStub() throws IOException {
     Files.delete(draft.resolve("stubs").resolve(STUB_PATH));
     assertThat(DraftCheck.check(draft))

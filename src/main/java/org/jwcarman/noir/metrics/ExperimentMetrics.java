@@ -48,8 +48,10 @@ public final class ExperimentMetrics {
         reworkSum += h.item().reworkCount();
       }
 
-      boolean anyGrade = events.stream().anyMatch(e -> e.type().equals("grade"));
-      if (anyGrade || terminal) {
+      // First pass counts items graded on attempt 1, plus FAILED items (failed before any grade).
+      boolean firstGrade =
+          events.stream().anyMatch(e -> e.type().equals("grade") && e.attempt() == 1);
+      if (firstGrade || state == State.FAILED) {
         gradedItems++;
         boolean passed =
             events.stream()

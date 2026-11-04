@@ -103,8 +103,9 @@ public record ExperimentReport(
     sb.append(String.format("  %-20s %s%n", label, value));
   }
 
+  /** Whole percent, rounded down so a shown rate never reaches a threshold it misses. */
   private static String percent(double rate) {
-    return new BigDecimal(rate * 100).setScale(0, RoundingMode.HALF_UP) + "%";
+    return new BigDecimal(rate * 100).setScale(0, RoundingMode.FLOOR) + "%";
   }
 
   private static String money(BigDecimal v) {
