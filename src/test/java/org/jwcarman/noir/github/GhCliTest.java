@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.jwcarman.noir.exec.CommandResult;
 import org.jwcarman.noir.exec.FakeCommandRunner;
@@ -152,5 +153,149 @@ class GhCliTest {
         List.of("gh", "api"), new CommandResult(1, "", "HTTP 404: Not Found\n", false));
     assertThatThrownBy(() -> gh.defaultBranch("jwcarman/nope"))
         .hasMessage("gh api failed: HTTP 404: Not Found");
+  }
+
+  @Test
+  void openIssuesWithLabel() {
+    runner.whenArgvStartsWith(List.of("gh", "issue", "list"), ok("3\n7\n"));
+    assertThat(gh.openIssuesWithLabel("r/d", "noir:ready")).containsExactly(3, 7);
+    assertThat(runner.commands().getFirst().argv())
+        .containsExactly(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            "r/d",
+            "--label",
+            "noir:ready",
+            "--state",
+            "open",
+            "--json",
+            "number",
+            "--jq",
+            ".[].number",
+            "--limit",
+            "200");
+  }
+
+  @Test
+  void openIssuesWithLabelEmpty() {
+    runner.whenArgvStartsWith(List.of("gh", "issue", "list"), ok("\n"));
+    assertThat(gh.openIssuesWithLabel("r/d", "noir:ready")).isEmpty();
+  }
+
+  @Test
+  void issueOpen() {
+    runner.whenArgvStartsWith(List.of("gh", "issue", "view"), ok("OPEN\n"));
+    assertThat(gh.issueOpen("r/d", 5)).isTrue();
+    assertThat(runner.commands().getFirst().argv())
+        .containsExactly(
+            "gh", "issue", "view", "5", "--repo", "r/d", "--json", "state", "--jq", ".state");
+  }
+
+  @Test
+  void issueClosed() {
+    runner.whenArgvStartsWith(List.of("gh", "issue", "view"), ok("CLOSED\n"));
+    assertThat(gh.issueOpen("r/d", 5)).isFalse();
+  }
+
+  @Test
+  void setNoirLabelAddsOneAndRemovesOthers() {
+    runner.whenArgvStartsWith(List.of("gh", "issue", "edit"), ok(""));
+    gh.setNoirLabel("r/d", 1, Optional.of("noir:building"));
+    assertThat(runner.commands().getFirst().argv())
+        .containsExactly(
+            "gh",
+            "issue",
+            "edit",
+            "1",
+            "--repo",
+            "r/d",
+            "--add-label",
+            "noir:building",
+            "--remove-label",
+            "noir:ready,noir:pr-open,noir:failed,noir:blocked");
+  }
+
+  @Test
+  void setNoirLabelEmptyRemovesAll() {
+    runner.whenArgvStartsWith(List.of("gh", "issue", "edit"), ok(""));
+    gh.setNoirLabel("r/d", 1, Optional.empty());
+    assertThat(runner.commands().getFirst().argv())
+        .containsExactly(
+            "gh",
+            "issue",
+            "edit",
+            "1",
+            "--repo",
+            "r/d",
+            "--remove-label",
+            "noir:ready,noir:building,noir:pr-open,noir:failed,noir:blocked");
+  }
+
+  @Test
+  void findPullRequest() {
+    runner.whenArgvStartsWith(List.of("gh", "pr", "list"), ok("12\n"));
+    assertThat(gh.findPullRequest("r/d", "noir/1-x")).contains(12);
+    assertThat(runner.commands().getFirst().argv())
+        .containsExactly(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            "r/d",
+            "--head",
+            "noir/1-x",
+            "--state",
+            "all",
+            "--json",
+            "number",
+            "--jq",
+            ".[0].number");
+  }
+
+  @Test
+  void findPullRequestNoneForEmptyOrNull() {
+    runner.whenArgvStartsWith(List.of("gh", "pr", "list"), ok("\n"));
+    assertThat(gh.findPullRequest("r/d", "b")).isEmpty();
+    var runner2 = new FakeCommandRunner();
+    runner2.whenArgvStartsWith(List.of("gh", "pr", "list"), ok("null\n"));
+    assertThat(new GhCli(runner2).findPullRequest("r/d", "b")).isEmpty();
+  }
+
+  @Test
+  void createPullRequestParsesNumber() {
+    runner.whenArgvStartsWith(List.of("gh", "pr", "create"), ok("https://github.com/r/d/pull/9\n"));
+    assertThat(gh.createPullRequest("r/d", "main", "noir/1-x", "T", "body", true)).isEqualTo(9);
+    var c = runner.commands().getFirst();
+    assertThat(c.argv())
+        .containsExactly(
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            "r/d",
+            "--base",
+            "main",
+            "--head",
+            "noir/1-x",
+            "--title",
+            "T",
+            "--body-file",
+            "-",
+            "--draft");
+    assertThat(new String(c.stdin(), UTF_8)).isEqualTo("body");
+  }
+
+  @Test
+  void createPullRequestNotDraftAndBadOutput() {
+    runner.whenArgvStartsWith(List.of("gh", "pr", "create"), ok("https://github.com/r/d/pull/9"));
+    gh.createPullRequest("r/d", "main", "h", "T", "b", false);
+    assertThat(runner.commands().getFirst().argv()).doesNotContain("--draft");
+    var runner2 = new FakeCommandRunner();
+    runner2.whenArgvStartsWith(List.of("gh", "pr", "create"), ok("weird"));
+    assertThatThrownBy(() -> new GhCli(runner2).createPullRequest("r/d", "m", "h", "T", "b", false))
+        .isInstanceOf(GitHubException.class)
+        .hasMessageContaining("weird");
   }
 }
