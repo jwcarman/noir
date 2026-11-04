@@ -9,10 +9,24 @@ import java.util.List;
 /** Builds noir's container images from the Dockerfiles bundled on the classpath. */
 public final class Images {
   static final String BUILDER_ROOT = "/docker/builder/";
-  static final List<String> BUILDER_FILES =
-      List.of("Dockerfile", "toolchain/pom.xml", "seal-check.sh");
-
   static final String GRADER_ROOT = "/docker/grader/";
+
+  /**
+   * Build-context files, relative to the image's resource root. An entry starting with {@code /} is
+   * an absolute resource path placed at the context root under its file name, so one resource can
+   * serve several images (the grader's ForbiddenScan is the single source of truth).
+   */
+  static final List<String> BUILDER_FILES =
+      List.of(
+          "Dockerfile",
+          "toolchain/pom.xml",
+          "seal-check.sh",
+          "build-prep.sh",
+          "build-post.sh",
+          "measure.sh",
+          "ClassScan.java",
+          GRADER_ROOT + "ForbiddenScan.java");
+
   static final List<String> GRADER_FILES =
       List.of("Dockerfile", "grade.sh", "grader.policy", "ForbiddenScan.java");
 
@@ -48,11 +62,13 @@ public final class Images {
     try {
       var dir = Files.createTempDirectory("noir-image");
       for (var file : files) {
-        try (var in = Images.class.getResourceAsStream(root + file)) {
+        var shared = file.startsWith("/");
+        var resource = shared ? file : root + file;
+        try (var in = Images.class.getResourceAsStream(resource)) {
           if (in == null) {
-            throw new IllegalStateException("Missing image resource " + root + file);
+            throw new IllegalStateException("Missing image resource " + resource);
           }
-          var target = dir.resolve(file);
+          var target = dir.resolve(shared ? file.substring(file.lastIndexOf('/') + 1) : file);
           Files.createDirectories(target.getParent());
           Files.copy(in, target);
         }

@@ -31,7 +31,15 @@ class BuilderImageIT {
                     "-c",
                     "java -version 2>&1 | head -1; mvn -v | head -1; claude --version; id -u;"
                         + " echo HOME=$HOME; ls /opt/noir/lib/junit /opt/noir/lib/pitest;"
-                        + " test -x /opt/noir/bin/seal-check.sh && echo seal-ok")
+                        + " test -x /opt/noir/bin/seal-check.sh && echo seal-ok;"
+                        + " ls /opt/noir/lib/jacoco;"
+                        + " for f in build-prep.sh build-post.sh measure.sh; do"
+                        + " test -x /opt/noir/bin/$f && echo $f-ok; done;"
+                        + " test -f /opt/noir/bin/ForbiddenScan.java && echo scan-ok;"
+                        + " test -f /opt/noir/bin/ClassScan.java && echo classscan-ok;"
+                        + " for f in /opt/noir/bin/x /opt/noir/lib/x /opt/noir/bin/measure.sh"
+                        + " /opt/noir/lib/jacoco/org.jacoco.cli-nodeps.jar; do"
+                        + " touch $f 2>/dev/null && echo writable:$f; done; echo checked-writes")
                 .withNetwork(false)
                 .withLimits(NoirConfig.defaults().limits()));
     assertThat(r.ok()).as(r.tail(40)).isTrue();
@@ -44,7 +52,16 @@ class BuilderImageIT {
         .contains("junit-platform-console-standalone")
         .contains("pitest-command-line")
         .contains("pitest-junit5-plugin")
-        .contains("seal-ok");
+        .contains("seal-ok")
+        .contains("org.jacoco.agent-runtime.jar")
+        .contains("org.jacoco.cli-nodeps.jar")
+        .contains("build-prep.sh-ok")
+        .contains("build-post.sh-ok")
+        .contains("measure.sh-ok")
+        .contains("scan-ok")
+        .contains("classscan-ok")
+        .contains("checked-writes")
+        .doesNotContain("writable:");
   }
 
   @Test

@@ -1,4 +1,4 @@
-# noir builder image: JDK 21, Maven 3.10.0, Claude Code, JUnit console launcher, PIT.
+# noir builder image: JDK 21, Maven 3.10.0, Claude Code, JUnit console launcher, PIT, JaCoCo.
 # Built locally by noir (org.jwcarman.noir.docker.Images); every version is pinned.
 FROM maven:3.10.0-eclipse-temurin-21-noble
 
@@ -23,11 +23,18 @@ RUN (userdel -r ubuntu 2>/dev/null || true) \
 ENV HOME=/home/noir
 USER noir
 
-# Toolchain jars (JUnit console launcher, PIT) and a warm Maven cache for the plugins noir uses.
+# Toolchain jars (JUnit console launcher, PIT, JaCoCo agent and CLI) and a warm Maven cache for
+# the plugins noir uses.
 COPY --chown=noir:noir toolchain/pom.xml /tmp/toolchain/pom.xml
 RUN mvn -B -q -f /tmp/toolchain/pom.xml package \
  && rm -rf /tmp/toolchain/target
 
-COPY --chown=noir:noir --chmod=755 seal-check.sh /opt/noir/bin/seal-check.sh
+# noir's scripts and scanners. Builder code runs as "noir", so everything under /opt/noir is
+# root-owned and not writable by it.
+COPY --chmod=755 seal-check.sh build-prep.sh build-post.sh measure.sh /opt/noir/bin/
+COPY --chmod=644 ForbiddenScan.java ClassScan.java /opt/noir/bin/
+USER root
+RUN chown -R root:root /opt/noir && chmod -R go-w /opt/noir
+USER noir
 
 WORKDIR /work
