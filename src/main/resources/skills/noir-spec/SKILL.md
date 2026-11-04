@@ -25,6 +25,11 @@ Your job is to get the user's intent into a spec that is complete, precise, and 
   draft directory (`~/.noir/store/drafts/<id>/`): its `spec.json` and the stub sources under its
   `stubs/` directory. Read the repository freely; do not create, edit, or delete files in it, and
   do not commit, branch, or push.
+- **Never look at holdout tests.** The holdout tests are hidden from you as much as from the
+  builder. Never run `noir audit <id>`, never read anything under
+  `~/.noir/store/<id>/holdout` or `~/.noir/store/<id>/reference`, and do not look at holdout
+  tests in any other way (for example in issue comments or logs). `noir audit <id>` is for the
+  human only.
 - **Never ask the user for credentials.** Do not ask them to paste an API key or token into the
   conversation, and never print one. `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` stays
   exported in the user's own terminal.
@@ -43,12 +48,12 @@ noir cannot proceed.
    `git status --porcelain` prints nothing. Derive `<owner/name>` from `git remote get-url origin`
    (it must be a GitHub remote).
 2. **On the default branch, up to date with origin.** noir seals against the **default branch on
-   origin**, not your local checkout. Find the default branch with
-   `git symbolic-ref --short refs/remotes/origin/HEAD` (or `gh repo view --json defaultBranchRef`),
-   run `git fetch origin`, and check that `git branch --show-current` is that branch and that
-   `git rev-parse HEAD` equals `git rev-parse origin/<default branch>`. If the user is on another
-   branch, or HEAD is behind or ahead of origin, stop and say so: you would be reading code the
-   build will never see. Do not switch branches or pull for them.
+   origin**, not your local checkout. In the repository, find the default branch's name with
+   `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` (it prints a bare name such
+   as `main`). Check that `git branch --show-current` prints that name. Then run
+   `git fetch origin` and check that `git rev-parse HEAD` equals `git rev-parse origin/<name>`.
+   If the user is on another branch, or HEAD is behind or ahead of origin, stop and say so: you
+   would be reading code the build will never see. Do not switch branches or pull for them.
 3. **noir knows the repo.** `~/.noir/config.yaml` exists and its `repos:` list contains
    `<owner/name>`. If not, stop and ask the user to add it; `noir run` ignores repos that are not
    listed.
@@ -59,7 +64,23 @@ noir cannot proceed.
 
    Gradle, multi-module builds, and other Java versions are out of scope: say so and stop.
 
-## 2. Read the repository
+## 2. Start the draft
+
+As soon as every precondition passes, before reading the repository or asking anything else,
+create the draft. noir measures the human time a spec takes from this moment to the seal, so
+start it now rather than after the conversation:
+
+```
+noir draft init --repo <owner/name> --title "<title>"
+```
+
+Use a short provisional title taken from the user's first description of the work (if they
+have not described it yet, ask for one sentence first). The title can be changed later by
+editing `title` in the draft's `spec.json`. The command prints `Created draft <id>` followed by
+the draft directory. Remember both: everything you produce goes in that directory and nowhere
+else.
+
+## 3. Read the repository
 
 Before asking anything substantive, build a picture of the code the work will live in:
 
@@ -73,18 +94,19 @@ Before asking anything substantive, build a picture of the code the work will li
 
 Keep this brief. Summarize back only what is relevant to the user's request.
 
-## 3. The conversation
+## 4. The conversation
 
 Work through these in order, one question at a time.
 
-### 3a. Intent
+### 4a. Intent
 
 Ask what they want built and why. Restate it as a short `intent` paragraph (the problem and the
 outcome, not the implementation) and a `title` (an imperative phrase such as
-"Add a bounded LRU cache"). Get agreement before going further. If the request is really
+"Add a bounded LRU cache"); it replaces the provisional title. Get agreement before going
+further. If the request is really
 several independent pieces of work, propose splitting it into separate specs.
 
-### 3b. API surface
+### 4b. API surface
 
 Propose the public types and method signatures, following the repository's conventions. These
 become the **API stubs**. Design them so the hidden tests can exercise the behavior:
@@ -110,7 +132,7 @@ become the **API stubs**. Design them so the hidden tests can exercise the behav
   tested. Concurrency guarantees cannot be tested by the holdout suite; record them as
   constraints if they matter.
 
-### 3c. Requirements and examples
+### 4c. Requirements and examples
 
 Agree on numbered requirements `R1`, `R2`, ... in order. Each requirement:
 
@@ -140,18 +162,12 @@ Leave the `qualityBar` noir generated unless the user asks to change it.
 Before writing files, read the whole spec back to the user in plain language and resolve any
 contradictions or gaps.
 
-## 4. Write the draft
+## 5. Write the draft
 
-Create the draft:
+Fill in the draft created in step 2. Everything below goes in its directory and nowhere else.
 
-```
-noir draft init --repo <owner/name> --title "<title>"
-```
-
-It prints `Created draft <id>` followed by the draft directory. Everything below goes in that
-directory and nowhere else.
-
-**`spec.json`**: edit the generated skeleton and replace every `TODO`. Keep `schemaVersion`,
+**`spec.json`**: edit the generated skeleton and replace every `TODO`; set `title` to the agreed
+title. Keep `schemaVersion`,
 `id`, `repo`, and `qualityBar` as generated, leave `baseSha` as `null` (sealing fills it in
 from origin), and add no other fields. The shape:
 
@@ -191,7 +207,7 @@ file lives at `<draft directory>/stubs/` followed by that same path, for example
   requirements: parameters, return values, `@throws` with exact exception types, and `null`
   handling where decided. Javadoc is part of the spec; the Examiner may test what it states.
 
-## 5. Check and approve
+## 6. Check and approve
 
 Run the mechanical check and fix every problem it reports, repeating until it prints
 `Draft <id> OK`:
@@ -216,7 +232,7 @@ Show the user that output in full and ask them to approve **that exact text**. M
 they ask for, rerun `noir draft check <id>` and `noir draft show <id>`, and ask again. Do not
 seal without explicit approval of the current text.
 
-## 6. Seal
+## 7. Seal
 
 Sealing needs Docker running, `gh` authenticated with `repo` scope, and `ANTHROPIC_API_KEY` or
 `CLAUDE_CODE_OAUTH_TOKEN` exported in the environment that runs noir. Check for the credential
@@ -242,7 +258,7 @@ output. Outcomes:
 - `Sealed <id> as <owner/name>#<n> (commitment <hash>)`: report the issue number and the
   commitment to the user.
 - `Not sealed:` followed by problems: explain them. If they point at an ambiguous, contradictory,
-  or untestable spec, revise the draft with the user, go back through step 5 (check, show,
+  or untestable spec, revise the draft with the user, go back through step 6 (check, show,
   approve), and seal again.
 - Any other error (exit code 2): show the one-line message; it usually names a missing tool,
   Docker, `gh`, or credential problem for the user to fix.
@@ -255,5 +271,6 @@ noir run --once
 ```
 
 and that `noir status` shows progress (`noir run` keeps polling instead of stopping after one
-pass). Once the item has been built, `noir audit <id>` lets them review the hidden holdout tests.
+pass). Once the item has been built, `noir audit <id>` lets them review the hidden holdout tests
+in their own terminal (you never run it).
 Drafts can be listed at any time with `noir draft list`.
