@@ -18,12 +18,14 @@ public final class JacocoReport {
     var doc = Xml.parseJacoco(jacocoXml);
     var covered = new LinkedHashMap<String, int[]>();
     var methods = new LinkedHashMap<String, List<MethodCrap>>();
+    var sources = new LinkedHashMap<String, String>();
     var classes = doc.getElementsByTagName("class");
     for (int i = 0; i < classes.getLength(); i++) {
       var cls = (Element) classes.item(i);
       var top = topLevel(cls.getAttribute("name"));
       var lines = covered.computeIfAbsent(top, k -> new int[2]);
       var list = methods.computeIfAbsent(top, k -> new ArrayList<>());
+      sources.putIfAbsent(top, cls.getAttribute("sourcefilename"));
       for (Node n = cls.getFirstChild(); n != null; n = n.getNextSibling()) {
         if (!(n instanceof Element e)) {
           continue;
@@ -37,8 +39,9 @@ public final class JacocoReport {
       }
     }
     var result = new LinkedHashMap<String, ClassCoverage>();
-    covered.forEach(
-        (name, c) -> result.put(name, new ClassCoverage(name, c[0], c[1], methods.get(name))));
+    covered.forEach((name, c) ->
+        result.put(
+            name, new ClassCoverage(name, c[0], c[1], methods.get(name), sources.get(name))));
     return result;
   }
 

@@ -18,6 +18,10 @@ class MeasureJudgeTest {
   private static final QualityBar BAR = new QualityBar(0.5, 0.5, 30);
   private static final List<String> CHANGED = List.of("com.example.Calc");
 
+  private static final String MUTATIONS_CALC =
+      "<mutations><mutation detected='true'><mutatedClass>com.example.Calc</mutatedClass>"
+          + "</mutation></mutations>";
+
   @TempDir Path out;
   MeasureArtifacts a;
 
@@ -28,7 +32,8 @@ class MeasureJudgeTest {
     Files.copy(FIX.resolve("jacoco.xml"), out.resolve("jacoco.xml"));
     Files.copy(FIX.resolve("javap-stub.txt"), out.resolve("javap-stub.txt"));
     Files.copy(FIX.resolve("javap-built.txt"), out.resolve("javap-built.txt"));
-    write("mutations.xml", "<mutations/>");
+    write("mutations.xml", MUTATIONS_CALC);
+    write("generated.txt", "");
     for (var step : List.of("holdout-sources", "forbidden", "api", "changed", "deps", "pit")) {
       write(step + ".exit", "0\n");
     }
@@ -286,5 +291,76 @@ class MeasureJudgeTest {
     var r = MeasureJudge.judge(a, BAR, List.of());
     assertThat(r).isInstanceOf(MeasureOutcome.Passed.class);
     assertThat(r.m().lineCoverage()).isEqualTo(1.0);
+  }
+
+  private void classFile(String path) throws IOException {
+    var f = out.resolve("export/classes").resolve(path);
+    Files.createDirectories(f.getParent());
+    Files.writeString(f, "x");
+  }
+
+  @Test
+  void emptyButValidJacocoWithRealClassFilesIsNotPassed() throws IOException {
+    write("jacoco.xml", "<report name='x'></report>");
+    classFile("com/example/Calc.class");
+    assertThat(shortfall())
+        .isEqualTo(
+            new FeedbackInput.BuildFailed("Coverage report contains none of the changed classes"));
+  }
+
+  @Test
+  void extraTopLevelClassInDifferentlyNamedFileIsMeasured() throws IOException {
+    write("changed.txt", "src/main/java/com/example/Util.java\n");
+    write(
+        "jacoco.xml",
+        "<report name='x'><package name='com/example'>"
+            + "<class name='com/example/Engine' sourcefilename='Util.java'>"
+            + "<method name='run' desc='()V'><counter type='LINE' missed='4' covered='0'/>"
+            + "<counter type='COMPLEXITY' missed='1' covered='0'/></method>"
+            + "<counter type='LINE' missed='4' covered='0'/></class></package></report>");
+    var s = (MeasureOutcome.Shortfall) MeasureJudge.judge(a, BAR, List.of("com.example.Util"));
+    var q = (FeedbackInput.QualityShortfall) s.input();
+    assertThat(q.classes()).extracting(c -> c.className()).containsExactly("com.example.Engine");
+  }
+
+  @Test
+  void classWithLinesButNoPitEntryScoresZero() throws IOException {
+    write("mutations.xml", "<mutations/>");
+    var s = (MeasureOutcome.Shortfall) MeasureJudge.judge(a, BAR, CHANGED);
+    var q = (FeedbackInput.QualityShortfall) s.input();
+    assertThat(q.classes().get(0).mutationScore()).isEqualTo(0.0);
+  }
+
+  @Test
+  void generatedAnnotationsAreContractViolation() throws IOException {
+    write("generated.txt", "com.example.Calc\n");
+    assertThat(shortfall())
+        .isEqualTo(
+            new FeedbackInput.ContractViolation(
+                List.of(
+                    "Remove @…Generated annotations; generated code is excluded from measurement: com.example.Calc")));
+  }
+
+  @Test
+  void missingGeneratedListIsIncomplete() throws IOException {
+    Files.delete(out.resolve("generated.txt"));
+    assertIncomplete("generated.txt");
+  }
+
+  @Test
+  void stubWithoutJavapBlockIsContractViolation() throws IOException {
+    write("stubs.txt", "com.example.api.Counter\ncom.example.api.Other\n");
+    assertThat(shortfall())
+        .isEqualTo(
+            new FeedbackInput.ContractViolation(
+                List.of("missing: com.example.api.Other (stub did not compile)")));
+  }
+
+  @Test
+  void changedFileWithClassFilesButNoJacocoEntryPassesAsNoCodeWhenReportNotEmpty()
+      throws IOException {
+    classFile("com/example/Marker$Inner.class");
+    var r = MeasureJudge.judge(a, BAR, List.of("com.example.Calc", "com.example.Marker"));
+    assertThat(r).isInstanceOf(MeasureOutcome.Passed.class);
   }
 }

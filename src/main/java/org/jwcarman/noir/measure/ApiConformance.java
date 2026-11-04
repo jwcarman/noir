@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /** Compares {@code javap -public} output of the stubs against the built classes, per class. */
@@ -32,6 +33,11 @@ public final class ApiConformance {
           }
         });
     return missing;
+  }
+
+  /** FQNs of every class declared in the javap output. */
+  public static Set<String> classNames(String javap) {
+    return blocks(javap).keySet();
   }
 
   /** Class FQN to its declaration line followed by its public/protected member lines. */

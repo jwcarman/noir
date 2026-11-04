@@ -2,8 +2,8 @@ package org.jwcarman.noir.measure;
 
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
-import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.jwcarman.noir.feedback.ClassQuality;
@@ -45,6 +45,15 @@ public final class MeasureJudge {
     if (!forbidden.isEmpty()) {
       return violation(forbidden.stream().map(l -> "forbidden in build output: " + l).toList());
     }
+    var generated = lines(a.require("generated.txt"));
+    if (!generated.isEmpty()) {
+      return violation(
+          generated.stream()
+              .map(c ->
+                  "Remove @…Generated annotations; generated code is excluded from measurement: "
+                      + c)
+              .toList());
+    }
     if (api != 0) {
       return violation(
           List.of(
@@ -54,8 +63,15 @@ public final class MeasureJudge {
     var stubs = a.require("stubs.txt");
     var stubJavap = a.require("javap-stub.txt");
     var builtJavap = a.require("javap-built.txt");
-    if (!stubs.isEmpty() && stubJavap.isEmpty()) {
-      return violation(List.of("no public API found for the stub classes"));
+    var declared = ApiConformance.classNames(stubJavap);
+    var uncompiled =
+        lines(stubs).stream()
+            .map(String::strip)
+            .filter(f -> !f.isEmpty() && !declared.contains(f))
+            .map(f -> "missing: " + f + " (stub did not compile)")
+            .toList();
+    if (!uncompiled.isEmpty()) {
+      return violation(uncompiled);
     }
     var mismatches = ApiConformance.mismatches(stubJavap, builtJavap);
     if (!mismatches.isEmpty()) {
@@ -90,6 +106,26 @@ public final class MeasureJudge {
             MeasureOutcome.Metrics.empty());
       }
     }
+    var measured = new LinkedHashMap<String, ClassCoverage>();
+    boolean anyClassFile = false;
+    for (var name : changedClasses) {
+      int dot = name.lastIndexOf('.');
+      var pkg = dot < 0 ? "" : name.substring(0, dot);
+      var source = name.substring(dot + 1) + ".java";
+      var found =
+          coverage.values().stream()
+              .filter(c -> c.packageName().equals(pkg) && c.sourceFile().equals(source))
+              .toList();
+      found.forEach(c -> measured.putIfAbsent(c.className(), c));
+      if (found.isEmpty()) {
+        anyClassFile |= hasClassFiles(a, pkg, name.substring(dot + 1));
+      }
+    }
+    if (coverage.isEmpty() && anyClassFile) {
+      return new MeasureOutcome.Shortfall(
+          new FeedbackInput.BuildFailed("Coverage report contains none of the changed classes"),
+          MeasureOutcome.Metrics.empty());
+    }
     var failing = new ArrayList<ClassQuality>();
     var violations = new ArrayList<MethodCrap>();
     int covered = 0;
@@ -97,34 +133,30 @@ public final class MeasureJudge {
     int detected = 0;
     int mutants = 0;
     double maxCrap = 0;
-    for (var name : changedClasses) {
-      var cov = coverage.get(name);
-      if (cov == null && !Files.isRegularFile(classFile(a, name), LinkOption.NOFOLLOW_LINKS)) {
-        continue; // deleted class: nothing to measure
-      }
-      double lineCov = cov == null ? 1.0 : cov.lineCoverage(); // no executable code
-      if (cov != null) {
-        covered += cov.linesCovered();
-        lines += cov.linesCovered() + cov.linesMissed();
-      }
-      var summary = pit.get(name);
-      double score = summary == null || summary.total() == 0 ? 1.0 : summary.score();
-      if (summary != null) {
+    for (var cov : measured.values()) {
+      double lineCov = cov.lineCoverage();
+      int classLines = cov.linesCovered() + cov.linesMissed();
+      covered += cov.linesCovered();
+      lines += classLines;
+      var summary = pit.get(cov.className());
+      double score;
+      if (summary == null || summary.total() == 0) {
+        score = classLines > 0 ? 0.0 : 1.0;
+      } else {
+        score = summary.score();
         detected += summary.detected();
         mutants += summary.total();
       }
       boolean bad = lineCov < bar.lineCoverage() || score < bar.mutationScore();
-      if (cov != null) {
-        for (var m : cov.methods()) {
-          maxCrap = Math.max(maxCrap, m.crap());
-          if (m.crap() > bar.maxCrap()) {
-            violations.add(m);
-            bad = true;
-          }
+      for (var m : cov.methods()) {
+        maxCrap = Math.max(maxCrap, m.crap());
+        if (m.crap() > bar.maxCrap()) {
+          violations.add(m);
+          bad = true;
         }
       }
       if (bad) {
-        failing.add(new ClassQuality(name, lineCov, score));
+        failing.add(new ClassQuality(cov.className(), lineCov, score));
       }
     }
     var metrics =
@@ -140,8 +172,25 @@ public final class MeasureJudge {
         new FeedbackInput.QualityShortfall(bar, failing, violations), metrics);
   }
 
-  private static Path classFile(MeasureArtifacts a, String fqn) {
-    return a.exportClasses().resolve(fqn.replace('.', '/') + ".class");
+  /**
+   * Whether {@code export/classes/<pkg>/} holds {@code Simple.class} or {@code Simple$*.class}.
+   * Detection is by file name; classes in a differently named file are found through JaCoCo.
+   */
+  private static boolean hasClassFiles(MeasureArtifacts a, String pkg, String simple) {
+    var dir = a.exportClasses().resolve(pkg.replace('.', '/'));
+    if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
+      return false;
+    }
+    try (var files = Files.list(dir)) {
+      return files.anyMatch(p -> {
+        var n = p.getFileName().toString();
+        return Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)
+            && (n.equals(simple + ".class")
+                || (n.startsWith(simple + "$") && n.endsWith(".class")));
+      });
+    } catch (java.io.IOException e) {
+      return false;
+    }
   }
 
   private static MeasureOutcome violation(List<String> mismatches) {
