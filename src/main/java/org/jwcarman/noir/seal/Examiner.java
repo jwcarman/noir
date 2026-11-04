@@ -1,0 +1,93 @@
+package org.jwcarman.noir.seal;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.List;
+import org.jwcarman.noir.agent.AgentPort;
+import org.jwcarman.noir.agent.AgentRequest;
+import org.jwcarman.noir.commit.SealedFileException;
+import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.render.StubSource;
+import org.jwcarman.noir.spec.Spec;
+
+/** Runs the Examiner agent and collects its holdout tests and reference implementation. */
+public final class Examiner {
+  private final AgentPort agent;
+  private final NoirConfig config;
+
+  public Examiner(AgentPort agent, NoirConfig config) {
+    this.agent = agent;
+    this.config = config;
+  }
+
+  public ExaminerOutput attempt(
+      Spec spec,
+      List<StubSource> stubs,
+      List<String> previousProblems,
+      Path attemptDir,
+      Path draftDir) {
+    try {
+      Files.createDirectories(attemptDir.resolve("out/holdout"));
+      Files.createDirectories(attemptDir.resolve("out/reference"));
+      var prompt = ExaminerPrompt.user(spec, stubs, previousProblems);
+      Files.writeString(attemptDir.resolve("PROMPT.md"), prompt);
+      var ex = config.examiner();
+      var result =
+          agent.run(
+              new AgentRequest(
+                  config.images().builder(),
+                  ExaminerPrompt.system(),
+                  prompt,
+                  attemptDir,
+                  ex.model(),
+                  ex.maxTurns(),
+                  ex.wallClock(),
+                  config.limits()));
+      var holdout = draftDir.resolve("holdout");
+      var reference = draftDir.resolve("reference");
+      replace(attemptDir.resolve("out/holdout"), holdout, "holdout");
+      replace(attemptDir.resolve("out/reference"), reference, "reference");
+      return new ExaminerOutput(result, holdout, reference);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  /** Replaces {@code target} with the regular {@code .java} files under {@code source}. */
+  private static void replace(Path source, Path target, String label) throws IOException {
+    deleteRecursively(target);
+    Files.createDirectories(target);
+    if (!Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) {
+      return;
+    }
+    try (var paths = Files.walk(source)) {
+      for (var p : paths.sorted().toList()) {
+        var rel = source.relativize(p);
+        if (Files.isSymbolicLink(p)) {
+          throw new SealedFileException(
+              "Examiner output must not contain symlinks: " + label + "/" + rel);
+        }
+        if (Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS) && p.toString().endsWith(".java")) {
+          var dest = target.resolve(rel.toString());
+          Files.createDirectories(dest.getParent());
+          Files.copy(p, dest);
+        }
+      }
+    }
+  }
+
+  private static void deleteRecursively(Path dir) throws IOException {
+    if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+      return;
+    }
+    try (var paths = Files.walk(dir)) {
+      for (var p : paths.sorted(Comparator.reverseOrder()).toList()) {
+        Files.delete(p);
+      }
+    }
+  }
+}
