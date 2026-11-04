@@ -41,13 +41,18 @@ noir cannot proceed.
 
 1. **A clean local clone of the target repo.** `git rev-parse --show-toplevel` succeeds and
    `git status --porcelain` prints nothing. Derive `<owner/name>` from `git remote get-url origin`
-   (it must be a GitHub remote). noir seals against the **default branch on origin**, not your
-   local checkout, so run `git fetch origin` and make sure the local default branch is not behind
-   it; otherwise you would be reading code the build will never see.
-2. **noir knows the repo.** `~/.noir/config.yaml` exists and its `repos:` list contains
+   (it must be a GitHub remote).
+2. **On the default branch, up to date with origin.** noir seals against the **default branch on
+   origin**, not your local checkout. Find the default branch with
+   `git symbolic-ref --short refs/remotes/origin/HEAD` (or `gh repo view --json defaultBranchRef`),
+   run `git fetch origin`, and check that `git branch --show-current` is that branch and that
+   `git rev-parse HEAD` equals `git rev-parse origin/<default branch>`. If the user is on another
+   branch, or HEAD is behind or ahead of origin, stop and say so: you would be reading code the
+   build will never see. Do not switch branches or pull for them.
+3. **noir knows the repo.** `~/.noir/config.yaml` exists and its `repos:` list contains
    `<owner/name>`. If not, stop and ask the user to add it; `noir run` ignores repos that are not
    listed.
-3. **noir's build assumptions hold** (noir refuses to seal otherwise):
+4. **noir's build assumptions hold** (noir refuses to seal otherwise):
    - a single-module Maven project: `pom.xml` at the root and no `<modules>` in it;
    - Java 21: `maven.compiler.release` is `21` (check the `pom.xml` properties or compiler plugin
      configuration, or run `mvn -q help:evaluate -Dexpression=maven.compiler.release -DforceStdout`).
@@ -100,7 +105,7 @@ become the **API stubs**. Design them so the hidden tests can exercise the behav
   arguments throw in the stub too.
 - **Keep it deterministic.** Holdout tests cannot read the clock, use unseeded randomness, start
   threads, use the network, or touch files outside a temporary directory, and each test has a
-  10 second timeout. If behavior depends on time or randomness, make it injectable (take a
+  10 second timeout by default. If behavior depends on time or randomness, make it injectable (take a
   `java.time.Clock`, a seeded `java.util.random.RandomGenerator`, or a `Path`) so it can be
   tested. Concurrency guarantees cannot be tested by the holdout suite; record them as
   constraints if they matter.
@@ -195,10 +200,11 @@ Run the mechanical check and fix every problem it reports, repeating until it pr
 noir draft check <id>
 ```
 
-Optionally, confirm the stubs compile without touching the working tree: clone the repository to
-a temporary directory outside it (`git clone -q . "$(mktemp -d)/repo"`), copy the draft's
-`stubs/` contents over that clone, run `mvn -B -q -DskipTests compile` there, then delete the
-temporary directory. Sealing does the same compile in Docker, but this catches errors sooner.
+Optionally, confirm the stubs compile without touching the working tree: create a temporary
+directory outside it and keep its path (`tmp=$(mktemp -d)`), clone the repository into it
+(`git clone -q . "$tmp/repo"`), copy the draft's `stubs/` contents over that clone
+(`cp -R <draft directory>/stubs/. "$tmp/repo/"`), run `mvn -B -q -DskipTests compile` in
+`"$tmp/repo"`, then delete the temporary directory (`rm -rf "$tmp"`). Sealing does the same compile in Docker, but this catches errors sooner.
 
 Then render the exact GitHub issue text:
 
@@ -224,8 +230,14 @@ From the repository root:
 noir seal <id> --repo-dir .
 ```
 
-Sealing runs the Examiner and the seal checks in Docker and takes several minutes; allow a long
-timeout. Outcomes:
+Sealing runs the Examiner (up to 3 attempts) and the seal checks in Docker. It often takes longer
+than a foreground command is allowed to run (10 minutes), so **run it as a background command and
+wait for it to exit** before reading its output. Never start a second `noir seal <id>` while one
+is still running. If a seal is interrupted, rerun the same command only after the first process
+has exited. That is safe: if the issue was already created it only finishes publishing,
+otherwise it examines again. If you cannot run it in the
+background, hand the command to the user to run in their own terminal and ask them to share the
+output. Outcomes:
 
 - `Sealed <id> as <owner/name>#<n> (commitment <hash>)`: report the issue number and the
   commitment to the user.
