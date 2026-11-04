@@ -43,4 +43,22 @@ class ApiConformanceTest {
             ApiConformance.mismatches(stub(), stub().replace("  public void", "\t public  void")))
         .isEmpty();
   }
+
+  @Test
+  void membersAreComparedPerClass() {
+    var stub =
+        "public class p.A {\n  public void reset();\n}\npublic class p.B {\n  public void reset();\n}\n";
+    var built = "public class p.A {\n}\npublic class p.B {\n  public void reset();\n}\n";
+    assertThat(ApiConformance.mismatches(stub, built))
+        .containsExactly("missing: public void reset();");
+  }
+
+  @Test
+  void missingClassBlockReportsDeclaration() {
+    var stub =
+        "public class p.A {\n  public void x();\n}\npublic interface p.B<T> extends p.C {\n  public abstract T get();\n}\n";
+    var built = "public class p.A {\n  public void x();\n}\n";
+    assertThat(ApiConformance.mismatches(stub, built))
+        .containsExactly("missing: public interface p.B<T> extends p.C {");
+  }
 }

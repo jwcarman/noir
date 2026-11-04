@@ -49,13 +49,24 @@ class JacocoReportTest {
       throws Exception {
     var secret = dir.resolve("secret.txt");
     java.nio.file.Files.writeString(secret, "TOPSECRET");
-    var xml = dir.resolve("r.xml");
-    java.nio.file.Files.writeString(
-        xml,
-        "<!DOCTYPE report [<!ENTITY x SYSTEM 'file://"
-            + secret.toAbsolutePath()
-            + "'>]><report><package name='a'><class name='a/B'><method name='m' desc='()V'>&x;</method></class></package></report>");
-    var parsed = JacocoReport.parse(xml);
-    assertThat(parsed).containsKey("a.B");
+    try (var server = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+      server.setSoTimeout(500);
+      var xml = dir.resolve("r.xml");
+      java.nio.file.Files.writeString(
+          xml,
+          "<!DOCTYPE report SYSTEM 'http://127.0.0.1:"
+              + server.getLocalPort()
+              + "/x.dtd' [<!ENTITY x SYSTEM 'file://"
+              + secret.toAbsolutePath()
+              + "'><!ENTITY y SYSTEM 'http://127.0.0.1:"
+              + server.getLocalPort()
+              + "/y'>]><report><package name='a'><class name='a/B'>"
+              + "<method name='m' desc='()V'>&x;&y;</method></class></package></report>");
+      var doc = org.jwcarman.noir.reports.Xml.parseJacoco(xml);
+      assertThat(doc.getDocumentElement().getTextContent()).doesNotContain("TOPSECRET");
+      assertThat(JacocoReport.parse(xml)).containsKey("a.B");
+      org.assertj.core.api.Assertions.assertThatThrownBy(server::accept)
+          .isInstanceOf(java.net.SocketTimeoutException.class);
+    }
   }
 }

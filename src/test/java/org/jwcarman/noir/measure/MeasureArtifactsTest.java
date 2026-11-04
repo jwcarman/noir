@@ -1,6 +1,7 @@
 package org.jwcarman.noir.measure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -48,5 +49,30 @@ class MeasureArtifactsTest {
     assertThat(a.report("big.txt")).isPresent();
     assertThat(a.report("link.txt")).isEmpty();
     assertThat(a.report("nope.xml")).isEmpty();
+  }
+
+  @Test
+  void changedClassesSkipPackageAndModuleInfo() throws IOException {
+    Files.writeString(
+        out.resolve("changed.txt"),
+        "src/main/java/a/package-info.java\nsrc/main/java/module-info.java\nsrc/main/java/a/C.java\n");
+    assertThat(new MeasureArtifacts(out).changedClasses()).containsExactly("a.C");
+  }
+
+  @Test
+  void requireDistinguishesEmptyFromMissingAndRejectsBadFiles() throws IOException {
+    var a = new MeasureArtifacts(out);
+    Files.writeString(out.resolve("empty.txt"), "");
+    assertThat(a.require("empty.txt")).isEmpty();
+    assertThatThrownBy(() -> a.require("nope.txt"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("measurement incomplete: nope.txt");
+    Files.write(out.resolve("bin.txt"), new byte[] {(byte) 0xC3, (byte) 0x28});
+    assertThatThrownBy(() -> a.require("bin.txt")).hasMessage("measurement incomplete: bin.txt");
+    assertThatThrownBy(() -> a.requireExit("nope")).hasMessage("measurement incomplete: nope.exit");
+    Files.writeString(out.resolve("bad.exit"), "x");
+    assertThatThrownBy(() -> a.requireExit("bad")).hasMessage("measurement incomplete: bad.exit");
+    Files.writeString(out.resolve("ok.exit"), "3\n");
+    assertThat(a.requireExit("ok")).isEqualTo(3);
   }
 }

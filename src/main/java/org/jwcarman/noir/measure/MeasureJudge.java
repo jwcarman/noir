@@ -1,5 +1,8 @@
 package org.jwcarman.noir.measure;
 
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -16,41 +19,76 @@ public final class MeasureJudge {
 
   public static MeasureOutcome judge(
       MeasureArtifacts a, QualityBar bar, List<String> changedClasses) {
-    var none = MeasureOutcome.Metrics.empty();
-    var exit = a.exit("build");
-    if (exit.isEmpty() || exit.get() != 0) {
+    int build = a.requireExit("build");
+    int holdoutStep = a.requireExit("holdout-sources");
+    int forbiddenStep = a.requireExit("forbidden");
+    int api = a.requireExit("api");
+    int changedStep = a.requireExit("changed");
+    int deps = a.requireExit("deps");
+    int pit = a.requireExit("pit");
+    if (build != 0) {
       return new MeasureOutcome.Shortfall(
-          new FeedbackInput.BuildFailed(a.logTail("build", BUILD_LOG_LINES)), none);
+          new FeedbackInput.BuildFailed(a.logTail("build", BUILD_LOG_LINES)),
+          MeasureOutcome.Metrics.empty());
     }
-    var holdout = lines(a.read("holdout-sources.txt"));
+    requireInfra("holdout-sources", holdoutStep);
+    requireInfra("forbidden", forbiddenStep);
+    requireInfra("changed", changedStep);
+    requireInfra("deps", deps);
+    a.require("changed.txt");
+    var holdout = lines(a.require("holdout-sources.txt"));
     if (!holdout.isEmpty()) {
       return violation(
           holdout.stream().map(p -> "source in reserved package noir.holdout: " + p).toList());
     }
-    var forbidden = lines(a.read("forbidden.txt"));
+    var forbidden = lines(a.require("forbidden.txt"));
     if (!forbidden.isEmpty()) {
       return violation(forbidden.stream().map(l -> "forbidden in build output: " + l).toList());
     }
-    var mismatches = ApiConformance.mismatches(a.read("javap-stub.txt"), a.read("javap-built.txt"));
+    if (api != 0) {
+      return violation(
+          List.of(
+              "API stubs do not compile against the built classes:\n"
+                  + a.logTail("api", BUILD_LOG_LINES)));
+    }
+    var stubs = a.require("stubs.txt");
+    var stubJavap = a.require("javap-stub.txt");
+    var builtJavap = a.require("javap-built.txt");
+    if (!stubs.isEmpty() && stubJavap.isEmpty()) {
+      return violation(List.of("no public API found for the stub classes"));
+    }
+    var mismatches = ApiConformance.mismatches(stubJavap, builtJavap);
     if (!mismatches.isEmpty()) {
       return violation(mismatches);
     }
+    if (pit != 0) {
+      return new MeasureOutcome.Shortfall(
+          new FeedbackInput.BuildFailed(
+              "Mutation testing failed:\n" + a.logTail("pit", BUILD_LOG_LINES)),
+          MeasureOutcome.Metrics.empty());
+    }
     return quality(a, bar, changedClasses);
+  }
+
+  private static void requireInfra(String step, int exit) {
+    if (exit != 0) {
+      throw new IllegalStateException("measurement incomplete: " + step + " exited " + exit);
+    }
   }
 
   private static MeasureOutcome quality(
       MeasureArtifacts a, QualityBar bar, List<String> changedClasses) {
     Map<String, ClassCoverage> coverage = Map.of();
     Map<String, PitSummary> pit = Map.of();
-    try {
-      coverage = a.report("jacoco.xml").map(JacocoReport::parse).orElse(Map.of());
-    } catch (RuntimeException e) {
-      // unparseable report counts as no coverage
-    }
-    try {
-      pit = a.report("mutations.xml").map(PitByClass::parse).orElse(Map.of());
-    } catch (RuntimeException e) {
-      // unparseable report counts as no mutants
+    if (!changedClasses.isEmpty()) {
+      try {
+        coverage = JacocoReport.parse(a.requireReport("jacoco.xml"));
+        pit = PitByClass.parse(a.requireReport("mutations.xml"));
+      } catch (RuntimeException e) {
+        return new MeasureOutcome.Shortfall(
+            new FeedbackInput.BuildFailed("Coverage or mutation report missing or unreadable"),
+            MeasureOutcome.Metrics.empty());
+      }
     }
     var failing = new ArrayList<ClassQuality>();
     var violations = new ArrayList<MethodCrap>();
@@ -61,7 +99,10 @@ public final class MeasureJudge {
     double maxCrap = 0;
     for (var name : changedClasses) {
       var cov = coverage.get(name);
-      double lineCov = cov == null ? 0.0 : cov.lineCoverage();
+      if (cov == null && !Files.isRegularFile(classFile(a, name), LinkOption.NOFOLLOW_LINKS)) {
+        continue; // deleted class: nothing to measure
+      }
+      double lineCov = cov == null ? 1.0 : cov.lineCoverage(); // no executable code
       if (cov != null) {
         covered += cov.linesCovered();
         lines += cov.linesCovered() + cov.linesMissed();
@@ -88,7 +129,7 @@ public final class MeasureJudge {
     }
     var metrics =
         new MeasureOutcome.Metrics(
-            lines == 0 ? (changedClasses.isEmpty() ? 1.0 : 0.0) : covered / (double) lines,
+            lines == 0 ? 1.0 : covered / (double) lines,
             mutants == 0 ? 1.0 : detected / (double) mutants,
             maxCrap,
             changedClasses);
@@ -97,6 +138,10 @@ public final class MeasureJudge {
     }
     return new MeasureOutcome.Shortfall(
         new FeedbackInput.QualityShortfall(bar, failing, violations), metrics);
+  }
+
+  private static Path classFile(MeasureArtifacts a, String fqn) {
+    return a.exportClasses().resolve(fqn.replace('.', '/') + ".class");
   }
 
   private static MeasureOutcome violation(List<String> mismatches) {

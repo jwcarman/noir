@@ -1,6 +1,8 @@
 package org.jwcarman.noir.measure;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -46,6 +48,47 @@ public record MeasureArtifacts(Path outDir) {
     }
   }
 
+  /**
+   * A file's trimmed content; an empty file gives an empty string, but a missing, symlinked,
+   * oversized or non-UTF-8 file is an incomplete measurement.
+   */
+  public String require(String file) {
+    var p = outDir.resolve(file);
+    if (!usable(p, MAX_TEXT_BYTES)) {
+      throw incomplete(file);
+    }
+    try {
+      var bytes = Files.readAllBytes(p);
+      return StandardCharsets.UTF_8
+          .newDecoder()
+          .onMalformedInput(CodingErrorAction.REPORT)
+          .onUnmappableCharacter(CodingErrorAction.REPORT)
+          .decode(ByteBuffer.wrap(bytes))
+          .toString()
+          .strip();
+    } catch (IOException e) {
+      throw incomplete(file);
+    }
+  }
+
+  /** The exit code a step recorded; a missing or malformed {@code .exit} is incomplete. */
+  public int requireExit(String step) {
+    try {
+      return Integer.parseInt(require(step + ".exit"));
+    } catch (NumberFormatException e) {
+      throw incomplete(step + ".exit");
+    }
+  }
+
+  /** The path of a large report, or an incomplete measurement if it is not usable. */
+  public Path requireReport(String file) {
+    return report(file).orElseThrow(() -> incomplete(file));
+  }
+
+  private static IllegalStateException incomplete(String file) {
+    return new IllegalStateException("measurement incomplete: " + file);
+  }
+
   /** The path of a large report (jacoco/mutations XML) if usable, else empty. */
   public Optional<Path> report(String file) {
     var p = outDir.resolve(file);
@@ -59,10 +102,14 @@ public record MeasureArtifacts(Path outDir) {
   /** FQNs of changed main classes listed in {@code changed.txt}; other lines are ignored. */
   public List<String> changedClasses() {
     var classes = new ArrayList<String>();
-    for (var line : read("changed.txt").split("\n")) {
+    for (var line : require("changed.txt").split("\n")) {
       var m = SOURCE.matcher(line.strip());
       if (m.matches()) {
-        classes.add(m.group(1).replace('/', '.'));
+        var fqn = m.group(1).replace('/', '.');
+        var simple = fqn.substring(fqn.lastIndexOf('.') + 1);
+        if (!simple.equals("package-info") && !simple.equals("module-info")) {
+          classes.add(fqn);
+        }
       }
     }
     return classes;
