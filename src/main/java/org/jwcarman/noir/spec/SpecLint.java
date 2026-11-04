@@ -73,6 +73,9 @@ public final class SpecLint {
     if (!(bar.mutationScore() > 0 && bar.mutationScore() <= 1)) {
       problems.add("qualityBar.mutationScore must be in (0, 1]");
     }
+    if (bar.maxCrap() < 1) {
+      problems.add("qualityBar.maxCrap must be at least 1");
+    }
   }
 
   private static void lintStubs(List<String> stubs, List<String> problems) {

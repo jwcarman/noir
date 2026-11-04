@@ -20,7 +20,7 @@ class ConfigLoaderTest {
     var c = ConfigLoader.load(tmp.resolve("config.yaml"));
     assertThat(c).isEqualTo(NoirConfig.defaults());
     assertThat(c.repos()).isEmpty();
-    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.80, 0.70));
+    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.80, 0.70, 30));
     assertThat(c.sealDiscrimination()).isEqualTo(0.70);
     assertThat(c.budgets())
         .isEqualTo(new NoirConfig.Budgets(200, Duration.ofMinutes(60), new BigDecimal("10.00")));
@@ -28,7 +28,9 @@ class ConfigLoaderTest {
     assertThat(c.pollInterval()).isEqualTo(Duration.ofSeconds(60));
     assertThat(c.infraRetries()).isEqualTo(5);
     assertThat(c.limits()).isEqualTo(new NoirConfig.Limits(2.0, "4g", 512));
-    assertThat(c.images()).isEqualTo(new NoirConfig.Images(null, null));
+    assertThat(c.images()).isEqualTo(new NoirConfig.Images("noir-builder:0.1.0", null));
+    assertThat(c.examiner())
+        .isEqualTo(new NoirConfig.Examiner(null, 100, Duration.ofMinutes(30), 3));
     assertThat(c.timeouts())
         .isEqualTo(new NoirConfig.Timeouts(Duration.ofSeconds(10), Duration.ofMinutes(10)));
   }
@@ -45,10 +47,21 @@ class ConfigLoaderTest {
         """);
     var c = ConfigLoader.load(tmp.resolve("config.yaml"));
     assertThat(c.repos()).containsExactly("jwcarman/demo");
-    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.80, 0.6));
+    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.80, 0.6, 30));
     assertThat(c.budgets().wallClock()).isEqualTo(Duration.ofMinutes(30));
     assertThat(c.budgets().turns()).isEqualTo(200);
     assertThat(c.pollInterval()).isEqualTo(Duration.ofMinutes(2));
+  }
+
+  @Test
+  void examinerAndMaxCrapOverlay() throws IOException {
+    Files.writeString(
+        tmp.resolve("config.yaml"),
+        "examiner: { model: claude-opus-5-5, attempts: 2 }\nqualityBar: { maxCrap: 15 }\n");
+    var c = ConfigLoader.load(tmp.resolve("config.yaml"));
+    assertThat(c.examiner())
+        .isEqualTo(new NoirConfig.Examiner("claude-opus-5-5", 100, Duration.ofMinutes(30), 2));
+    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.80, 0.70, 15));
   }
 
   @Test

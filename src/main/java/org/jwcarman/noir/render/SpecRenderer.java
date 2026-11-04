@@ -58,6 +58,7 @@ public final class SpecRenderer {
     sb.append("- Mutation score ≥ ")
         .append(Math.round(spec.qualityBar().mutationScore() * 100))
         .append("%\n");
+    sb.append("- Max CRAP score per method ≤ ").append(spec.qualityBar().maxCrap()).append('\n');
     return sb.toString();
   }
 

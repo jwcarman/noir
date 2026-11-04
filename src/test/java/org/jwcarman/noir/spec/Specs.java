@@ -31,7 +31,7 @@ public final class Specs {
                     new Example(
                         "an empty cache", "put(\"\", 1)", "throws IllegalArgumentException")))),
         List.of("no new dependencies"),
-        new QualityBar(0.80, 0.70),
+        new QualityBar(0.80, 0.70, 30),
         List.of("src/main/java/com/example/api/Foo.java"));
   }
 

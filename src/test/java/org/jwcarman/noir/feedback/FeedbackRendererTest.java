@@ -41,7 +41,7 @@ class FeedbackRendererTest {
         FeedbackRenderer.render(
             1,
             new FeedbackInput.QualityShortfall(
-                new QualityBar(0.8, 0.7),
+                new QualityBar(0.8, 0.7, 30),
                 List.of(new ClassQuality("com.example.Foo", 0.6234, 0.5))));
     assertThat(md)
         .startsWith("# Feedback on attempt 1: QUALITY_SHORTFALL")

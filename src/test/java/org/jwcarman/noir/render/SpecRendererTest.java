@@ -39,7 +39,8 @@ class SpecRendererTest {
             "- no new dependencies",
             "## Quality bar",
             "Line coverage ≥ 80%",
-            "Mutation score ≥ 70%");
+            "Mutation score ≥ 70%",
+            "Max CRAP score per method ≤ 30");
   }
 
   @Test

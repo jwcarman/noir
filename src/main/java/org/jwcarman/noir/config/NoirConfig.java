@@ -17,7 +17,8 @@ public record NoirConfig(
     int infraRetries,
     Limits limits,
     Images images,
-    Timeouts timeouts) {
+    Timeouts timeouts,
+    Examiner examiner) {
 
   public NoirConfig {
     repos = repos == null ? List.of() : List.copyOf(repos);
@@ -39,17 +40,21 @@ public record NoirConfig(
   /** Holdout test timeouts. */
   public record Timeouts(Duration perTest, Duration suite) {}
 
+  /** Examiner agent settings. {@code model == null} means the Claude CLI default. */
+  public record Examiner(String model, int maxTurns, Duration wallClock, int attempts) {}
+
   public static NoirConfig defaults() {
     return new NoirConfig(
         List.of(),
-        new QualityBar(0.80, 0.70),
+        new QualityBar(0.80, 0.70, 30),
         0.70,
         new Budgets(200, Duration.ofMinutes(60), new BigDecimal("10.00")),
         3,
         Duration.ofSeconds(60),
         5,
         new Limits(2.0, "4g", 512),
-        new Images(null, null),
-        new Timeouts(Duration.ofSeconds(10), Duration.ofMinutes(10)));
+        new Images("noir-builder:0.1.0", null),
+        new Timeouts(Duration.ofSeconds(10), Duration.ofMinutes(10)),
+        new Examiner(null, 100, Duration.ofMinutes(30), 3));
   }
 }

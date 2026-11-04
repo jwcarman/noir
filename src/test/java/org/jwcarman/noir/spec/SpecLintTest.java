@@ -56,10 +56,16 @@ class SpecLintTest {
 
   @Test
   void qualityBarInRange() {
-    assertThat(SpecLint.lint(Specs.valid().withQualityBar(new QualityBar(1.2, 0))))
+    assertThat(SpecLint.lint(Specs.valid().withQualityBar(new QualityBar(1.2, 0, 30))))
         .containsExactlyInAnyOrder(
             "qualityBar.lineCoverage must be in (0, 1]",
             "qualityBar.mutationScore must be in (0, 1]");
+  }
+
+  @Test
+  void maxCrapAtLeastOne() {
+    assertThat(SpecLint.lint(Specs.valid().withQualityBar(new QualityBar(0.8, 0.7, 0))))
+        .containsExactly("qualityBar.maxCrap must be at least 1");
   }
 
   @Test
