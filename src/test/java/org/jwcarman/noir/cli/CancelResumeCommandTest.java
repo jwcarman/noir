@@ -189,6 +189,7 @@ class CancelResumeCommandTest {
             store,
             gh,
             new org.jwcarman.noir.docker.FakeContainerPort(spec -> null),
+            "noir.run=test",
             id -> {
               throw new IllegalStateException("boom");
             },

@@ -94,7 +94,17 @@ class DaemonTest {
             defaults.examiner());
     var reconciler = new Reconciler(store, gh, reconcileDelivery, clock);
     return new Daemon(
-        store, gh, docker, driver, reconciler, config, sleeper, clock, Set.of(SECRET), listener);
+        store,
+        gh,
+        docker,
+        "noir.run=h1",
+        driver,
+        reconciler,
+        config,
+        sleeper,
+        clock,
+        Set.of(SECRET),
+        listener);
   }
 
   /** Reconciliation that never touches labels, so the daemon's own label filter is observable. */
@@ -167,14 +177,14 @@ class DaemonTest {
   void removesLeftoverNoirContainersOnceBeforeTheFirstPass() {
     item(A, REPO, issue(REPO), State.GRADING);
     // Checked inside the drive: an AssertionError is not caught as an item failure.
-    driver.failures.put(A, id -> assertThat(docker.removedLabels()).containsExactly("noir.run=1"));
+    driver.failures.put(A, id -> assertThat(docker.removedLabels()).containsExactly("noir.run=h1"));
     var daemon = daemon();
     assertThat(docker.removedLabels()).isEmpty();
 
     daemon.runOnce();
     daemon.runOnce();
 
-    assertThat(docker.removedLabels()).containsExactly("noir.run=1");
+    assertThat(docker.removedLabels()).containsExactly("noir.run=h1");
   }
 
   @Test

@@ -8,7 +8,7 @@ import org.jwcarman.noir.config.NoirConfig;
 
 /**
  * How to run one container. {@code labels} are Docker labels; every container also gets {@link
- * DockerCli#RUN_LABEL}.
+ * DockerCli}'s owner label.
  */
 public record ContainerSpec(
     String image,

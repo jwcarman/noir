@@ -9,13 +9,14 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.jwcarman.noir.NoirHome;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.exec.CommandResult;
 import org.jwcarman.noir.exec.FakeCommandRunner;
 
 class DockerCliTest {
   final FakeCommandRunner runner = new FakeCommandRunner();
-  final DockerCli docker = new DockerCli(runner, () -> "noir-test1");
+  final DockerCli docker = new DockerCli(runner, "noir.run=h1", () -> "noir-test1");
 
   static CommandResult ok(String out) {
     return new CommandResult(0, out, "", false, false);
@@ -74,7 +75,7 @@ class DockerCliTest {
             "--network",
             "none",
             "--label",
-            "noir.run=1",
+            "noir.run=h1",
             "--label",
             "noir.item=nr-01ABC",
             "-w",
@@ -253,8 +254,22 @@ class DockerCliTest {
     runner.whenArgvStartsWith(List.of("docker", "run"), ok("ok"));
     docker.run(ContainerSpec.of("img", "true"));
     var argv = runner.commands().get(1).argv();
-    assertThat(argv).containsSequence("--label", "noir.run=1");
+    assertThat(argv).containsSequence("--label", "noir.run=h1");
     assertThat(argv).filteredOn(a -> a.equals("--label")).hasSize(1);
+  }
+
+  @Test
+  void runAndSealLabelsAreDistinctAndScopedToTheirHome(@TempDir Path dir) {
+    var a = new NoirHome(dir.resolve("a"));
+    var b = new NoirHome(dir.resolve("b"));
+    assertThat(DockerCli.runLabel(a)).startsWith("noir.run=").isEqualTo(DockerCli.runLabel(a));
+    assertThat(DockerCli.sealLabel(a)).startsWith("noir.seal=");
+    assertThat(DockerCli.runLabel(a)).isNotEqualTo(DockerCli.runLabel(b));
+    assertThat(DockerCli.runLabel(a).substring("noir.run=".length()))
+        .isEqualTo(DockerCli.sealLabel(a).substring("noir.seal=".length()));
+    // The same home spelled differently is still the same home.
+    assertThat(DockerCli.runLabel(new NoirHome(dir.resolve("a/../a"))))
+        .isEqualTo(DockerCli.runLabel(a));
   }
 
   @Test
@@ -262,13 +277,13 @@ class DockerCliTest {
     runner.whenArgvStartsWith(List.of("docker", "ps"), ok("abc123\ndef456\n"));
     runner.whenArgvStartsWith(List.of("docker", "rm"), ok("abc123\ndef456\n"));
 
-    int removed = docker.removeLabelled(DockerCli.RUN_LABEL);
+    int removed = docker.removeLabelled("noir.run=h1");
 
     assertThat(removed).isEqualTo(2);
     assertThat(runner.commands())
         .extracting(c -> c.argv())
         .containsExactly(
-            List.of("docker", "ps", "-aq", "--filter", "label=noir.run=1"),
+            List.of("docker", "ps", "-aq", "--filter", "label=noir.run=h1"),
             List.of("docker", "rm", "-f", "abc123", "def456"));
   }
 
@@ -276,7 +291,7 @@ class DockerCliTest {
   void removeLabelledWithNothingLeftRunsNoRm() {
     runner.whenArgvStartsWith(List.of("docker", "ps"), ok("\n"));
 
-    assertThat(docker.removeLabelled(DockerCli.RUN_LABEL)).isZero();
+    assertThat(docker.removeLabelled("noir.run=h1")).isZero();
     assertThat(runner.commands()).hasSize(1);
   }
 
@@ -286,7 +301,7 @@ class DockerCliTest {
     runner.whenArgvStartsWith(
         List.of("docker", "rm"), new CommandResult(1, "", "permission denied", false, false));
 
-    assertThatThrownBy(() -> docker.removeLabelled(DockerCli.RUN_LABEL))
+    assertThatThrownBy(() -> docker.removeLabelled("noir.run=h1"))
         .isInstanceOf(DockerException.class)
         .hasMessageContaining("permission denied");
   }
@@ -297,7 +312,7 @@ class DockerCliTest {
         List.of("docker", "ps"),
         new CommandResult(1, "", "Cannot connect to the Docker daemon", false, false));
 
-    assertThatThrownBy(() -> docker.removeLabelled(DockerCli.RUN_LABEL))
+    assertThatThrownBy(() -> docker.removeLabelled("noir.run=h1"))
         .isInstanceOf(DockerException.class)
         .hasMessageContaining("Docker is not running");
   }

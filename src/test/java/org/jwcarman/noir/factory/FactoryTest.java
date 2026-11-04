@@ -489,6 +489,20 @@ class FactoryTest {
   }
 
   @Test
+  void agentKilledAfterCommittingWorkIsStillABuilderOutcome() {
+    // An OOM- or self-killed builder reports no result JSON, but its commits are real work.
+    build.produces = n -> true;
+    build.agent = n -> new AgentResult(137, true, false, BigDecimal.ZERO, 0, "default", "", "sha");
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.PR_OPEN);
+    assertThat(build.calls).hasSize(1);
+    assertThat(sleeps).isEmpty();
+    assertThat(eventTypes()).doesNotContain("infra_failure");
+  }
+
+  @Test
   void agentThatTimedOutWithNothingReportedIsStillABuilderOutcome() {
     build.produces = n -> false;
     build.agent = n -> new AgentResult(137, true, true, BigDecimal.ZERO, 0, "default", "", "sha");

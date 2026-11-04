@@ -43,7 +43,7 @@ final class Wiring {
       var auth = AgentAuth.fromEnvironment(System.getenv());
       var config = ConfigLoader.load(home.config());
       var runner = new ProcessCommandRunner();
-      var docker = new DockerCli(runner);
+      var docker = new DockerCli(runner, DockerCli.sealLabel(home));
       Images.ensureBuilder(docker, config.images().builder());
       var sealer =
           new Sealer(
@@ -78,7 +78,8 @@ final class Wiring {
       NoirHome home, Map<String, String> auth, Set<String> secrets, Daemon.Listener listener) {
     var config = ConfigLoader.load(home.config());
     var runner = new ProcessCommandRunner();
-    var docker = new DockerCli(runner);
+    var runLabel = DockerCli.runLabel(home);
+    var docker = new DockerCli(runner, runLabel);
     Images.ensureBuilder(docker, config.images().builder());
     var graderImageId = Images.ensureGrader(docker, config.images().grader());
     var tmp = tempRoot(home);
@@ -102,7 +103,17 @@ final class Wiring {
             secrets);
     var reconciler = new Reconciler(store, gh, delivery, clock);
     return new Daemon(
-        store, gh, docker, factory, reconciler, config, sleeper, clock, secrets, listener);
+        store,
+        gh,
+        docker,
+        runLabel,
+        factory,
+        reconciler,
+        config,
+        sleeper,
+        clock,
+        secrets,
+        listener);
   }
 
   /** Every credential value in the environment that agents could receive. */

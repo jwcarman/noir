@@ -1,15 +1,21 @@
 package org.jwcarman.noir.docker;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
+import org.jwcarman.noir.NoirHome;
 import org.jwcarman.noir.exec.Command;
 import org.jwcarman.noir.exec.CommandResult;
 import org.jwcarman.noir.exec.CommandRunner;
@@ -20,25 +26,55 @@ import org.jwcarman.noir.exec.ToolMissingException;
  * privileges, with resource limits, and never with the Docker socket mounted (spec §6.2).
  */
 public final class DockerCli implements ContainerPort {
-  /**
-   * Every container noir runs carries this label, so containers orphaned by a hard kill of noir can
-   * be found and removed at the next {@code noir run}.
-   */
-  public static final String RUN_LABEL = "noir.run=1";
+  /** Owner label for containers started outside {@code noir run} and {@code noir seal} (tests). */
+  public static final String ADHOC_LABEL = "noir.adhoc=1";
 
   private static final List<String> DAEMON_DOWN =
       List.of("Cannot connect to the Docker daemon", "failed to connect to the docker API");
 
   private final CommandRunner runner;
+  private final String ownerLabel;
   private final Supplier<String> names;
 
   public DockerCli(CommandRunner runner) {
-    this(runner, () -> "noir-" + UUID.randomUUID().toString().substring(0, 12));
+    this(runner, ADHOC_LABEL);
   }
 
-  DockerCli(CommandRunner runner, Supplier<String> names) {
+  /**
+   * Every container this instance runs carries {@code ownerLabel}, so containers orphaned by a hard
+   * kill of noir can be found and removed later by whoever owns them, and only by them.
+   */
+  public DockerCli(CommandRunner runner, String ownerLabel) {
+    this(runner, ownerLabel, () -> "noir-" + UUID.randomUUID().toString().substring(0, 12));
+  }
+
+  DockerCli(CommandRunner runner, String ownerLabel, Supplier<String> names) {
     this.runner = runner;
+    this.ownerLabel = ownerLabel;
     this.names = names;
+  }
+
+  /**
+   * Label for the containers of {@code noir run} against {@code home}. Its first pass sweeps them;
+   * seals and other noir homes carry different labels and are never swept.
+   */
+  public static String runLabel(NoirHome home) {
+    return "noir.run=" + homeKey(home);
+  }
+
+  /** Label for the containers of {@code noir seal} against {@code home}. */
+  public static String sealLabel(NoirHome home) {
+    return "noir.seal=" + homeKey(home);
+  }
+
+  private static String homeKey(NoirHome home) {
+    var path = home.root().toAbsolutePath().normalize().toString();
+    try {
+      var digest = MessageDigest.getInstance("SHA-256").digest(path.getBytes(UTF_8));
+      return HexFormat.of().formatHex(digest, 0, 8);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException(e);
+    }
   }
 
   @Override
@@ -57,7 +93,7 @@ public final class DockerCli implements ContainerPort {
     argv.addAll(List.of("--memory", spec.limits().memory()));
     argv.addAll(List.of("--pids-limit", String.valueOf(spec.limits().pids())));
     argv.addAll(List.of("--network", spec.network() ? "bridge" : "none"));
-    argv.addAll(List.of("--label", RUN_LABEL));
+    argv.addAll(List.of("--label", ownerLabel));
     for (var label : new java.util.TreeMap<>(spec.labels()).entrySet()) {
       argv.addAll(List.of("--label", label.getKey() + "=" + label.getValue()));
     }

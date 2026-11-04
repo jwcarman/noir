@@ -10,7 +10,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.ContainerPort;
-import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.github.GitHubPort;
 import org.jwcarman.noir.lifecycle.Lifecycle;
 import org.jwcarman.noir.lifecycle.State;
@@ -67,12 +66,16 @@ public final class Daemon {
   /** Items already warned about, so a polling daemon warns once per item, not once per pass. */
   private final Set<String> warned = new HashSet<>();
 
+  /** This run's container label; the first pass removes leftovers carrying it. */
+  private final String sweepLabel;
+
   private boolean swept;
 
   public Daemon(
       Store store,
       GitHubPort gh,
       ContainerPort docker,
+      String sweepLabel,
       ItemDriver driver,
       Reconciler reconciler,
       NoirConfig config,
@@ -83,6 +86,7 @@ public final class Daemon {
     this.store = store;
     this.gh = gh;
     this.docker = docker;
+    this.sweepLabel = sweepLabel;
     this.driver = driver;
     this.reconciler = reconciler;
     this.config = config;
@@ -114,7 +118,7 @@ public final class Daemon {
    */
   public int runOnce() {
     if (!swept) {
-      docker.removeLabelled(DockerCli.RUN_LABEL);
+      docker.removeLabelled(sweepLabel);
       swept = true;
     }
     var ids = store.itemIds();

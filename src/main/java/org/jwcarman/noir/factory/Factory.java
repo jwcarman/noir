@@ -209,7 +209,7 @@ public final class Factory implements ItemDriver {
         retry.call(() -> {
           var o =
               builder.run(ctx.spec(), stubs, input, ctx.branch(), feedback, ctx.attempt().build());
-          if (consumedNothing(o.agent())) {
+          if (consumedNothing(o.agent()) && !o.producedCommits()) {
             throw new DockerException(
                 "builder agent failed before doing any work (exit "
                     + o.agent().exitCode()
