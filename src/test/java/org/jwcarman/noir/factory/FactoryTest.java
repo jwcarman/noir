@@ -689,6 +689,11 @@ class FactoryTest {
     }
 
     @Override
+    public String tip(Path bundle, String branch) {
+      return "c0ffee";
+    }
+
+    @Override
     public String patchSince(Path bundle, String baseSha, String branch) {
       if (tooLarge) {
         throw new PatchTooLargeException("patch exceeds 256 MiB");

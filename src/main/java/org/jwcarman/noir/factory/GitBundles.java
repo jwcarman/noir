@@ -28,4 +28,11 @@ public final class GitBundles implements Bundles {
       return repo.patchSince(baseSha, branch);
     }
   }
+
+  @Override
+  public String tip(Path bundle, String branch) {
+    try (var repo = BundleRepo.open(runner, bundle, tempRoot)) {
+      return repo.tip(branch);
+    }
+  }
 }

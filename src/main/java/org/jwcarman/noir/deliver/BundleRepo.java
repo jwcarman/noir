@@ -79,6 +79,11 @@ public final class BundleRepo implements AutoCloseable {
     return copy;
   }
 
+  /** The full SHA of {@code branch}. */
+  public String tip(String branch) {
+    return git("rev-parse", "--verify", "refs/heads/" + branch).stdout().trim();
+  }
+
   public List<String> commitsSince(String baseSha, String branch) {
     var out = git("rev-list", baseSha + ".." + branch).stdout();
     return out.lines().map(String::trim).filter(s -> !s.isEmpty()).toList();

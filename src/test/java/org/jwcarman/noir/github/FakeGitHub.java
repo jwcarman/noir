@@ -1,7 +1,9 @@
 package org.jwcarman.noir.github;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /** In-memory {@link GitHubPort} for tests. */
@@ -21,6 +23,7 @@ public final class FakeGitHub implements GitHubPort {
   private final List<Issue> issues = new ArrayList<>();
   private final List<String> ensuredRepos = new ArrayList<>();
   private final List<Pr> pullRequests = new ArrayList<>();
+  private final Map<Integer, PullRequestState> prStates = new HashMap<>();
   private boolean failNextCreatePullRequest;
   private String defaultBranch = "main";
   private boolean failNextCreateIssue;
@@ -149,6 +152,30 @@ public final class FakeGitHub implements GitHubPort {
     }
     var pr = new Pr(pullRequests.size() + 1, base, head, title, body, draft);
     pullRequests.add(pr);
+    prStates.put(
+        pr.number(),
+        new PullRequestState(pr.number(), PullRequestState.Status.OPEN, "fake-head", null));
     return pr.number();
+  }
+
+  @Override
+  public PullRequestState pullRequest(String repo, int number) {
+    var state = prStates.get(number);
+    if (state == null) {
+      throw new GitHubException("no such pull request: " + number);
+    }
+    return state;
+  }
+
+  /** Marks the pull request merged with {@code headSha} as its head. */
+  public void merge(int pr, String headSha) {
+    prStates.put(
+        pr,
+        new PullRequestState(pr, PullRequestState.Status.MERGED, headSha, java.time.Instant.EPOCH));
+  }
+
+  public void closePullRequest(int pr) {
+    var old = pullRequest("", pr);
+    prStates.put(pr, new PullRequestState(pr, PullRequestState.Status.CLOSED, old.headSha(), null));
   }
 }

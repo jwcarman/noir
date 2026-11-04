@@ -10,4 +10,7 @@ public interface Bundles {
 
   /** The full patch of {@code branch} beyond {@code baseSha}, binary content included. */
   String patchSince(Path bundle, String baseSha, String branch);
+
+  /** The full SHA of {@code branch} in the bundle. */
+  String tip(Path bundle, String branch);
 }

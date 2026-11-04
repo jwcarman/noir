@@ -1,5 +1,7 @@
 package org.jwcarman.noir.github;
 
+import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -8,6 +10,7 @@ import java.util.stream.Collectors;
 import org.jwcarman.noir.exec.Command;
 import org.jwcarman.noir.exec.CommandResult;
 import org.jwcarman.noir.exec.CommandRunner;
+import org.jwcarman.noir.json.Json;
 
 /** {@link GitHubPort} backed by the {@code gh} CLI. Bodies are always passed on stdin. */
 public final class GhCli implements GitHubPort {
@@ -174,6 +177,32 @@ public final class GhCli implements GitHubPort {
       throw new GitHubException("gh pr create returned no pull request URL: " + out);
     }
     return Integer.parseInt(m.group(1));
+  }
+
+  @Override
+  public PullRequestState pullRequest(String repo, int number) {
+    var out =
+        gh(
+                null,
+                "pr",
+                "view",
+                String.valueOf(number),
+                "--repo",
+                repo,
+                "--json",
+                "number,state,headRefOid,mergedAt")
+            .stdout();
+    try {
+      var json = Json.mapper().readTree(out);
+      var mergedAt = json.path("mergedAt");
+      return new PullRequestState(
+          json.required("number").intValue(),
+          PullRequestState.Status.valueOf(json.required("state").asText()),
+          json.required("headRefOid").asText(),
+          mergedAt.isNull() || mergedAt.isMissingNode() ? null : Instant.parse(mergedAt.asText()));
+    } catch (IOException | RuntimeException e) {
+      throw new GitHubException("gh pr view returned unexpected output: " + out.trim());
+    }
   }
 
   private CommandResult gh(String stdin, String... args) {

@@ -298,4 +298,40 @@ class GhCliTest {
         .isInstanceOf(GitHubException.class)
         .hasMessageContaining("weird");
   }
+
+  private static final List<String> PR_VIEW =
+      List.of(
+          "gh", "pr", "view", "7", "--repo", "r/d", "--json", "number,state,headRefOid,mergedAt");
+
+  @Test
+  void pullRequestParsesMergedState() {
+    runner.whenArgvStartsWith(
+        List.of("gh", "pr", "view"),
+        ok(
+            "{\"number\":7,\"state\":\"MERGED\",\"headRefOid\":\"abc123\","
+                + "\"mergedAt\":\"2026-11-04T10:15:30Z\"}"));
+    var pr = gh.pullRequest("r/d", 7);
+    assertThat(pr.number()).isEqualTo(7);
+    assertThat(pr.status()).isEqualTo(PullRequestState.Status.MERGED);
+    assertThat(pr.headSha()).isEqualTo("abc123");
+    assertThat(pr.mergedAt()).isEqualTo(java.time.Instant.parse("2026-11-04T10:15:30Z"));
+    assertThat(runner.commands().getFirst().argv()).containsExactlyElementsOf(PR_VIEW);
+  }
+
+  @Test
+  void pullRequestParsesOpenStateWithNullMergedAt() {
+    runner.whenArgvStartsWith(
+        List.of("gh", "pr", "view"),
+        ok("{\"number\":7,\"state\":\"OPEN\",\"headRefOid\":\"abc123\",\"mergedAt\":null}"));
+    var pr = gh.pullRequest("r/d", 7);
+    assertThat(pr.status()).isEqualTo(PullRequestState.Status.OPEN);
+    assertThat(pr.mergedAt()).isNull();
+    assertThat(runner.commands().getFirst().argv()).containsExactlyElementsOf(PR_VIEW);
+  }
+
+  @Test
+  void pullRequestWithGarbageOutputIsAGitHubException() {
+    runner.whenArgvStartsWith(List.of("gh", "pr", "view"), ok("not json at all"));
+    assertThatThrownBy(() -> gh.pullRequest("r/d", 7)).isInstanceOf(GitHubException.class);
+  }
 }

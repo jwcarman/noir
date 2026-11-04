@@ -2,8 +2,10 @@ package org.jwcarman.noir.factory;
 
 import java.time.Clock;
 import java.util.LinkedHashMap;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import org.jwcarman.noir.lifecycle.Category;
 import org.jwcarman.noir.lifecycle.IllegalTransitionException;
 import org.jwcarman.noir.lifecycle.Lifecycle;
 import org.jwcarman.noir.lifecycle.SideEffect;
@@ -51,6 +53,16 @@ public final class Transitions {
     return persist(store, clock, item, next, trigger);
   }
 
+  /** The failure category a trigger implies, if any. */
+  static Optional<Category> categoryOf(Trigger trigger) {
+    return switch (trigger) {
+      case Trigger.MeasurementFailed m -> Optional.of(m.category());
+      case Trigger.GradeFailed g -> Optional.of(Category.BEHAVIOR_FAILURE);
+      case Trigger.AgentExited a when !a.producedCommits() -> Optional.of(Category.NO_OUTPUT);
+      default -> Optional.empty();
+    };
+  }
+
   /** Writes {@code next} as {@code workitem.json} and appends its {@code transition} event. */
   static StateChange persist(
       Store store, Clock clock, WorkItem item, WorkItem next, Trigger trigger) {
@@ -59,6 +71,9 @@ public final class Transitions {
     data.put("from", item.state().name());
     data.put("to", next.state().name());
     data.put("trigger", trigger.getClass().getSimpleName());
+    if (next.state() == State.REWORK || next.state() == State.FAILED) {
+      categoryOf(trigger).ifPresent(c -> data.put("category", c.name()));
+    }
     store.appendEvent(Event.of(clock, item.id(), "transition", next.attempt(), data));
     return new StateChange(item.id(), item.state(), next.state());
   }

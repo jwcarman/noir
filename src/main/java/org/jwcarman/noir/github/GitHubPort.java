@@ -29,4 +29,7 @@ public interface GitHubPort {
   /** Creates a pull request and returns its number. */
   int createPullRequest(
       String repo, String base, String head, String title, String body, boolean draft);
+
+  /** The current state of pull request {@code number}. */
+  PullRequestState pullRequest(String repo, int number);
 }

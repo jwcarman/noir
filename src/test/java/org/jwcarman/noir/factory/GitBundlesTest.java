@@ -35,6 +35,24 @@ class GitBundlesTest {
   }
 
   @Test
+  void tipIsTheBranchHeadInTheBundle() throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("origin"), "o/r");
+    var src = GitFixtures.cloneOf(origin, tmp.resolve("src"));
+    git(src, "checkout", "-q", "-b", "noir/1-x");
+    Files.writeString(src.resolve("A.txt"), "a\n");
+    git(src, "add", ".");
+    git(src, "commit", "-q", "-m", "add a");
+    var head = git(src, "rev-parse", "HEAD").trim();
+    var bundle = tmp.resolve("out.bundle");
+    git(src, "bundle", "create", "-q", bundle.toString(), "refs/heads/noir/1-x");
+
+    var tip =
+        new GitBundles(new ProcessCommandRunner(), tmp.resolve("scratch")).tip(bundle, "noir/1-x");
+
+    assertThat(tip).isEqualTo(head).hasSize(40);
+  }
+
+  @Test
   void secretInsideABinaryFileMarkedBinaryByTheBuilderIsInThePatch() throws Exception {
     var origin = GitFixtures.originWithCommit(tmp.resolve("origin"), "o/r");
     var src = GitFixtures.cloneOf(origin, tmp.resolve("src"));
