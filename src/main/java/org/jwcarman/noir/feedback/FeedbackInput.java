@@ -2,6 +2,7 @@ package org.jwcarman.noir.feedback;
 
 import java.util.List;
 import org.jwcarman.noir.lifecycle.Category;
+import org.jwcarman.noir.measure.MethodCrap;
 import org.jwcarman.noir.spec.QualityBar;
 
 /** The coarse information allowed into FEEDBACK.md, per failure category. */
@@ -24,9 +25,12 @@ public sealed interface FeedbackInput {
     }
   }
 
-  record QualityShortfall(QualityBar bar, List<ClassQuality> classes) implements FeedbackInput {
+  record QualityShortfall(
+      QualityBar bar, List<ClassQuality> classes, List<MethodCrap> crapViolations)
+      implements FeedbackInput {
     public QualityShortfall {
       classes = List.copyOf(classes);
+      crapViolations = List.copyOf(crapViolations);
     }
 
     public Category category() {

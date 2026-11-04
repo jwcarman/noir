@@ -46,6 +46,25 @@ public final class FeedbackRenderer {
               .append(pct(c.mutationScore()))
               .append(" |\n");
         }
+        if (!q.crapViolations().isEmpty()) {
+          sb.append("\nMethods over the CRAP limit (max ")
+              .append(q.bar().maxCrap())
+              .append("):\n\n");
+          sb.append("| Method | CRAP | Complexity | Line coverage |\n|---|---|---|---|\n");
+          for (var m : q.crapViolations()) {
+            sb.append("| ")
+                .append(m.className())
+                .append('.')
+                .append(m.method())
+                .append(" | ")
+                .append(String.format(Locale.ROOT, "%.1f", m.crap()))
+                .append(" | ")
+                .append(m.complexity())
+                .append(" | ")
+                .append(pct(m.lineCoverage()))
+                .append(" |\n");
+          }
+        }
       }
       case FeedbackInput.BehaviorFailure b -> {
         b.results()

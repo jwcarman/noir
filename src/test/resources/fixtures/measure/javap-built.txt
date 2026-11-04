@@ -1,0 +1,8 @@
+Compiled from "Counter.java"
+public class com.example.api.Counter {
+  public com.example.api.Counter();
+  public void increment();
+  public int value();
+  public com.example.api.Counter withStart(int);
+  private void helper();
+}

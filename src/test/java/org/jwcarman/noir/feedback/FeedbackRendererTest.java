@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.jwcarman.noir.lifecycle.Category;
+import org.jwcarman.noir.measure.MethodCrap;
 import org.jwcarman.noir.spec.QualityBar;
 
 class FeedbackRendererTest {
@@ -42,12 +43,28 @@ class FeedbackRendererTest {
             1,
             new FeedbackInput.QualityShortfall(
                 new QualityBar(0.8, 0.7, 30),
-                List.of(new ClassQuality("com.example.Foo", 0.6234, 0.5))));
+                List.of(new ClassQuality("com.example.Foo", 0.6234, 0.5)),
+                List.of()));
     assertThat(md)
         .startsWith("# Feedback on attempt 1: QUALITY_SHORTFALL")
         .contains("Required: line coverage ≥ 80.0%, mutation score ≥ 70.0%")
         .contains("| Class | Line coverage | Mutation score |")
         .contains("| com.example.Foo | 62.3% | 50.0% |");
+  }
+
+  @Test
+  void qualityShortfallListsCrapViolations() {
+    var md =
+        FeedbackRenderer.render(
+            1,
+            new FeedbackInput.QualityShortfall(
+                new QualityBar(0.8, 0.7, 30),
+                List.of(new ClassQuality("com.example.Foo", 0.9, 0.9)),
+                List.of(new MethodCrap("com.example.Foo", "add(int,int)", 10, 0.5, 22.5))));
+    assertThat(md)
+        .contains("Methods over the CRAP limit (max 30):")
+        .contains("| Method | CRAP | Complexity | Line coverage |")
+        .contains("| com.example.Foo.add(int,int) | 22.5 | 10 | 50.0% |");
   }
 
   @Test

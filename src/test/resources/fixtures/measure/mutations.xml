@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mutations>
+  <mutation detected='true' status='KILLED'><sourceFile>C.java</sourceFile><mutatedClass>a.b.C</mutatedClass><mutatedMethod>m</mutatedMethod></mutation>
+  <mutation detected='false' status='SURVIVED'><sourceFile>C.java</sourceFile><mutatedClass>a.b.C$Inner</mutatedClass><mutatedMethod>n</mutatedMethod></mutation>
+  <mutation detected='true' status='KILLED'><sourceFile>D.java</sourceFile><mutatedClass>a.b.D</mutatedClass><mutatedMethod>m</mutatedMethod></mutation>
+</mutations>
