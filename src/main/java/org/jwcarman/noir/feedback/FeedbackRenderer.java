@@ -27,7 +27,9 @@ public final class FeedbackRenderer {
         sb.append(tail(b.mavenOutput(), MAX_BUILD_LINES)).append("\n```\n");
       }
       case FeedbackInput.ContractViolation c -> {
-        sb.append("The compiled public API does not match the stubs in SPEC.md:\n\n");
+        sb.append(
+            "The build breaks the contract in SPEC.md (public API vs. the stubs, reserved"
+                + " packages, forbidden files). Fix each item:\n\n");
         c.mismatches().forEach(m -> sb.append("- ").append(m).append('\n'));
       }
       case FeedbackInput.QualityShortfall q -> {

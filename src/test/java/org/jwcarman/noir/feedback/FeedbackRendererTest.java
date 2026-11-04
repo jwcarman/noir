@@ -91,6 +91,21 @@ class FeedbackRendererTest {
   }
 
   @Test
+  void contractViolationHeadingFitsNonApiFindings() {
+    // Measurement also reports reserved-package sources and forbidden build-output entries as
+    // CONTRACT_VIOLATION; the heading must not tell the builder its API differs from the stubs.
+    var md =
+        FeedbackRenderer.render(
+            1,
+            new FeedbackInput.ContractViolation(
+                List.of("source in reserved package noir.holdout: src/main/java/noir/X.java")));
+    assertThat(md)
+        .doesNotContain("public API does not match")
+        .contains("breaks the contract in SPEC.md")
+        .contains("- source in reserved package noir.holdout: src/main/java/noir/X.java");
+  }
+
+  @Test
   void noOutput() {
     assertThat(FeedbackRenderer.render(3, new FeedbackInput.NoOutput()))
         .startsWith("# Feedback on attempt 3: NO_OUTPUT")
