@@ -7,6 +7,31 @@
   <artifactId>noir</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <name>noir</name>
+  <description>A dark software factory: autonomous agents build from sealed specs, graded by a holdout suite they never see</description>
+  <url>https://github.com/jwcarman/noir</url>
+  <inceptionYear>2026</inceptionYear>
+
+  <developers>
+    <developer>
+      <id>jwcarman</id>
+      <name>James Carman</name>
+    </developer>
+  </developers>
+
+  <licenses>
+    <license>
+      <name>Apache 2</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+      <comments>A business-friendly OSS license</comments>
+    </license>
+  </licenses>
+
+  <scm>
+    <url>https://github.com/jwcarman/noir</url>
+    <connection>scm:git:git@github.com:jwcarman/noir.git</connection>
+    <developerConnection>scm:git:git@github.com:jwcarman/noir.git</developerConnection>
+  </scm>
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>
