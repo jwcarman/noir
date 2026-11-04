@@ -19,10 +19,10 @@ import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 
 /**
- * The {@code noir run} loop (spec §6.1, §9.3). Each pass reconciles every item against GitHub, then
- * picks up work — {@code SEALED} items whose open issue in a configured repo is labelled {@code
- * noir:ready}, plus every {@code REWORK} and active item — and drives each one, oldest id first and
- * one at a time, until it is terminal or {@code BLOCKED}.
+ * The {@code noir run} loop (spec §6.1, §9.3). Each pass reconciles every item against GitHub,
+ * records PR dispositions, then picks up work — {@code SEALED} items whose open issue in a
+ * configured repo is labelled {@code noir:ready}, plus every {@code REWORK} and active item — and
+ * drives each one, oldest id first and one at a time, until it is terminal or {@code BLOCKED}.
  *
  * <p>The daemon drives items one {@link ItemDriver#advance} at a time so that it can report every
  * transition to its {@link Listener} without the factory knowing about output.
@@ -57,6 +57,7 @@ public final class Daemon {
   private final ContainerPort docker;
   private final ItemDriver driver;
   private final Reconciler reconciler;
+  private final Dispositions dispositions;
   private final NoirConfig config;
   private final Retry.Sleeper sleeper;
   private final Clock clock;
@@ -78,6 +79,7 @@ public final class Daemon {
       String sweepLabel,
       ItemDriver driver,
       Reconciler reconciler,
+      Dispositions dispositions,
       NoirConfig config,
       Retry.Sleeper sleeper,
       Clock clock,
@@ -89,6 +91,7 @@ public final class Daemon {
     this.sweepLabel = sweepLabel;
     this.driver = driver;
     this.reconciler = reconciler;
+    this.dispositions = dispositions;
     this.config = config;
     this.sleeper = sleeper;
     this.clock = clock;
@@ -129,6 +132,7 @@ public final class Daemon {
         itemError(id, "reconcile", e);
       }
     }
+    refreshDispositions();
     int advanced = 0;
     for (var item : eligible(ids)) {
       if (interrupted()) {
@@ -139,6 +143,15 @@ public final class Daemon {
       }
     }
     return advanced;
+  }
+
+  /** Records PR outcomes; a failure is a warning and never stops the pass. */
+  private void refreshDispositions() {
+    try {
+      dispositions.refresh(listener::warning);
+    } catch (RuntimeException e) {
+      listener.warning("dispositions: " + Secrets.describe(e, secrets));
+    }
   }
 
   private List<WorkItem> eligible(List<String> ids) {

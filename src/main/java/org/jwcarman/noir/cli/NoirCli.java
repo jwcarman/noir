@@ -6,6 +6,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.jwcarman.noir.NoirHome;
+import org.jwcarman.noir.factory.Dispositions;
 import org.jwcarman.noir.github.GitHubPort;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -31,10 +32,23 @@ public final class NoirCli implements Runnable {
       Function<NoirHome, SealOperation> sealers,
       Function<NoirHome, RunOperation> runners,
       Supplier<GitHubPort> github,
-      Supplier<Set<String>> secrets) {
+      Supplier<Set<String>> secrets,
+      Function<NoirHome, Dispositions> dispositions) {
+    Operations(
+        Function<NoirHome, SealOperation> sealers,
+        Function<NoirHome, RunOperation> runners,
+        Supplier<GitHubPort> github,
+        Supplier<Set<String>> secrets) {
+      this(sealers, runners, github, secrets, Wiring::dispositions);
+    }
+
     static Operations real() {
       return new Operations(
-          Wiring::sealOperation, Wiring::runOperation, Wiring::github, Wiring::secrets);
+          Wiring::sealOperation,
+          Wiring::runOperation,
+          Wiring::github,
+          Wiring::secrets,
+          Wiring::dispositions);
     }
   }
 
@@ -60,6 +74,11 @@ public final class NoirCli implements Runnable {
   /** The daemon for the effective home. */
   RunOperation runner() {
     return ops.runners().apply(home());
+  }
+
+  /** Dispositions for the effective home (real gh and git unless a test injects them). */
+  Dispositions dispositions() {
+    return ops.dispositions().apply(home());
   }
 
   GitHubPort github() {
@@ -96,7 +115,7 @@ public final class NoirCli implements Runnable {
         home,
         out,
         err,
-        new Operations(sealers, real.runners(), real.github(), real.secrets()),
+        new Operations(sealers, real.runners(), real.github(), real.secrets(), real.dispositions()),
         args);
   }
 

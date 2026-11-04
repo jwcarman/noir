@@ -26,6 +26,7 @@ import org.jwcarman.noir.docker.FakeContainerPort;
 import org.jwcarman.noir.github.FakeGitHub;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.spec.Spec;
+import org.jwcarman.noir.store.Event;
 import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 
@@ -100,11 +101,51 @@ class DaemonTest {
         "noir.run=h1",
         driver,
         reconciler,
+        new Dispositions(store, gh, new NoTipBundles(), clock),
         config,
         sleeper,
         clock,
         Set.of(SECRET),
         listener);
+  }
+
+  static final class NoTipBundles implements Bundles {
+    @Override
+    public List<String> commitsSince(Path bundle, String baseSha, String branch) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String patchSince(Path bundle, String baseSha, String branch) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String tip(Path bundle, String branch) {
+      throw new UnsupportedOperationException();
+    }
+  }
+
+  @Test
+  void passRecordsDispositions() {
+    int issue = issue(REPO, "noir:pr-open");
+    store.writeWorkItem(WorkItem.sealed(A, REPO, issue).withState(State.PR_OPEN).withAttempt(1));
+    int pr = gh.createPullRequest(REPO, "main", "noir/x", "t", "b", false);
+    store.appendEvent(
+        Event.of(
+            clock,
+            A,
+            "delivered",
+            1,
+            Map.of("pullRequest", pr, "draft", false, "deliveredAttempt", 1)));
+    gh.merge(pr, "abc123");
+
+    daemon().runOnce();
+
+    assertThat(store.readEvents(A))
+        .filteredOn(e -> e.type().equals("pr_disposition"))
+        .singleElement()
+        .satisfies(e -> assertThat(e.data()).containsEntry("disposition", "modified"));
   }
 
   /** Reconciliation that never touches labels, so the daemon's own label filter is observable. */

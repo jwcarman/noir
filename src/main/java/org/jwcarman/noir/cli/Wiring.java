@@ -18,6 +18,7 @@ import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.docker.Images;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.factory.Daemon;
+import org.jwcarman.noir.factory.Dispositions;
 import org.jwcarman.noir.factory.Factory;
 import org.jwcarman.noir.factory.GitBundles;
 import org.jwcarman.noir.factory.GitHubDelivery;
@@ -109,6 +110,7 @@ final class Wiring {
         runLabel,
         factory,
         reconciler,
+        new Dispositions(store, gh, new GitBundles(runner, tmp), clock),
         config,
         sleeper,
         clock,
@@ -122,6 +124,16 @@ final class Wiring {
         .map(System::getenv)
         .filter(v -> v != null && !v.isBlank())
         .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  }
+
+  /** Dispositions backed by the real {@code gh} and git, for {@code noir status --refresh}. */
+  static Dispositions dispositions(NoirHome home) {
+    var runner = new ProcessCommandRunner();
+    return new Dispositions(
+        new Store(home),
+        new GhCli(runner),
+        new GitBundles(runner, tempRoot(home)),
+        Clock.systemUTC());
   }
 
   static GitHubPort github() {

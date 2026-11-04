@@ -194,6 +194,8 @@ class CancelResumeCommandTest {
               throw new IllegalStateException("boom");
             },
             new Reconciler(store, gh, new GitHubDelivery(gh, new FakeBranchPublisher()), clock),
+            new org.jwcarman.noir.factory.Dispositions(
+                store, gh, new org.jwcarman.noir.factory.GitBundles(null, tmp), clock),
             NoirConfig.defaults(),
             d -> {},
             clock,
