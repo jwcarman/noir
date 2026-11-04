@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="JUnit Jupiter" tests="5" skipped="1" failures="2" errors="1" time="0.2">
+  <testcase name="passes()" classname="noir.holdout.x.CounterTest" time="0.001"/>
+  <testcase name="fails()" classname="noir.holdout.x.CounterTest" time="0.002">
+    <failure message="expected: &lt;1&gt; but was: &lt;2&gt;" type="org.opentest4j.AssertionFailedError">trace</failure>
+  </testcase>
+  <testcase name="errors()" classname="noir.holdout.x.CounterTest" time="0.002">
+    <error message="Not implemented" type="java.lang.UnsupportedOperationException">trace</error>
+  </testcase>
+  <testcase name="hangs()" classname="noir.holdout.x.CounterTest" time="10.0">
+    <failure message="hangs() timed out after 10 seconds" type="java.util.concurrent.TimeoutException">trace</failure>
+  </testcase>
+  <testcase name="skipped()" classname="noir.holdout.x.CounterTest" time="0">
+    <skipped/>
+  </testcase>
+</testsuite>

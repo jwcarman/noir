@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mutations partial="false">
+<mutation detected='true' status='KILLED' numberOfTestsRun='1'><sourceFile>Counter.java</sourceFile></mutation>
+<mutation detected='true' status='KILLED' numberOfTestsRun='1'><sourceFile>Counter.java</sourceFile></mutation>
+<mutation detected='true' status='TIMED_OUT' numberOfTestsRun='1'><sourceFile>Counter.java</sourceFile></mutation>
+<mutation detected='false' status='SURVIVED' numberOfTestsRun='1'><sourceFile>Counter.java</sourceFile></mutation>
+<mutation detected='false' status='NO_COVERAGE' numberOfTestsRun='0'><sourceFile>Counter.java</sourceFile></mutation>
+</mutations>
