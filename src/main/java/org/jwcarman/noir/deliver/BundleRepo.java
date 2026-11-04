@@ -3,6 +3,7 @@ package org.jwcarman.noir.deliver;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -42,13 +43,37 @@ public final class BundleRepo implements AutoCloseable {
     }
     var repo = new BundleRepo(runner, dir);
     try {
+      var copy = copyBundle(bundle, dir);
       run(runner, List.of("git", "init", "--bare", "-q", dir.toString()));
-      repo.git("fetch", "-q", bundle.toAbsolutePath().toString(), "+refs/heads/*:refs/heads/*");
+      repo.git("fetch", "-q", copy.toString(), "+refs/heads/*:refs/heads/*");
       return repo;
     } catch (RuntimeException e) {
       repo.close();
       throw e;
     }
+  }
+
+  /** Copies a regular (non-symlink) bundle file into the temp dir and checks its header. */
+  private static Path copyBundle(Path bundle, Path dir) {
+    if (!Files.isRegularFile(bundle, LinkOption.NOFOLLOW_LINKS)) {
+      throw new GitException("Not a regular bundle file: " + bundle);
+    }
+    var copy = dir.resolve("input.bundle");
+    try (var in = Files.newInputStream(bundle, LinkOption.NOFOLLOW_LINKS)) {
+      Files.copy(in, copy);
+    } catch (IOException e) {
+      throw new GitException("Cannot read bundle " + bundle + ": " + e.getMessage());
+    }
+    String first;
+    try (var lines = Files.lines(copy, java.nio.charset.StandardCharsets.ISO_8859_1)) {
+      first = lines.findFirst().orElse("");
+    } catch (IOException | java.io.UncheckedIOException e) {
+      first = "";
+    }
+    if (!first.equals("# v2 git bundle") && !first.equals("# v3 git bundle")) {
+      throw new GitException("Not a git bundle: " + bundle);
+    }
+    return copy;
   }
 
   public List<String> commitsSince(String baseSha, String branch) {
@@ -57,7 +82,17 @@ public final class BundleRepo implements AutoCloseable {
   }
 
   public String patchSince(String baseSha, String branch) {
-    return git("log", "-p", "--no-color", baseSha + ".." + branch).stdout();
+    return git(
+            "log",
+            "-p",
+            "--binary",
+            "--text",
+            "-m",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            baseSha + ".." + branch)
+        .stdout();
   }
 
   public Path dir() {

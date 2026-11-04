@@ -2,6 +2,7 @@ package org.jwcarman.noir.deliver;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.jwcarman.noir.git.GitFixtures.git;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -38,6 +39,12 @@ class BundleRepoTest {
             + "[core]\n\tfsmonitor = "
             + fsmonitor.toAbsolutePath()
             + "\n");
+    // positive control: the planted hook and fsmonitor really fire when git runs in the source
+    git(fx.source, "status");
+    git(fx.source, "checkout", "-q", "-b", "tmp-control");
+    assertThat(hookMarker).exists();
+    assertThat(fsmonitorMarker).exists();
+    git(fx.source, "checkout", "-q", fx.branch);
     fx.bundled();
     Files.deleteIfExists(hookMarker);
     Files.deleteIfExists(fsmonitorMarker);
@@ -60,7 +67,7 @@ class BundleRepoTest {
     var fake =
         new FakeCommandRunner()
             .whenArgvStartsWith(List.of("git"), new CommandResult(0, "abc\n", "", false));
-    try (var repo = BundleRepo.open(fake, tmp.resolve("b.bundle"), tmp)) {
+    try (var repo = BundleRepo.open(fake, fakeBundle(), tmp)) {
       repo.commitsSince("base", "br");
       repo.patchSince("base", "br");
     }
@@ -86,7 +93,7 @@ class BundleRepoTest {
             .whenArgvStartsWith(
                 List.of("git", "-C"), new CommandResult(128, "", "fatal: bad bundle", false));
     // init has no -C so it succeeds; fetch fails
-    assertThatThrownBy(() -> BundleRepo.open(fake, tmp.resolve("b.bundle"), work))
+    assertThatThrownBy(() -> BundleRepo.open(fake, fakeBundle(), work))
         .isInstanceOf(GitException.class)
         .hasMessageContaining("fatal: bad bundle");
     try (var s = Files.list(work)) {
@@ -99,10 +106,91 @@ class BundleRepoTest {
     var fake =
         new FakeCommandRunner()
             .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false));
-    var repo = BundleRepo.open(fake, tmp.resolve("b.bundle"), tmp.resolve("w2"));
+    var repo = BundleRepo.open(fake, fakeBundle(), tmp.resolve("w2"));
     assertThat(repo.dir()).exists();
     repo.close();
     repo.close();
     assertThat(repo.dir()).doesNotExist();
+  }
+
+  private Path fakeBundle() {
+    try {
+      var p = tmp.resolve("fake-" + System.nanoTime() + ".bundle");
+      Files.writeString(p, "# v2 git bundle\n\n");
+      return p;
+    } catch (IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
+  }
+
+  private void assertRejected(Path bundle, String message) throws IOException {
+    var work = Files.createDirectories(tmp.resolve("rw-" + System.nanoTime()));
+    assertThatThrownBy(() -> BundleRepo.open(new ProcessCommandRunner(), bundle, work))
+        .isInstanceOf(GitException.class)
+        .hasMessageContaining(message);
+    try (var s = Files.list(work)) {
+      assertThat(s).isEmpty();
+    }
+  }
+
+  @Test
+  void rejectsSymlinkToHostileRepoWithoutRunningItsHooks() throws IOException {
+    var fx = BundleFixture.create(tmp.resolve("fx"), "noir/1-x");
+    var marker = tmp.resolve("marker").toAbsolutePath();
+    var hook = fx.source.resolve(".git/hooks/post-checkout");
+    Files.createDirectories(hook.getParent());
+    Files.writeString(hook, "#!/bin/sh\ntouch '" + marker + "'\n");
+    hook.toFile().setExecutable(true);
+    var link = tmp.resolve("evil.bundle");
+    Files.createSymbolicLink(link, fx.source);
+    assertRejected(link, "Not a regular bundle file");
+    assertThat(marker).doesNotExist();
+  }
+
+  @Test
+  void rejectsSymlinkToRegularBundleFile() throws IOException {
+    var fx = BundleFixture.create(tmp.resolve("fx"), "noir/1-x").bundled();
+    var link = tmp.resolve("link.bundle");
+    Files.createSymbolicLink(link, fx.bundle);
+    assertRejected(link, "Not a regular bundle file");
+  }
+
+  @Test
+  void rejectsDirectory() throws IOException {
+    assertRejected(Files.createDirectories(tmp.resolve("dir.bundle")), "Not a regular bundle file");
+  }
+
+  @Test
+  void rejectsWrongHeader() throws IOException {
+    var f = tmp.resolve("bad.bundle");
+    Files.writeString(f, "not a bundle\n");
+    assertRejected(f, "Not a git bundle");
+  }
+
+  @Test
+  void patchIncludesBinaryContentAndMergeResolutions() throws IOException {
+    var fx = BundleFixture.create(tmp.resolve("fx"), "noir/1-x");
+    var src = fx.source;
+    Files.write(src.resolve("secret.bin"), "\0AKIAIOSFODNN7EXAMPLE\0".getBytes());
+    git(src, "add", ".");
+    git(src, "commit", "-q", "-m", "binary");
+    git(src, "checkout", "-q", "-b", "side", fx.baseSha);
+    Files.writeString(src.resolve("Added.txt"), "side\n");
+    git(src, "add", ".");
+    git(src, "commit", "-q", "-m", "side");
+    git(src, "checkout", "-q", fx.branch);
+    try {
+      git(src, "merge", "-q", "--no-ff", "side", "-m", "merge");
+    } catch (IllegalStateException expected) {
+      // conflict on Added.txt: resolve with an injected string
+    }
+    Files.writeString(src.resolve("Added.txt"), "ghp_MERGEINTRODUCEDTOKEN\n");
+    git(src, "add", ".");
+    git(src, "commit", "-q", "-m", "merge");
+    git(src, "bundle", "create", "-q", fx.bundle.toString(), "refs/heads/" + fx.branch);
+    try (var repo = BundleRepo.open(new ProcessCommandRunner(), fx.bundle, tmp)) {
+      var patch = repo.patchSince(fx.baseSha, fx.branch);
+      assertThat(patch).contains("AKIAIOSFODNN7EXAMPLE").contains("ghp_MERGEINTRODUCEDTOKEN");
+    }
   }
 }

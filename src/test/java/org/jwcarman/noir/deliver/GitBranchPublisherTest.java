@@ -40,7 +40,7 @@ class GitBranchPublisherTest {
     var fake =
         new FakeCommandRunner()
             .whenArgvStartsWith(List.of("git"), new CommandResult(0, "", "", false));
-    new GitBranchPublisher(fake, tmp).push("o/r", tmp.resolve("b.bundle"), "noir/1-x");
+    new GitBranchPublisher(fake, tmp).push("o/r", stubBundle(), "noir/1-x");
     var push = fake.commands().get(fake.commands().size() - 1);
     assertThat(push.argv())
         .contains(
@@ -66,9 +66,18 @@ class GitBranchPublisherTest {
     var failing =
         new FakeCommandRunner()
             .whenArgvStartsWith(List.of("git"), new CommandResult(1, "", "denied", false));
-    assertThatThrownBy(
-            () -> new GitBranchPublisher(failing, tmp).push("o/r", tmp.resolve("b"), "br"))
+    assertThatThrownBy(() -> new GitBranchPublisher(failing, tmp).push("o/r", stubBundle(), "br"))
         .isInstanceOf(GitException.class)
         .hasMessageContaining("denied");
+  }
+
+  private Path stubBundle() {
+    try {
+      var p = tmp.resolve("stub.bundle");
+      Files.writeString(p, "# v2 git bundle\n\n");
+      return p;
+    } catch (IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
   }
 }
