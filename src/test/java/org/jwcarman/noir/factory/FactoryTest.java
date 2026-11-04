@@ -85,6 +85,10 @@ class FactoryTest {
   }
 
   Factory factory() {
+    return factory(Set.of(SECRET));
+  }
+
+  Factory factory(Set<String> secrets) {
     return new Factory(
         store,
         delivery,
@@ -95,7 +99,7 @@ class FactoryTest {
         NoirConfig.defaults(),
         Clock.fixed(Instant.parse("2026-11-04T00:00:00Z"), ZoneOffset.UTC),
         new Retry(6, Duration.ofSeconds(2), Duration.ofSeconds(60), sleeps::add),
-        Set.of(SECRET));
+        secrets);
   }
 
   WorkItem drive() {
@@ -285,6 +289,50 @@ class FactoryTest {
   }
 
   @Test
+  void secretInABuilderReportedValueBlocksThePullRequest() {
+    build.model = SECRET; // a forged model id would be printed in the PR body
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.SECRET_FOUND);
+    assertThat(item.blockedPhase()).isEqualTo(State.GRADING);
+    assertThat(publisher.pushes()).isEmpty();
+    assertThat(gh.pullRequests()).isEmpty();
+    assertThat(gh.issue(1).comments()).isEmpty();
+    assertThat(delivery.labels).containsExactly("noir:building", "noir:blocked");
+  }
+
+  @Test
+  void secretInAnIssueCommentBlocksTheComment() {
+    build.produces = n -> false;
+    // The guard is text-agnostic: any secret value appearing in the outbound comment blocks it.
+    factory(Set.of(SECRET, "No attempt produced commits")).drive(Specs.ID);
+    var item = store.readWorkItem(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.SECRET_FOUND);
+    assertThat(item.blockedPhase()).isEqualTo(State.BUILDING);
+    assertThat(gh.issue(1).comments()).isEmpty();
+    assertThat(gh.pullRequests()).isEmpty();
+    assertThat(delivery.labels).last().isEqualTo("noir:blocked");
+  }
+
+  @Test
+  void blankPatchIsAnInfrastructureFailureNotAPass() {
+    bundles.patch = "";
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
+    assertThat(item.blockedPhase()).isEqualTo(State.MEASURING);
+    assertThat(measure.calls).isZero();
+    assertThat(publisher.pushes()).isEmpty();
+    assertThat(gh.pullRequests()).isEmpty();
+  }
+
+  @Test
   void persistentDockerFailureBlocksAsInfrastructure() {
     measure.modes = n -> MeasureMode.THROW;
 
@@ -379,6 +427,7 @@ class FactoryTest {
   static final class FakeBuild implements BuildRunner {
     final List<BuildCall> calls = new ArrayList<>();
     IntFunction<Boolean> produces = n -> true;
+    String model = "claude-test";
 
     @Override
     public BuildOutcome run(
@@ -393,7 +442,7 @@ class FactoryTest {
       write(bundle, "# v2 git bundle\nattempt " + calls.size() + "\n");
       var agent =
           new AgentResult(
-              0, false, false, new BigDecimal("1.25"), 10, "claude-test", "done", "sha256:builder");
+              0, false, false, new BigDecimal("1.25"), 10, model, "done", "sha256:builder");
       return new BuildOutcome(bundle, produces.apply(calls.size()), agent);
     }
   }

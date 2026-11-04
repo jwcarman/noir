@@ -13,6 +13,38 @@ class ProcessCommandRunnerTest {
   final CommandRunner runner = new ProcessCommandRunner();
 
   @Test
+  void failedDrainThrowsInsteadOfReturningEmptyOutput() {
+    var broken =
+        new java.io.InputStream() {
+          @Override
+          public int read() throws java.io.IOException {
+            throw new java.io.IOException("pipe broke");
+          }
+        };
+    var drained = ProcessCommandRunner.drain(broken);
+    assertThatThrownBy(() -> ProcessCommandRunner.get(drained, Duration.ofSeconds(5)))
+        .isInstanceOf(java.io.UncheckedIOException.class)
+        .hasMessageContaining("pipe broke");
+  }
+
+  @Test
+  void drainTimeoutThrowsInsteadOfReturningEmptyOutput() {
+    var never = new java.util.concurrent.CompletableFuture<String>();
+    assertThatThrownBy(() -> ProcessCommandRunner.get(never, Duration.ofMillis(20)))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("did not finish");
+  }
+
+  @Test
+  void drainErrorThrowsInsteadOfReturningEmptyOutput() {
+    var failed =
+        java.util.concurrent.CompletableFuture.<String>failedFuture(new OutOfMemoryError("oom"));
+    assertThatThrownBy(() -> ProcessCommandRunner.get(failed, Duration.ofSeconds(5)))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("oom");
+  }
+
+  @Test
   void capturesStdoutStderrAndExit() {
     var r = runner.run(Command.of("sh", "-c", "echo out; echo err >&2; exit 3"));
     assertThat(r.exitCode()).isEqualTo(3);

@@ -120,7 +120,7 @@ class LifecycleTest {
   @ParameterizedTest
   @EnumSource(
       value = State.class,
-      names = {"MEASURING", "GRADING"})
+      names = {"BUILDING", "MEASURING", "GRADING"})
   void secretFoundBlocks(State s) {
     var t = apply(atState(s), new Trigger.SecretFound());
     assertThat(t.next().state()).isEqualTo(State.BLOCKED);

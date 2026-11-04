@@ -8,6 +8,13 @@ import org.jwcarman.noir.json.Json;
 
 /** Parses the result object printed by {@code claude -p --output-format json}. */
 public final class ClaudeJson {
+  /**
+   * A plausible model id. The JSON comes from the builder container's stdout, which the agent can
+   * forge, and the model id is published in pull requests: anything else is not trusted.
+   */
+  static final java.util.regex.Pattern MODEL_ID =
+      java.util.regex.Pattern.compile("[A-Za-z0-9._:\\[\\]-]{1,100}");
+
   private ClaudeJson() {}
 
   public static AgentResult parse(ContainerResult r, String requestedModel) {
@@ -19,7 +26,11 @@ public final class ClaudeJson {
     }
     var usage = node.path("modelUsage");
     if (usage.isObject() && usage.fieldNames().hasNext()) {
-      model = usage.fieldNames().next();
+      var reported = usage.fieldNames().next();
+      model =
+          MODEL_ID.matcher(reported).matches()
+              ? reported
+              : requestedModel == null ? "unknown" : requestedModel;
     }
     var cost = node.path("total_cost_usd");
     return new AgentResult(

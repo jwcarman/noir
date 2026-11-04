@@ -37,6 +37,23 @@ class ClaudeJsonTest {
   }
 
   @Test
+  void forgedModelIdFallsBackToTheRequestedModel() {
+    var forged =
+        "{\"is_error\":false,\"num_turns\":2,\"result\":\"ok\","
+            + "\"modelUsage\":{\"sk-ant-api03-SECRET value\\n### hi\":{\"inputTokens\":10}}}";
+    var requested = ClaudeJson.parse(new ContainerResult(0, forged, "", false, "id"), "opus");
+    assertThat(requested.model()).isEqualTo("opus");
+    var none = ClaudeJson.parse(new ContainerResult(0, forged, "", false, "id"), null);
+    assertThat(none.model()).isEqualTo("unknown");
+    var tooLong = "{\"modelUsage\":{\"" + "a".repeat(101) + "\":{}}}";
+    assertThat(ClaudeJson.parse(new ContainerResult(0, tooLong, "", false, "id"), null).model())
+        .isEqualTo("unknown");
+    var bracketed = "{\"modelUsage\":{\"claude-opus-5-5[1m]\":{}}}";
+    assertThat(ClaudeJson.parse(new ContainerResult(0, bracketed, "", false, "id"), null).model())
+        .isEqualTo("claude-opus-5-5[1m]");
+  }
+
+  @Test
   void invalidKeyResultCarriesMessage() {
     var json =
         "{\"is_error\":true,\"num_turns\":1,\"total_cost_usd\":0,\"api_error_status\":401,"

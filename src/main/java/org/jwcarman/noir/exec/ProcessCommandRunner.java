@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit;
 
 /** {@link CommandRunner} backed by {@link ProcessBuilder}. */
 public final class ProcessCommandRunner implements CommandRunner {
+  static final java.time.Duration DRAIN_TIMEOUT = java.time.Duration.ofSeconds(10);
 
   @Override
   public CommandResult run(Command command) {
@@ -66,7 +67,7 @@ public final class ProcessCommandRunner implements CommandRunner {
     }
   }
 
-  private static CompletableFuture<String> drain(InputStream stream) {
+  static CompletableFuture<String> drain(InputStream stream) {
     return CompletableFuture.supplyAsync(
         () -> {
           try (stream) {
@@ -74,20 +75,34 @@ public final class ProcessCommandRunner implements CommandRunner {
             stream.transferTo(out);
             return out.toString(UTF_8);
           } catch (IOException e) {
-            return "";
+            throw new UncheckedIOException("Cannot read process output: " + e.getMessage(), e);
           }
         },
         Thread::startVirtualThread);
   }
 
   private static String get(CompletableFuture<String> f) {
+    return get(f, DRAIN_TIMEOUT);
+  }
+
+  /**
+   * The drained output. A drain that failed or did not finish is an error, never empty output:
+   * callers (such as the secret scan) must not mistake lost output for no output.
+   */
+  static String get(CompletableFuture<String> f, java.time.Duration timeout) {
     try {
-      return f.get(10, TimeUnit.SECONDS);
+      return f.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      return "";
-    } catch (ExecutionException | java.util.concurrent.TimeoutException e) {
-      return "";
+      throw new IllegalStateException("Interrupted while reading process output", e);
+    } catch (ExecutionException e) {
+      var cause = e.getCause();
+      if (cause instanceof UncheckedIOException u) {
+        throw u;
+      }
+      throw new IllegalStateException("Cannot read process output: " + cause, cause);
+    } catch (java.util.concurrent.TimeoutException e) {
+      throw new IllegalStateException("Reading process output did not finish within " + timeout, e);
     }
   }
 }

@@ -38,7 +38,7 @@ public final class Lifecycle {
           to(block(item, BlockReason.HOLDOUT_DEFECT), APPLY_LABEL);
       case Trigger.InfraBlocked b when state.active() ->
           to(block(item, BlockReason.INFRASTRUCTURE), STOP_CONTAINERS, APPLY_LABEL);
-      case Trigger.SecretFound s when state == State.MEASURING || state == State.GRADING ->
+      case Trigger.SecretFound s when state.active() ->
           to(block(item, BlockReason.SECRET_FOUND), APPLY_LABEL);
       case Trigger.IssueClosed c ->
           to(item.withState(State.CANCELLED), STOP_CONTAINERS, APPLY_LABEL);

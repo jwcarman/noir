@@ -158,6 +158,13 @@ public final class Factory {
       step = Step.of(new Trigger.InfraBlocked());
       transition = Lifecycle.apply(item, step.trigger(), config.reworkRetries());
       perform(ctx, transition, step);
+    } catch (OutboundSecret e) {
+      // A credential in text about to be posted to GitHub: post nothing and block. Outbound text
+      // is only produced from active phases, where SecretFound is always a valid trigger.
+      event(itemId, "secret_found", item.attempt(), Map.of("where", e.where));
+      step = Step.of(new Trigger.SecretFound());
+      transition = Lifecycle.apply(item, step.trigger(), config.reworkRetries());
+      perform(ctx, transition, step);
     }
 
     var next = transition.next();
@@ -244,6 +251,10 @@ public final class Factory {
     var bundle = paths.bundle();
     // Before anything runs or leaves the machine: a credential in the patch blocks the item.
     var patch = retry.call(() -> bundles.patchSince(bundle, spec.baseSha(), ctx.branch()));
+    if (patch.isBlank()) {
+      // The attempt produced commits, so its patch cannot be empty: lost output is never a pass.
+      throw new InfraFailure(new IllegalStateException("empty patch for an attempt with commits"));
+    }
     if (secrets.stream().anyMatch(patch::contains)) {
       event(ctx.item().id(), "secret_found", ctx.item().attempt(), Map.of());
       return Step.of(new Trigger.SecretFound());
@@ -364,6 +375,7 @@ public final class Factory {
 
   private void deliver(Ctx ctx, WorkItem next, AttemptPaths attempt, boolean draft) {
     var body = body(ctx, next, attempt.attempt(), draft);
+    guard("pull_request", ctx.spec().title(), body);
     int pr = retry.call(() -> delivery.openPullRequest(next, ctx.spec(), attempt, body, draft));
     var data = new LinkedHashMap<String, Object>();
     data.put("pullRequest", pr);
@@ -398,6 +410,7 @@ public final class Factory {
       }
     }
     var comment = PullRequestBody.failureComment(next.attempt(), latestResults(events, null));
+    guard("comment", comment);
     retry.run(() -> delivery.comment(next, comment));
     event(next.id(), "delivered", next.attempt(), Map.of("comment", true));
   }
@@ -425,6 +438,25 @@ public final class Factory {
                     num(e.data().get("maxCrap"))));
     return PullRequestBody.render(
         next.issueNumber(), metrics, latestResults(events, attempt), provenance, draft);
+  }
+
+  /** Text bound for GitHub carried a credential; nothing has been posted. */
+  private static final class OutboundSecret extends RuntimeException {
+    final String where;
+
+    OutboundSecret(String where) {
+      super("secret in outbound " + where);
+      this.where = where;
+    }
+  }
+
+  /** Refuses outbound GitHub text (PR title and body, comments) that contains any secret. */
+  private void guard(String where, String... texts) {
+    for (var text : texts) {
+      if (text != null && secrets.stream().anyMatch(text::contains)) {
+        throw new OutboundSecret(where);
+      }
+    }
   }
 
   // ---- events --------------------------------------------------------------------------------
