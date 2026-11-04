@@ -41,11 +41,14 @@ public class ForbiddenScan {
 
   /**
    * The reason an entry path (relative, '/'-separated) is forbidden, or null. A leading
-   * META-INF/versions/<digits>/ (any case) is ignored, in jars and the classes tree alike.
+   * META-INF/versions/<digits>/ (any case) and any trailing '/' are ignored, in jars and the
+   * classes tree alike.
    */
   static String forbiddenPath(String path) {
     var m = VERSIONED.matcher(path);
     var p = (m.lookingAt() ? path.substring(m.end()) : path).toLowerCase(Locale.ROOT);
+    // ZipFile.getEntry(x) also matches an entry named x/, which can hold data: drop trailing '/'.
+    p = p.replaceAll("/+$", "");
     if (p.equals("noir/holdout") || p.startsWith("noir/holdout/")) {
       return "holdout lookalike";
     }

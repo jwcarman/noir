@@ -201,4 +201,27 @@ class ForbiddenScanTest {
             "META-INF/versions/9/a/B.class", bytes("x")));
     assertThat(scan()).isEmpty();
   }
+
+  @Test
+  void trailingSlashJunitPropertiesWithDataIsFlagged() throws Exception {
+    jar(
+        "slash.jar",
+        Map.of(
+            "junit-platform.properties/",
+            bytes("junit.jupiter.execution.timeout.mode=disabled\n")));
+    assertThat(scan())
+        .anyMatch(l -> l.contains("slash.jar") && l.contains("junit-platform.properties"));
+  }
+
+  @Test
+  void versionedTrailingSlashJunitPropertiesIsFlagged() throws Exception {
+    jar(
+        "mr-slash.jar",
+        Map.of(
+            "META-INF/MANIFEST.MF", bytes(MULTI_RELEASE_MANIFEST),
+            "META-INF/versions/9/junit-platform.properties//",
+                bytes("junit.jupiter.execution.timeout.mode=disabled\n")));
+    assertThat(scan())
+        .anyMatch(l -> l.contains("mr-slash.jar") && l.contains("junit-platform.properties"));
+  }
 }

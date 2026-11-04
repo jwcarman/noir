@@ -407,4 +407,24 @@ class ContainerGradeRunnerIT {
         "java.nio.file.Files.write(java.nio.file.Path.of(args[2]), new byte[0]);"
             + " System.exit(3);");
   }
+
+  /** ZipFile.getEntry("x") also matches "x/", so this entry is served as the properties file. */
+  @Test
+  void jarWithTrailingSlashJunitPropertiesFailsAsForbidden() throws Exception {
+    var classes = referenceClasses();
+    var deps = Files.createDirectories(tmp.resolve("deps"));
+    try (var zip =
+        new java.util.zip.ZipOutputStream(Files.newOutputStream(deps.resolve("slash.jar")))) {
+      zip.putNextEntry(new java.util.zip.ZipEntry("junit-platform.properties/"));
+      zip.write(
+          "junit.jupiter.execution.timeout.mode=disabled\n"
+              .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      zip.closeEntry();
+    }
+    assertThat(grade(classes, deps).outcome()).isEqualTo(ZERO);
+    var artifacts = new GradeArtifacts(tmp.resolve("out"));
+    assertThat(artifacts.read("forbidden.txt")).contains("junit-platform.properties/");
+    assertThat(artifacts.exit("forbidden")).contains(0);
+    assertThat(tmp.resolve("out/run-1")).doesNotExist();
+  }
 }
