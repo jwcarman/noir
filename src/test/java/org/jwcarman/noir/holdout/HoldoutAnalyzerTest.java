@@ -85,6 +85,49 @@ class HoldoutAnalyzerTest {
     }
 
     @Test
+    void staticImportBypassCaught() {
+        source("T", "import static java.lang.Thread.sleep; import static java.time.Instant.*; import org.junit.jupiter.api.*; class T { @Test @Tag(\"R1\") @Tag(\"R2\") void a() throws Exception { sleep(1); now(); } }");
+        assertThat(analyze().problems()).containsExactlyInAnyOrder(
+                "T.java#a: nondeterministic API not allowed: sleep(1)",
+                "T.java#a: nondeterministic API not allowed: now()");
+    }
+
+    @Test
+    void fullyQualifiedDeniedApisCaught() {
+        source("T", "import org.junit.jupiter.api.*; class T { @Test @Tag(\"R1\") @Tag(\"R2\") void a() throws Exception { java.util.concurrent.Executors.newFixedThreadPool(2); new java.net.URL(\"http://x\"); Thread.startVirtualThread(() -> {}); new java.util.Date(); java.time.Year.now(); } }");
+        assertThat(analyze().problems()).containsExactlyInAnyOrder(
+                "T.java#a: nondeterministic API not allowed: java.util.concurrent.Executors.newFixedThreadPool(2)",
+                "T.java#a: nondeterministic API not allowed: new java.net.URL(\"http://x\")",
+                "T.java#a: nondeterministic API not allowed: Thread.startVirtualThread(() -> {\n})",
+                "T.java#a: nondeterministic API not allowed: new java.util.Date()",
+                "T.java#a: nondeterministic API not allowed: java.time.Year.now()");
+    }
+
+    @Test
+    void fullyQualifiedDeniedTypeInDeclarationCaught() {
+        source("T", "import org.junit.jupiter.api.*; class T { @Test @Tag(\"R1\") @Tag(\"R2\") void a() { java.util.concurrent.ExecutorService e = null; } }");
+        assertThat(analyze().problems()).containsExactly(
+                "T.java#a: nondeterministic API not allowed: java.util.concurrent.ExecutorService");
+    }
+
+    @Test
+    void nonUtf8FileNamedAsProblem() throws IOException {
+        Files.write(dir.resolve("Bad.java"), new byte[] {(byte) 0xC3, (byte) 0x28});
+        assertThat(analyze().problems()).containsExactly("Bad.java: is not valid UTF-8");
+    }
+
+    @Test
+    void privateOrStaticTestsRejectedAndDuplicateTagsCountOnce() {
+        source("T", "import org.junit.jupiter.api.*; class T { @Test @Tag(\"R1\") @Tag(\"R1\") void a() {} @Test @Tag(\"R2\") private void b() {} @Test @Tag(\"R2\") static void c() {} }");
+        var r = analyze();
+        assertThat(r.problems()).containsExactlyInAnyOrder(
+                "T.java#b: test method must not be private or static (JUnit will not run it)",
+                "T.java#c: test method must not be private or static (JUnit will not run it)",
+                "R2 has no holdout tests");
+        assertThat(r.testsPerRequirement()).containsEntry("R1", 1);
+    }
+
+    @Test
     void unparseableFile() {
         rawSource("T.java", "this is not java");
         assertThat(analyze().problems()).singleElement().asString().startsWith("T.java: does not parse");

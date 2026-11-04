@@ -83,6 +83,23 @@ class StoreTest {
     }
 
     @Test
+    void appendAfterTruncatedTailRecovers() throws IOException {
+        store.appendEvent(Event.of(Clock.systemUTC(), ID, "transition", 1, Map.of()));
+        Files.writeString(store.itemDir(ID).resolve("events.jsonl"), "{\"v\":1,\"ts\":", StandardOpenOption.APPEND);
+        store.appendEvent(Event.of(Clock.systemUTC(), ID, "after_crash", 1, Map.of()));
+        assertThat(store.readEvents(ID)).extracting(Event::type).containsExactly("transition", "after_crash");
+    }
+
+    @Test
+    void truncatedMultibyteTailIsSkipped() throws IOException {
+        store.appendEvent(Event.of(Clock.systemUTC(), ID, "transition", 1, Map.of("bar", "≥ 80%")));
+        var path = store.itemDir(ID).resolve("events.jsonl");
+        var partial = "{\"v\":1,\"data\":{\"bar\":\"≥".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Files.write(path, java.util.Arrays.copyOf(partial, partial.length - 1), StandardOpenOption.APPEND);
+        assertThat(store.readEvents(ID)).hasSize(1);
+    }
+
+    @Test
     void corruptMiddleEventLineFails() throws IOException {
         Files.createDirectories(store.itemDir(ID));
         Files.writeString(store.itemDir(ID).resolve("events.jsonl"), "garbage\n{\"v\":1}\n");

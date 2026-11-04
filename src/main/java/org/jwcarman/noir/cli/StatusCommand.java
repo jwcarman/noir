@@ -26,16 +26,34 @@ final class StatusCommand implements Callable<Integer> {
     @Override
     public Integer call() {
         var store = new Store(parent.home());
-        var items = store.itemIds().stream().map(store::readWorkItem).toList();
+        var items = store.itemIds().stream().map(id -> read(store, id)).toList();
         var out = spec.commandLine().getOut();
         out.print(json ? json(items) : table(items));
         out.flush();
         return 0;
     }
 
-    private static String json(List<WorkItem> items) {
-        var rows = items.stream().map(i -> {
+    /** A work item, or the error that prevented reading it. Exactly one of the two is non-null. */
+    private record Row(String id, WorkItem item, String error) {}
+
+    private static Row read(Store store, String id) {
+        try {
+            return new Row(id, store.readWorkItem(id), null);
+        } catch (RuntimeException e) {
+            return new Row(id, null, e.getMessage());
+        }
+    }
+
+    private static String json(List<Row> items) {
+        var rows = items.stream().map(r -> {
             Map<String, Object> row = new LinkedHashMap<>();
+            if (r.item() == null) {
+                row.put("id", r.id());
+                row.put("state", "UNREADABLE");
+                row.put("error", r.error());
+                return row;
+            }
+            var i = r.item();
             row.put("id", i.id());
             row.put("repo", i.repo());
             row.put("issue", i.issueNumber());
@@ -52,13 +70,18 @@ final class StatusCommand implements Callable<Integer> {
         }
     }
 
-    private static String table(List<WorkItem> items) {
+    private static String table(List<Row> items) {
         if (items.isEmpty()) {
             return "No work items.\n";
         }
         var rows = new java.util.ArrayList<String[]>();
         rows.add(new String[] {"ID", "REPO", "ISSUE", "STATE", "ATTEMPT"});
-        for (var i : items) {
+        for (var r : items) {
+            var i = r.item();
+            if (i == null) {
+                rows.add(new String[] {r.id(), "-", "-", "UNREADABLE", "-"});
+                continue;
+            }
             rows.add(new String[] {
                 i.id(),
                 i.repo(),

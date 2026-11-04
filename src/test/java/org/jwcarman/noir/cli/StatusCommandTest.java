@@ -58,6 +58,18 @@ class StatusCommandTest {
     }
 
     @Test
+    void unreadableItemDoesNotHideOthers() throws Exception {
+        store.writeWorkItem(WorkItem.sealed(ID, "jwcarman/demo", 7));
+        var broken = "nr-01JBX4ZQ8K3V0M7N2P5R6S9T1X";
+        java.nio.file.Files.createDirectories(store.itemDir(broken));
+        assertThat(run("status")).contains(ID).contains(broken).contains("UNREADABLE");
+        var node = Json.mapper().readTree(run("status", "--json"));
+        assertThat(node.at("/items/1/id").asText()).isEqualTo(broken);
+        assertThat(node.at("/items/1/state").asText()).isEqualTo("UNREADABLE");
+        assertThat(node.at("/items/1/error").asText()).contains("workitem.json");
+    }
+
+    @Test
     void homeOptionOverridesDefault() {
         var other = tmp.resolve("other");
         new Store(new NoirHome(other)).writeWorkItem(WorkItem.sealed(ID, "jwcarman/demo", 7));

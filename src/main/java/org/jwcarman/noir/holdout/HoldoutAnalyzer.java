@@ -16,7 +16,16 @@ import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -38,7 +47,10 @@ public final class HoldoutAnalyzer {
     private static final List<String> DENIED_PREFIXES =
             List.of("java.net", "java.nio.channels", "java.util.concurrent", "java.lang.reflect");
     private static final Set<String> CLOCK_TYPES =
-            Set.of("Instant", "LocalDate", "LocalDateTime", "LocalTime", "ZonedDateTime", "OffsetDateTime", "Clock");
+            Set.of("Instant", "LocalDate", "LocalDateTime", "LocalTime", "ZonedDateTime", "OffsetDateTime",
+                    "OffsetTime", "Year", "YearMonth", "MonthDay", "Clock");
+    private static final Set<String> THREAD_METHODS =
+            Set.of("sleep", "startVirtualThread", "ofPlatform", "ofVirtual", "onSpinWait", "yield");
 
     private HoldoutAnalyzer() {}
 
@@ -54,19 +66,30 @@ public final class HoldoutAnalyzer {
 
         for (var file : javaFiles(holdoutDir)) {
             var rel = holdoutDir.relativize(file).toString().replace(file.getFileSystem().getSeparator(), "/");
-            CompilationUnit cu;
+            String source;
             try {
-                var result = parser.parse(Files.readString(file));
-                if (!result.isSuccessful() || result.getResult().isEmpty()) {
-                    problems.add(rel + ": does not parse: " + result.getProblems().stream()
-                            .findFirst().map(p -> p.getMessage()).orElse("unknown error"));
-                    parseFailure = true;
-                    continue;
-                }
-                cu = result.getResult().get();
+                source = StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(Files.readAllBytes(file)))
+                        .toString();
+            } catch (CharacterCodingException e) {
+                problems.add(rel + ": is not valid UTF-8");
+                parseFailure = true;
+                continue;
             } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                problems.add(rel + ": cannot read: " + e.getMessage());
+                parseFailure = true;
+                continue;
             }
+            var result = parser.parse(source);
+            if (!result.isSuccessful() || result.getResult().isEmpty()) {
+                problems.add(rel + ": does not parse: " + result.getProblems().stream()
+                        .findFirst().map(p -> p.getMessage()).orElse("unknown error"));
+                parseFailure = true;
+                continue;
+            }
+            CompilationUnit cu = result.getResult().get();
 
             var pkg = cu.getPackageDeclaration().map(p -> p.getNameAsString()).orElse("");
             if (!pkg.equals(expectedPackage)) {
@@ -86,9 +109,13 @@ public final class HoldoutAnalyzer {
                 if (method.getAnnotations().stream().noneMatch(a -> TEST_ANNOTATIONS.contains(simpleName(a)))) {
                     continue;
                 }
-                totalTests++;
                 var where = rel + "#" + method.getNameAsString();
-                var tags = tagsOf(method);
+                if (method.isPrivate() || method.isStatic()) {
+                    problems.add(where + ": test method must not be private or static (JUnit will not run it)");
+                    continue;
+                }
+                totalTests++;
+                var tags = new LinkedHashSet<>(tagsOf(method));
                 if (tags.isEmpty()) {
                     problems.add(where + ": test has no requirement tag");
                 }
@@ -111,27 +138,72 @@ public final class HoldoutAnalyzer {
                 }
             });
         }
-        return new HoldoutReport(problems, counts, totalTests);
+        return new HoldoutReport(problems.stream().distinct().toList(), counts, totalTests);
     }
 
     private static void checkDeterminism(CompilationUnit cu, String rel, List<String> problems) {
+        // Static imports: member name -> declaring class simple names; asterisk imports apply to any member.
+        var staticMembers = new HashMap<String, List<String>>();
+        var staticWildcardClasses = new ArrayList<String>();
+        for (var imp : cu.getImports()) {
+            if (!imp.isStatic()) {
+                continue;
+            }
+            var name = imp.getNameAsString();
+            if (imp.isAsterisk()) {
+                staticWildcardClasses.add(name.substring(name.lastIndexOf('.') + 1));
+            } else {
+                var owner = name.substring(0, name.lastIndexOf('.'));
+                staticMembers.computeIfAbsent(name.substring(name.lastIndexOf('.') + 1), k -> new ArrayList<>())
+                        .add(owner.substring(owner.lastIndexOf('.') + 1));
+            }
+        }
         for (var call : cu.findAll(MethodCallExpr.class)) {
-            var scope = call.getScope().map(HoldoutAnalyzer::lastSegment).orElse("");
             var name = call.getNameAsString();
-            boolean banned = (scope.equals("Thread") && name.equals("sleep"))
-                    || (scope.equals("System") && (name.equals("currentTimeMillis") || name.equals("nanoTime")))
-                    || (scope.equals("Math") && name.equals("random"))
-                    || (CLOCK_TYPES.contains(scope) && name.equals("now"));
+            boolean banned;
+            if (call.getScope().isPresent()) {
+                var scope = call.getScope().get();
+                banned = bannedCall(lastSegment(scope), name)
+                        || ((scope instanceof NameExpr || scope instanceof FieldAccessExpr) && deniedName(scope.toString()));
+            } else {
+                var owners = new ArrayList<>(staticMembers.getOrDefault(name, List.of()));
+                owners.addAll(staticWildcardClasses);
+                banned = owners.stream().anyMatch(owner -> bannedCall(owner, name));
+            }
             if (banned) {
                 problems.add(location(call, rel) + ": nondeterministic API not allowed: " + call);
             }
         }
         for (var creation : cu.findAll(ObjectCreationExpr.class)) {
-            var type = creation.getType().getNameAsString();
-            if (type.equals("Thread") || (type.equals("Random") && creation.getArguments().isEmpty())) {
+            var type = creation.getType();
+            var simple = type.getNameAsString();
+            boolean noArgs = creation.getArguments().isEmpty();
+            if (simple.equals("Thread")
+                    || ((simple.equals("Random") || simple.equals("Date")) && noArgs)
+                    || deniedName(type.getNameWithScope())) {
                 problems.add(location(creation, rel) + ": nondeterministic API not allowed: " + creation);
             }
         }
+        for (var type : cu.findAll(ClassOrInterfaceType.class)) {
+            var parent = type.getParentNode().orElse(null);
+            if (parent instanceof ObjectCreationExpr || parent instanceof ClassOrInterfaceType) {
+                continue;
+            }
+            if (deniedName(type.getNameWithScope())) {
+                problems.add(location(type, rel) + ": nondeterministic API not allowed: " + type.getNameWithScope());
+            }
+        }
+    }
+
+    private static boolean bannedCall(String owner, String name) {
+        return (owner.equals("Thread") && THREAD_METHODS.contains(name))
+                || (owner.equals("System") && (name.equals("currentTimeMillis") || name.equals("nanoTime")))
+                || (owner.equals("Math") && name.equals("random"))
+                || (CLOCK_TYPES.contains(owner) && name.equals("now"));
+    }
+
+    private static boolean deniedName(String qualifiedName) {
+        return DENIED_PREFIXES.stream().anyMatch(p -> under(qualifiedName, p));
     }
 
     private static String location(Node node, String rel) {

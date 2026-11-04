@@ -75,7 +75,9 @@ public final class Store {
         try {
             Files.createDirectories(path.getParent());
             var line = (Json.mapper().writeValueAsString(event) + "\n").getBytes(UTF_8);
-            try (var ch = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
+            try (var ch = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+                discardInterruptedTail(ch);
+                ch.position(ch.size());
                 var buf = ByteBuffer.wrap(line);
                 while (buf.hasRemaining()) {
                     ch.write(buf);
@@ -87,37 +89,72 @@ public final class Store {
         }
     }
 
+    /** Truncates a partial final line (left by a crash mid-append) so the next append starts on a clean line. */
+    private static void discardInterruptedTail(FileChannel ch) throws IOException {
+        long size = ch.size();
+        if (size == 0) {
+            return;
+        }
+        var one = ByteBuffer.allocate(1);
+        long pos = size - 1;
+        ch.read(one, pos);
+        if (one.get(0) == '\n') {
+            return;
+        }
+        while (pos > 0) {
+            one.clear();
+            ch.read(one, pos - 1);
+            if (one.get(0) == '\n') {
+                break;
+            }
+            pos--;
+        }
+        ch.truncate(pos);
+    }
+
     /**
-     * Reads all events. A malformed final line without a trailing newline (an interrupted append) is skipped; any other
-     * malformed line is an error.
+     * Reads all events. A malformed or non-UTF-8 final line without a trailing newline (an interrupted append) is
+     * skipped; any other malformed line is an error.
      */
     public List<Event> readEvents(String id) {
         var path = itemDir(id).resolve(EVENTS);
         if (!Files.exists(path)) {
             return List.of();
         }
+        byte[] bytes;
         try {
-            var content = Files.readString(path, UTF_8);
-            var endsCleanly = content.isEmpty() || content.endsWith("\n");
-            var lines = content.split("\n", -1);
-            var events = new ArrayList<Event>();
-            for (int i = 0; i < lines.length; i++) {
-                var line = lines[i];
-                if (line.isBlank()) {
-                    continue;
-                }
-                try {
-                    events.add(Json.mapper().readValue(line, Event.class));
-                } catch (JsonProcessingException e) {
-                    boolean interruptedTail = i == lines.length - 1 && !endsCleanly;
-                    if (!interruptedTail) {
-                        throw new UncheckedIOException("Malformed event at " + path + " line " + (i + 1), e);
-                    }
-                }
-            }
-            return events;
+            bytes = Files.readAllBytes(path);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot read " + path, e);
         }
+        var events = new ArrayList<Event>();
+        int start = 0;
+        int lineNo = 0;
+        while (start < bytes.length) {
+            int end = start;
+            while (end < bytes.length && bytes[end] != '\n') {
+                end++;
+            }
+            lineNo++;
+            boolean interruptedTail = end == bytes.length;
+            var raw = java.util.Arrays.copyOfRange(bytes, start, end);
+            start = end + 1;
+            try {
+                var line = UTF_8.newDecoder()
+                        .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(raw))
+                        .toString();
+                if (line.isBlank()) {
+                    continue;
+                }
+                events.add(Json.mapper().readValue(line, Event.class));
+            } catch (IOException e) {
+                if (!interruptedTail) {
+                    throw new UncheckedIOException("Malformed event at " + path + " line " + lineNo, e);
+                }
+            }
+        }
+        return events;
     }
 }
