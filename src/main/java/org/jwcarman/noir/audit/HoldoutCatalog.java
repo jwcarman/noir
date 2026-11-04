@@ -27,6 +27,13 @@ public final class HoldoutCatalog {
     }
   }
 
+  /** A holdout file could not be parsed, so the catalog would be incomplete. */
+  public static final class UnreadableHoldoutException extends RuntimeException {
+    public UnreadableHoldoutException(String message) {
+      super(message);
+    }
+  }
+
   /** Tests in file-then-source order. Tags come from {@link HoldoutAnalyzer}. */
   public static List<HoldoutTest> load(Spec spec, Path holdoutDir) {
     // Imports are irrelevant to tags, so no stub packages are needed here.
@@ -42,10 +49,17 @@ public final class HoldoutCatalog {
       } catch (IOException e) {
         throw new UncheckedIOException(e);
       }
-      var cu = parser.parse(text).getResult().orElse(null);
-      if (cu == null) {
-        continue;
+      var result = parser.parse(text);
+      if (!result.isSuccessful() || result.getResult().isEmpty()) {
+        throw new UnreadableHoldoutException(
+            holdoutDir.relativize(file).toString().replace('\\', '/')
+                + ": does not parse: "
+                + result.getProblems().stream()
+                    .findFirst()
+                    .map(p -> p.getMessage())
+                    .orElse("unknown error"));
       }
+      var cu = result.getResult().get();
       var pkg = cu.getPackageDeclaration().map(p -> p.getNameAsString()).orElse("");
       var lines = text.split("\r?\n", -1);
       for (var method : cu.findAll(MethodDeclaration.class)) {

@@ -95,6 +95,9 @@ final class AuditCommand implements Callable<Integer> {
       store.appendEvent(Event.of(Clock.systemUTC(), itemId, "audit_verdict", item.attempt(), data));
       out.println("Recorded " + verdict + " for " + test);
       return 0;
+    } catch (HoldoutCatalog.UnreadableHoldoutException e) {
+      err.println(e.getMessage());
+      return 1;
     } catch (RuntimeException e) {
       err.println(Secrets.describe(e, parent.secrets()));
       return 2;

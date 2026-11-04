@@ -74,4 +74,16 @@ public class HoldoutCatalogTest {
         tests.stream().filter(t -> t.id().equals("CacheTest#getsPut")).findFirst().orElseThrow();
     assertThat(gets.source()).contains("Gets what was put.").contains("void getsPut()");
   }
+
+  @Test
+  void unparseableHoldoutFileIsAnError() throws IOException {
+    writeFixture(tmp);
+    var dir = tmp.resolve(ItemId.holdoutPackage(Specs.ID).replace('.', '/'));
+    Files.writeString(dir.resolve("BrokenTest.java"), "class BrokenTest { void x( {");
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> HoldoutCatalog.load(Specs.valid(), tmp))
+        .isInstanceOf(HoldoutCatalog.UnreadableHoldoutException.class)
+        .hasMessageContaining("BrokenTest.java");
+  }
 }

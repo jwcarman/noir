@@ -145,4 +145,22 @@ class AuditCommandTest {
 
     assertThat(store.readWorkItem(ID)).isEqualTo(before);
   }
+
+  @Test
+  void auditWithUnparseableHoldoutFails() throws IOException {
+    var dir =
+        store
+            .itemDir(ID)
+            .resolve("holdout")
+            .resolve(org.jwcarman.noir.spec.ItemId.holdoutPackage(ID).replace('.', '/'));
+    java.nio.file.Files.writeString(dir.resolve("BrokenTest.java"), "class BrokenTest { void x( {");
+
+    assertThat(run("audit", ID)).isEqualTo(1);
+    assertThat(run("audit", ID, "--test", "CacheTest#both", "--agree")).isEqualTo(1);
+
+    assertThat(out.toString()).isEmpty();
+    assertThat(err.toString().lines().count()).isEqualTo(2);
+    assertThat(err.toString()).contains("BrokenTest.java");
+    assertThat(store.readEvents(ID)).isEmpty();
+  }
 }
