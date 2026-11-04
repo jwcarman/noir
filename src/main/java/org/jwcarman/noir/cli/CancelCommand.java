@@ -1,6 +1,7 @@
 package org.jwcarman.noir.cli;
 
 import java.util.concurrent.Callable;
+import org.jwcarman.noir.factory.Secrets;
 import org.jwcarman.noir.lifecycle.Trigger;
 import org.jwcarman.noir.store.InstanceLock;
 import picocli.CommandLine.Command;
@@ -31,8 +32,8 @@ final class CancelCommand implements Callable<Integer> {
         return 2;
       }
       return ItemTriggers.apply(parent, spec, itemId, new Trigger.CancelRequested());
-    } catch (java.io.UncheckedIOException e) {
-      err.println(e.getMessage());
+    } catch (RuntimeException e) {
+      err.println(Secrets.describe(e, parent.secrets()));
       err.flush();
       return 2;
     }

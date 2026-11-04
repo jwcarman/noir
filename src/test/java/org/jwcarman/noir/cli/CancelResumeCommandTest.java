@@ -6,10 +6,16 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.jwcarman.noir.NoirHome;
+import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.deliver.FakeBranchPublisher;
+import org.jwcarman.noir.factory.Daemon;
+import org.jwcarman.noir.factory.GitHubDelivery;
+import org.jwcarman.noir.factory.Reconciler;
 import org.jwcarman.noir.github.FakeGitHub;
 import org.jwcarman.noir.lifecycle.BlockReason;
 import org.jwcarman.noir.lifecycle.State;
@@ -42,7 +48,8 @@ class CancelResumeCommandTest {
                 (once, listener) -> {
                   throw new AssertionError("run must not be invoked");
                 },
-            () -> gh);
+            () -> gh,
+            Set::of);
     return NoirCli.execute(
         new NoirHome(tmp), new PrintWriter(out), new PrintWriter(err), ops, args);
   }
@@ -156,5 +163,54 @@ class CancelResumeCommandTest {
     assertThat(err.toString()).isEqualTo("simulated setNoirLabel failure\n");
     assertThat(store.readWorkItem(A)).isEqualTo(before);
     assertThat(store.readEvents(A)).isEmpty();
+  }
+
+  @Test
+  void resumeIsRefusedWhenTheIssueWasClosed() {
+    var before = blocked(BlockReason.INFRASTRUCTURE, State.MEASURING);
+    gh.closeIssue(issue);
+
+    int code = run("resume", A);
+
+    assertThat(code).isEqualTo(1);
+    assertThat(err.toString())
+        .isEqualTo("Issue " + REPO + "#" + issue + " is closed; not resuming " + A + "\n");
+    assertThat(store.readWorkItem(A)).isEqualTo(before);
+    assertThat(gh.issue(issue).labels()).containsExactlyInAnyOrder("noir:blocked", "bug");
+    assertThat(store.readEvents(A)).isEmpty();
+  }
+
+  @Test
+  void anItemTheDaemonBlockedCanBeResumed() {
+    store.writeWorkItem(WorkItem.sealed(A, REPO, issue).withState(State.BUILDING).withAttempt(1));
+    var clock = java.time.Clock.systemUTC();
+    var daemon =
+        new Daemon(
+            store,
+            gh,
+            id -> {
+              throw new IllegalStateException("boom");
+            },
+            new Reconciler(store, gh, new GitHubDelivery(gh, new FakeBranchPublisher()), clock),
+            NoirConfig.defaults(),
+            d -> {},
+            clock,
+            Set.of(),
+            new Daemon.Listener() {
+              @Override
+              public void transition(org.jwcarman.noir.factory.StateChange change) {}
+
+              @Override
+              public void error(String itemId, String message) {}
+            });
+    daemon.runOnce();
+    assertThat(store.readWorkItem(A).state()).isEqualTo(State.BLOCKED);
+
+    int code = run("resume", A);
+
+    assertThat(code).isZero();
+    assertThat(out.toString()).isEqualTo(A + " BLOCKED → BUILDING\n");
+    assertThat(store.readWorkItem(A).state()).isEqualTo(State.BUILDING);
+    assertThat(gh.issue(issue).labels()).containsExactlyInAnyOrder("bug", "noir:building");
   }
 }

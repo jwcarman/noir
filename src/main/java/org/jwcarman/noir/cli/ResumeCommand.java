@@ -9,7 +9,8 @@ import picocli.CommandLine.ParentCommand;
 
 /**
  * Resumes a {@code BLOCKED} work item at the phase that blocked. A running daemon does not drive a
- * blocked item, so this needs no lock: the daemon picks the item up on its next pass.
+ * blocked item, so this needs no lock: the daemon picks the item up on its next pass. An item whose
+ * issue was closed is not resumed (reconciliation cancels it).
  */
 @Command(name = "resume", description = "Resume a blocked work item.")
 final class ResumeCommand implements Callable<Integer> {
@@ -21,6 +22,6 @@ final class ResumeCommand implements Callable<Integer> {
 
   @Override
   public Integer call() {
-    return ItemTriggers.apply(parent, spec, itemId, new Trigger.ResumeRequested());
+    return ItemTriggers.apply(parent, spec, itemId, new Trigger.ResumeRequested(), true);
   }
 }

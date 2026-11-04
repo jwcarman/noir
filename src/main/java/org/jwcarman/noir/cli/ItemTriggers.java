@@ -2,9 +2,9 @@ package org.jwcarman.noir.cli;
 
 import java.nio.file.Files;
 import java.time.Clock;
+import org.jwcarman.noir.factory.Secrets;
 import org.jwcarman.noir.factory.StateChange;
 import org.jwcarman.noir.factory.Transitions;
-import org.jwcarman.noir.github.GitHubException;
 import org.jwcarman.noir.lifecycle.IllegalTransitionException;
 import org.jwcarman.noir.lifecycle.Trigger;
 import org.jwcarman.noir.spec.ItemId;
@@ -25,6 +25,15 @@ final class ItemTriggers {
    * the item does not exist or the lifecycle refuses, 2 on an infrastructure error.
    */
   static int apply(NoirCli parent, CommandSpec spec, String itemId, Trigger trigger) {
+    return apply(parent, spec, itemId, trigger, false);
+  }
+
+  /**
+   * As {@link #apply(NoirCli, CommandSpec, String, Trigger)}; with {@code requireOpenIssue}, an
+   * item whose issue was closed is refused (exit 1) and left for reconciliation to cancel.
+   */
+  static int apply(
+      NoirCli parent, CommandSpec spec, String itemId, Trigger trigger, boolean requireOpenIssue) {
     var out = spec.commandLine().getOut();
     var err = spec.commandLine().getErr();
     var store = new Store(parent.home());
@@ -36,6 +45,16 @@ final class ItemTriggers {
       }
       var item = store.readWorkItem(itemId);
       var gh = parent.github();
+      if (requireOpenIssue && !gh.issueOpen(item.repo(), item.issueNumber())) {
+        err.println(
+            "Issue "
+                + item.repo()
+                + "#"
+                + item.issueNumber()
+                + " is closed; not resuming "
+                + itemId);
+        return 1;
+      }
       var change =
           Transitions.applyExternal(
               store,
@@ -46,14 +65,10 @@ final class ItemTriggers {
       out.println(line(change));
       return 0;
     } catch (IllegalTransitionException e) {
-      err.println(e.getMessage());
+      err.println(Secrets.describe(e, parent.secrets()));
       return 1;
-    } catch (GitHubException
-        | org.jwcarman.noir.exec.ToolMissingException
-        | java.io.UncheckedIOException
-        | IllegalArgumentException
-        | IllegalStateException e) {
-      err.println(e.getMessage());
+    } catch (RuntimeException e) {
+      err.println(Secrets.describe(e, parent.secrets()));
       return 2;
     } finally {
       out.flush();

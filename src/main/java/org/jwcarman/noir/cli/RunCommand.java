@@ -2,13 +2,9 @@ package org.jwcarman.noir.cli;
 
 import java.io.PrintWriter;
 import java.util.concurrent.Callable;
-import org.jwcarman.noir.docker.DockerException;
-import org.jwcarman.noir.exec.ToolMissingException;
 import org.jwcarman.noir.factory.Daemon;
-import org.jwcarman.noir.factory.InfraFailure;
+import org.jwcarman.noir.factory.Secrets;
 import org.jwcarman.noir.factory.StateChange;
-import org.jwcarman.noir.git.GitException;
-import org.jwcarman.noir.github.GitHubException;
 import org.jwcarman.noir.store.InstanceLock;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
@@ -36,15 +32,9 @@ final class RunCommand implements Callable<Integer> {
       }
       parent.runner().run(once, printer(out, err));
       return 0;
-    } catch (ToolMissingException
-        | DockerException
-        | GitHubException
-        | GitException
-        | InfraFailure
-        | java.io.UncheckedIOException
-        | IllegalArgumentException
-        | IllegalStateException e) {
-      err.println(e.getMessage());
+    } catch (RuntimeException e) {
+      // Every failure is one redacted line; picocli never prints a stack trace for noir run.
+      err.println(Secrets.describe(e, parent.secrets()));
       err.flush();
       return 2;
     }

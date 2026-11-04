@@ -2,6 +2,7 @@ package org.jwcarman.noir.cli;
 
 import java.io.PrintWriter;
 import java.nio.file.Path;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.jwcarman.noir.NoirHome;
@@ -29,9 +30,11 @@ public final class NoirCli implements Runnable {
   record Operations(
       Function<NoirHome, SealOperation> sealers,
       Function<NoirHome, RunOperation> runners,
-      Supplier<GitHubPort> github) {
+      Supplier<GitHubPort> github,
+      Supplier<Set<String>> secrets) {
     static Operations real() {
-      return new Operations(Wiring::sealOperation, Wiring::runOperation, Wiring::github);
+      return new Operations(
+          Wiring::sealOperation, Wiring::runOperation, Wiring::github, Wiring::secrets);
     }
   }
 
@@ -63,6 +66,11 @@ public final class NoirCli implements Runnable {
     return ops.github().get();
   }
 
+  /** Credential values that must never be printed. */
+  Set<String> secrets() {
+    return ops.secrets().get();
+  }
+
   /** The effective noir home: {@code --home} if given, else the default. */
   public NoirHome home() {
     return homeOverride != null ? new NoirHome(homeOverride) : defaultHome;
@@ -84,7 +92,12 @@ public final class NoirCli implements Runnable {
       Function<NoirHome, SealOperation> sealers,
       String... args) {
     var real = Operations.real();
-    return execute(home, out, err, new Operations(sealers, real.runners(), real.github()), args);
+    return execute(
+        home,
+        out,
+        err,
+        new Operations(sealers, real.runners(), real.github(), real.secrets()),
+        args);
   }
 
   static int execute(

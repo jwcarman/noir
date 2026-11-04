@@ -10,7 +10,9 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.github.GitHubPort;
+import org.jwcarman.noir.lifecycle.Lifecycle;
 import org.jwcarman.noir.lifecycle.State;
+import org.jwcarman.noir.lifecycle.Trigger;
 import org.jwcarman.noir.store.Event;
 import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
@@ -25,9 +27,11 @@ import org.jwcarman.noir.store.WorkItem;
  * transition to its {@link Listener} without the factory knowing about output.
  *
  * <p>A failure in one item never stops the pass: any {@link RuntimeException} is recorded as a
- * {@code daemon_error} event (secret values removed), reported, and the issue is labelled {@code
- * noir:blocked} on a best-effort basis. The item's state is left as it is, so it is retried on the
- * next pass (whose reconciliation restores the label of its state). Errors propagate.
+ * {@code daemon_error} event (secret values removed) and reported. An item that failed while {@code
+ * BUILDING}/{@code MEASURING}/{@code GRADING} is then blocked ({@code INFRASTRUCTURE}, resumable
+ * with {@code noir resume}) so a persistent fault cannot re-run a paid phase every poll; its issue
+ * is labelled {@code noir:blocked} after the state is persisted, best effort. A {@code
+ * SEALED}/{@code REWORK} item is left as it is and retried next pass. Errors propagate.
  *
  * <p>A thread interrupt stops the daemon between transitions; the interrupt flag is kept.
  */
@@ -96,7 +100,7 @@ public final class Daemon {
       try {
         reconciler.reconcile(id).ifPresent(listener::transition);
       } catch (RuntimeException e) {
-        itemError(id, null, "reconcile", e);
+        itemError(id, "reconcile", e);
       }
     }
     int advanced = 0;
@@ -150,7 +154,7 @@ public final class Daemon {
       try {
         next = driver.advance(current.id());
       } catch (RuntimeException e) {
-        itemError(current.id(), current, "drive", e);
+        driveFailed(current.id(), e);
         break;
       }
       listener.transition(new StateChange(current.id(), current.state(), next.state()));
@@ -160,25 +164,50 @@ public final class Daemon {
     return moved;
   }
 
-  /**
-   * Records and reports a failure for one item; for a drive failure also labels the issue {@code
-   * noir:blocked}. Every step is best effort: the daemon goes on with the next item regardless.
-   */
-  private void itemError(String id, WorkItem item, String during, RuntimeException e) {
+  /** Records and reports a failure for one item. Best effort: the pass goes on regardless. */
+  private void itemError(String id, String during, RuntimeException e) {
     var message = Secrets.describe(e, secrets);
     listener.error(id, message);
+    int attempt;
     try {
-      int attempt = item == null ? 0 : item.attempt();
+      attempt = store.readWorkItem(id).attempt();
+    } catch (RuntimeException unreadable) {
+      attempt = 0;
+    }
+    try {
       store.appendEvent(
           Event.of(clock, id, "daemon_error", attempt, Map.of("during", during, "error", message)));
     } catch (RuntimeException ignored) {
       // The store itself is failing; the listener already has the message.
     }
-    if (item != null && item.issueNumber() != null) {
+  }
+
+  /**
+   * After a drive failure, blocks an item whose stored state is active (persist first, then label
+   * {@code noir:blocked}); a {@code SEALED}/{@code REWORK} item is left for the next pass.
+   */
+  private void driveFailed(String id, RuntimeException e) {
+    itemError(id, "drive", e);
+    WorkItem stored;
+    StateChange change;
+    try {
+      stored = store.readWorkItem(id);
+      if (!stored.state().active()) {
+        return;
+      }
+      var trigger = new Trigger.InfraBlocked();
+      var next = Lifecycle.apply(stored, trigger, config.reworkRetries()).next();
+      change = Transitions.persist(store, clock, stored, next, trigger);
+    } catch (RuntimeException failed) {
+      listener.error(id, Secrets.describe(failed, secrets));
+      return;
+    }
+    listener.transition(change);
+    if (stored.issueNumber() != null) {
       try {
-        gh.setNoirLabel(item.repo(), item.issueNumber(), State.BLOCKED.label());
+        gh.setNoirLabel(stored.repo(), stored.issueNumber(), State.BLOCKED.label());
       } catch (RuntimeException ignored) {
-        // Best effort: reconciliation re-applies the stored state's label next pass anyway.
+        // Best effort: reconciliation re-applies noir:blocked on the next pass.
       }
     }
   }

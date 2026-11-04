@@ -23,7 +23,6 @@ import org.jwcarman.noir.factory.GitBundles;
 import org.jwcarman.noir.factory.GitHubDelivery;
 import org.jwcarman.noir.factory.Reconciler;
 import org.jwcarman.noir.factory.Retry;
-import org.jwcarman.noir.factory.Secrets;
 import org.jwcarman.noir.git.GitCli;
 import org.jwcarman.noir.github.GhCli;
 import org.jwcarman.noir.github.GitHubPort;
@@ -61,26 +60,16 @@ final class Wiring {
 
   /**
    * The daemon. When invoked it checks credentials, ensures the builder and grader images, then
-   * runs one pass or polls until interrupted. Any error message that would carry a credential value
-   * is redacted before it reaches the caller.
+   * runs one pass or polls until interrupted. {@link RunCommand} redacts any error it prints.
    */
   static RunOperation runOperation(NoirHome home) {
     return (once, listener) -> {
       var auth = AgentAuth.fromEnvironment(System.getenv());
-      Set<String> secrets = Set.copyOf(auth.values());
-      try {
-        var daemon = daemon(home, auth, secrets, listener);
-        if (once) {
-          daemon.runOnce();
-        } else {
-          daemon.runForever();
-        }
-      } catch (RuntimeException e) {
-        var message = e.getMessage() == null ? "" : e.getMessage();
-        if (secrets.stream().anyMatch(message::contains)) {
-          throw new IllegalStateException(Secrets.describe(e, secrets));
-        }
-        throw e;
+      var daemon = daemon(home, auth, Set.copyOf(auth.values()), listener);
+      if (once) {
+        daemon.runOnce();
+      } else {
+        daemon.runForever();
       }
     };
   }
@@ -112,6 +101,14 @@ final class Wiring {
             secrets);
     var reconciler = new Reconciler(store, gh, delivery, clock);
     return new Daemon(store, gh, factory, reconciler, config, sleeper, clock, secrets, listener);
+  }
+
+  /** Every credential value in the environment that agents could receive. */
+  static Set<String> secrets() {
+    return java.util.stream.Stream.of("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
+        .map(System::getenv)
+        .filter(v -> v != null && !v.isBlank())
+        .collect(java.util.stream.Collectors.toUnmodifiableSet());
   }
 
   static GitHubPort github() {

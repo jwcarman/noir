@@ -48,6 +48,12 @@ public final class Transitions {
     if (transition.effects().contains(SideEffect.APPLY_LABEL)) {
       labeler.accept(next, next.state());
     }
+    return persist(store, clock, item, next, trigger);
+  }
+
+  /** Writes {@code next} as {@code workitem.json} and appends its {@code transition} event. */
+  static StateChange persist(
+      Store store, Clock clock, WorkItem item, WorkItem next, Trigger trigger) {
     store.writeWorkItem(next);
     var data = new LinkedHashMap<String, Object>();
     data.put("from", item.state().name());

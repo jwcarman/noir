@@ -212,9 +212,47 @@ class DaemonTest {
     assertThat(event.type()).isEqualTo("daemon_error");
     var error = (String) event.data().get("error");
     assertThat(error).doesNotContain(SECRET).doesNotContain("\n").contains("docker failed");
-    assertThat(gh.issue(failing).labels()).containsExactly("noir:blocked");
+    // A SEALED item stays SEALED and keeps its state label (no flip to noir:blocked).
+    assertThat(gh.issue(failing).labels()).containsExactly("noir:ready");
     assertThat(reported).anySatisfy(r -> assertThat(r).startsWith("error " + A + ": "));
     assertThat(String.join("\n", reported)).doesNotContain(SECRET);
+  }
+
+  @Test
+  void activeItemThatFailsIsBlockedAndNotRetried() {
+    int n = issue(REPO, "noir:building");
+    store.writeWorkItem(WorkItem.sealed(A, REPO, n).withState(State.BUILDING).withAttempt(2));
+    driver.failures.put(
+        A,
+        id -> {
+          throw new java.io.UncheckedIOException(
+              "Cannot delete planted dir", new java.io.IOException("denied"));
+        });
+    var daemon = daemon();
+
+    daemon.runOnce();
+
+    var item = store.readWorkItem(A);
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason())
+        .isEqualTo(org.jwcarman.noir.lifecycle.BlockReason.INFRASTRUCTURE);
+    assertThat(item.blockedPhase()).isEqualTo(State.BUILDING);
+    assertThat(item.attempt()).isEqualTo(2);
+    var types = store.readEvents(A).stream().map(e -> e.type()).toList();
+    assertThat(types).containsSubsequence("daemon_error", "transition");
+    assertThat(store.readEvents(A).getLast().data())
+        .containsEntry("from", "BUILDING")
+        .containsEntry("to", "BLOCKED")
+        .containsEntry("trigger", "InfraBlocked");
+    assertThat(gh.issue(n).labels()).containsExactly("noir:blocked");
+    assertThat(reported).contains(A + " BUILDING -> BLOCKED");
+
+    driver.driven.clear();
+    daemon.runOnce();
+
+    assertThat(driver.driven).isEmpty();
+    assertThat(store.readWorkItem(A).state()).isEqualTo(State.BLOCKED);
+    assertThat(gh.issue(n).labels()).containsExactly("noir:blocked");
   }
 
   @Test
