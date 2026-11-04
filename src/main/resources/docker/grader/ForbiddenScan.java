@@ -1,7 +1,8 @@
 // noir grader pre-scan. Usage: java ForbiddenScan.java <classesDir> <depsDir> <outFile>
 //
 // Lists everything in the builder's classes and dependency jars that could subvert grading:
-// holdout lookalikes, JUnit service registrations, a root junit-platform.properties, manifests
+// holdout lookalikes, JUnit service registrations, a root junit-platform.properties (also under a
+// multi-release META-INF/versions/<N>/ prefix), manifests
 // with Class-Path (they pull in archives this scan never sees), odd manifest names, symlinks, and
 // anything in the deps directory that is not a plainly named regular .jar file.
 //
@@ -22,6 +23,8 @@ import java.util.regex.Pattern;
 
 public class ForbiddenScan {
   static final Pattern JAR_NAME = Pattern.compile("[A-Za-z0-9._-]+\\.jar");
+  // A multi-release jar serves META-INF/versions/<N>/x as x, so rules apply to the stripped name.
+  static final Pattern VERSIONED = Pattern.compile("(?i)meta-inf/versions/[0-9]+/");
   static final List<String> problems = new ArrayList<>();
 
   public static void main(String[] args) throws IOException {
@@ -35,9 +38,13 @@ public class ForbiddenScan {
     Files.write(out, problems, StandardCharsets.UTF_8);
   }
 
-  /** The reason an entry path (relative, '/'-separated) is forbidden, or null. */
+  /**
+   * The reason an entry path (relative, '/'-separated) is forbidden, or null. A leading
+   * META-INF/versions/<digits>/ (any case) is ignored, in jars and the classes tree alike.
+   */
   static String forbiddenPath(String path) {
-    var p = path.toLowerCase(Locale.ROOT);
+    var m = VERSIONED.matcher(path);
+    var p = (m.lookingAt() ? path.substring(m.end()) : path).toLowerCase(Locale.ROOT);
     if (p.equals("noir/holdout") || p.startsWith("noir/holdout/")) {
       return "holdout lookalike";
     }

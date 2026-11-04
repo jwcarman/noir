@@ -156,4 +156,49 @@ class ForbiddenScanTest {
         .anyMatch(l -> l.contains("link.jar"))
         .noneMatch(l -> l.contains("/a.jar"));
   }
+
+  static final String MULTI_RELEASE_MANIFEST =
+      "Manifest-Version: 1.0\r\nMulti-Release: true\r\n\r\n";
+
+  @Test
+  void multiReleaseVersionedJunitPropertiesIsFlagged() throws Exception {
+    jar(
+        "mr.jar",
+        Map.of(
+            "META-INF/MANIFEST.MF", bytes(MULTI_RELEASE_MANIFEST),
+            "META-INF/versions/9/junit-platform.properties",
+                bytes("junit.jupiter.execution.timeout.mode=disabled\n")));
+    assertThat(scan())
+        .anyMatch(l -> l.contains("mr.jar") && l.contains("junit-platform.properties"));
+  }
+
+  @Test
+  void multiReleaseVersionedHoldoutLookalikeIsFlagged() throws Exception {
+    jar(
+        "mr.jar",
+        Map.of(
+            "META-INF/MANIFEST.MF", bytes(MULTI_RELEASE_MANIFEST),
+            "META-INF/versions/11/noir/holdout/X.class", bytes("x")));
+    assertThat(scan()).anyMatch(l -> l.contains("mr.jar") && l.contains("noir/holdout/X.class"));
+  }
+
+  @Test
+  void versionedPrefixIsStrippedCaseInsensitivelyInJarsAndClasses() throws Exception {
+    jar("lower.jar", Map.of("meta-inf/Versions/17/junit-platform.properties", bytes("x")));
+    Files.createDirectories(classes.resolve("META-INF/versions/9/noir/holdout"));
+    Files.writeString(classes.resolve("META-INF/versions/9/noir/holdout/T.class"), "x");
+    assertThat(scan())
+        .anyMatch(l -> l.contains("lower.jar") && l.contains("junit-platform.properties"))
+        .anyMatch(l -> l.contains("META-INF/versions/9/noir/holdout"));
+  }
+
+  @Test
+  void versionedOrdinaryClassesAreClean() throws Exception {
+    jar(
+        "mr-ok.jar",
+        Map.of(
+            "META-INF/MANIFEST.MF", bytes(MULTI_RELEASE_MANIFEST),
+            "META-INF/versions/9/a/B.class", bytes("x")));
+    assertThat(scan()).isEmpty();
+  }
 }
