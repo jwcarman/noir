@@ -1,7 +1,7 @@
 # noir v1 — Design
 
 **Date:** 2026-11-03
-**Status:** Draft — revised after external review, pending author approval
+**Status:** Approved (2026-11-03)
 
 ## 1. Purpose
 
