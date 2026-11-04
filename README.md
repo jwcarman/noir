@@ -55,12 +55,26 @@ repos:
   - you/your-repo
 EOF
 
-bin/noir draft init --repo you/your-repo --title "Add a Counter"
-# fill in the draft's spec.json, then:
-bin/noir seal <draft-id> --repo-dir path/to/local/clone
+bin/noir skill install     # installs /noir-spec into ~/.claude/skills
+```
+
+Then open a Claude Code session inside a clean local clone of the target repo
+and run `/noir-spec`. It reads the repo, works out the API stubs and
+numbered, testable requirements with you one question at a time, writes the
+draft under `~/.noir/store/drafts/` (never into your working tree), shows you
+the exact issue text for approval, and seals it. Then build it from a
+terminal where your credential is exported:
+
+```bash
 bin/noir run --once        # or `bin/noir run` to keep polling
 bin/noir status
 ```
+
+**Without the skill:** `bin/noir draft init --repo you/your-repo --title "Add
+a Counter"`, fill in the printed draft's `spec.json` and `stubs/` by hand,
+check it with `bin/noir draft check <draft-id>`, preview it with
+`bin/noir draft show <draft-id>`, then
+`bin/noir seal <draft-id> --repo-dir path/to/local/clone`.
 
 Credentials are passed to containers through a private env file, never on
 the command line, and every outbound GitHub text is checked for them.
