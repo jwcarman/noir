@@ -191,7 +191,7 @@ public final class Sealer {
     return SealJudge.judge(artifacts, config.sealDiscrimination());
   }
 
-  static Set<String> stubPackages(List<StubSource> stubs) {
+  public static Set<String> stubPackages(List<StubSource> stubs) {
     var packages = new LinkedHashSet<String>();
     for (var stub : stubs) {
       var m = PACKAGE.matcher(stub.content());

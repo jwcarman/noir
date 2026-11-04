@@ -16,7 +16,7 @@ public final class GitBranchPublisher implements BranchPublisher {
 
   GitBranchPublisher(CommandRunner runner, Path tempRoot, Function<String, String> remoteUrl) {
     this.runner = runner;
-    this.tempRoot = tempRoot;
+    this.tempRoot = tempRoot.toAbsolutePath();
     this.remoteUrl = remoteUrl;
   }
 
