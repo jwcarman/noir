@@ -154,4 +154,35 @@ class ContainerBuildRunnerTest {
     }
     assertThat(attempt.resolve("FEEDBACK.md")).hasContent("fb");
   }
+
+  @Test
+  void postAlwaysStartsFromNoirsOwnInputBundle() throws IOException {
+    var tampering =
+        new ScriptedAgent((n, work) -> {
+          try {
+            Files.delete(work.resolve("input.bundle"));
+            Files.writeString(work.resolve("input.bundle"), "tampered");
+          } catch (IOException e) {
+            throw new UncheckedIOException(e);
+          }
+        });
+    var seen = new java.util.ArrayList<String>();
+    var recording =
+        new FakeContainerPort(spec -> {
+          var work = spec.mounts().get(0).host();
+          try {
+            seen.add(Files.readString(work.resolve("input.bundle")));
+            if (spec.command().get(0).endsWith("build-post.sh")) {
+              Files.writeString(work.resolve("out.bundle"), "# v2 git bundle\n");
+              Files.writeString(work.resolve("commits.txt"), "1\n");
+            }
+          } catch (IOException e) {
+            throw new UncheckedIOException(e);
+          }
+          return new ContainerResult(0, "", "", false, "sha");
+        });
+    new ContainerBuildRunner(recording, tampering, NoirConfig.defaults())
+        .run(Specs.valid(), List.of(), input, "noir/1-x", Optional.empty(), tmp.resolve("a"));
+    assertThat(seen).containsExactly("# v2 git bundle\n", "# v2 git bundle\n");
+  }
 }

@@ -70,7 +70,7 @@ class ContainerBuildRunnerIT {
             tmp.resolve("inspect").toAbsolutePath())) {
       assertThat(repo.commitsSince(base.sha(), BRANCH)).hasSize(1);
       assertThat(repo.patchSince(base.sha(), BRANCH))
-          .contains("noir: uncommitted work at agent exit")
+          .contains("noir: attempt work")
           .contains("+++ b/" + COUNTER_PATH)
           .contains("+++ b/" + COUNTER_TEST_PATH)
           .contains("Author: noir <noir@noir.invalid>");
@@ -152,55 +152,141 @@ class ContainerBuildRunnerIT {
     assertThat(outcome.bundle()).isRegularFile();
   }
 
-  @Test
-  void historyRewrittenPastTheBaseIsNoOutput() {
-    var agent =
-        new ScriptedAgent((n, work) -> {
-          var repo = work.resolve("repo");
-          GitFixtures.git(repo, "checkout", "-q", "--orphan", "rewritten");
-          BuildFixtures.write(repo, Map.of(COUNTER_PATH, BuildFixtures.reference()));
-          GitFixtures.git(repo, "add", "-A");
-          GitFixtures.git(repo, "commit", "-q", "-m", "fresh history");
-          GitFixtures.git(repo, "branch", "-M", BRANCH);
-        });
-    var attempt = tmp.resolve("attempt");
-    var outcome =
-        new ContainerBuildRunner(docker, agent, config)
-            .run(
-                BuildFixtures.spec(base.sha()),
-                BuildFixtures.stubs(),
-                base.bundle(),
-                BRANCH,
-                Optional.empty(),
-                attempt);
-    assertThat(outcome.producedCommits()).isFalse();
-    assertThat(attempt.resolve("post-error.txt")).content().contains("not an ancestor");
+  /** The bundle's single new commit and its patch, inspected with noir's own BundleRepo. */
+  String onlyNewCommit(BuildOutcome outcome) {
+    try (var repo =
+        BundleRepo.open(
+            new ProcessCommandRunner(),
+            outcome.bundle(),
+            tmp.resolve("inspect").toAbsolutePath())) {
+      assertThat(repo.commitsSince(base.sha(), BRANCH)).hasSize(1);
+      return repo.patchSince(base.sha(), BRANCH);
+    }
+  }
+
+  static void git(Path repo, String... args) {
+    GitFixtures.git(repo, args);
   }
 
   @Test
-  void destroyedRepositoryIsNoOutput() {
+  void rewrittenHistoryStillCapturesTheWorkingTree() {
     var agent =
         new ScriptedAgent((n, work) -> {
-          try (var paths = Files.walk(work.resolve("repo/.git"))) {
-            for (var p : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
-              Files.delete(p);
-            }
+          var repo = work.resolve("repo");
+          git(repo, "checkout", "-q", "--orphan", "rewritten");
+          BuildFixtures.write(repo, Map.of(COUNTER_PATH, BuildFixtures.reference()));
+          git(repo, "add", "-A");
+          git(repo, "commit", "-q", "-m", "fresh history");
+          git(repo, "branch", "-M", BRANCH);
+        });
+    var outcome = buildWith(agent, tmp.resolve("attempt"));
+    assertThat(outcome.producedCommits()).isTrue();
+    assertThat(onlyNewCommit(outcome))
+        .contains("noir: attempt work")
+        .contains("+++ b/" + COUNTER_PATH)
+        .doesNotContain("fresh history");
+  }
+
+  @Test
+  void deletedGitDirectoryStillCapturesTheWorkingTree() {
+    var agent =
+        new ScriptedAgent((n, work) -> {
+          var repo = work.resolve("repo");
+          BuildFixtures.write(repo, Map.of(COUNTER_PATH, BuildFixtures.reference()));
+          deleteTree(repo.resolve(".git"));
+        });
+    var outcome = buildWith(agent, tmp.resolve("attempt"));
+    assertThat(outcome.producedCommits()).isTrue();
+    assertThat(onlyNewCommit(outcome)).contains("+++ b/" + COUNTER_PATH);
+  }
+
+  @Test
+  void severalAgentCommitsAndEditsBecomeOneCommit() {
+    var agent =
+        new ScriptedAgent((n, work) -> {
+          var repo = work.resolve("repo");
+          BuildFixtures.write(repo, Map.of(COUNTER_PATH, BuildFixtures.reference()));
+          git(repo, "add", "-A");
+          git(repo, "commit", "-q", "-m", "agent one");
+          BuildFixtures.write(repo, Map.of(COUNTER_TEST_PATH, BuildFixtures.COUNTER_TEST));
+          git(repo, "add", "-A");
+          git(repo, "commit", "-q", "-m", "agent two");
+          BuildFixtures.write(repo, Map.of("NOTES.txt", "uncommitted\n"));
+          deleteTree(repo.resolve("src/main/java/com/example/api/Placeholder.java"));
+        });
+    var outcome = buildWith(agent, tmp.resolve("attempt"));
+    assertThat(outcome.producedCommits()).isTrue();
+    assertThat(onlyNewCommit(outcome))
+        .contains("noir: attempt work")
+        .contains("+++ b/" + COUNTER_PATH)
+        .contains("+++ b/" + COUNTER_TEST_PATH)
+        .contains("+++ b/NOTES.txt")
+        .contains("--- a/src/main/java/com/example/api/Placeholder.java")
+        .doesNotContain("agent one")
+        .doesNotContain("agent two");
+  }
+
+  @Test
+  void nestedRepositoryFilterNeverRunsAndNestedGitIsDropped() {
+    var attempt = tmp.resolve("attempt");
+    var agent =
+        new ScriptedAgent((n, work) -> {
+          var repo = work.resolve("repo");
+          var sub = repo.resolve("sub");
+          git(repo.getParent(), "init", "-q", sub.toString());
+          git(sub, "config", "filter.z.clean", "sh -c 'touch /work/SUB_RAN; cat'");
+          BuildFixtures.write(sub, Map.of(".gitattributes", "* filter=z\n", "f.txt", "one\n"));
+          git(sub, "add", "-A");
+          git(sub, "commit", "-q", "-m", "s");
+          BuildFixtures.write(sub, Map.of("f.txt", "two\n"));
+          deleteTree(work.resolve("SUB_RAN"));
+          git(repo, "add", "sub");
+          // gitfile variant: a submodule-style .git file pointing into .git/modules
+          var mod = repo.resolve("mod");
+          try {
+            Files.createDirectories(repo.resolve(".git/modules"));
           } catch (java.io.IOException e) {
             throw new java.io.UncheckedIOException(e);
           }
+          git(
+              repo.getParent(),
+              "init",
+              "-q",
+              "--separate-git-dir",
+              repo.resolve(".git/modules/mod").toString(),
+              mod.toString());
+          git(mod, "config", "filter.z.clean", "sh -c 'touch /work/MOD_RAN; cat'");
+          BuildFixtures.write(mod, Map.of(".gitattributes", "* filter=z\n", "g.txt", "one\n"));
+          git(mod, "add", "-A");
+          git(mod, "commit", "-q", "-m", "m");
+          BuildFixtures.write(mod, Map.of("g.txt", "two\n"));
+          deleteTree(work.resolve("MOD_RAN"));
+          git(repo, "add", "mod");
         });
-    var attempt = tmp.resolve("attempt");
-    var outcome =
-        new ContainerBuildRunner(docker, agent, config)
-            .run(
-                BuildFixtures.spec(base.sha()),
-                BuildFixtures.stubs(),
-                base.bundle(),
-                BRANCH,
-                Optional.empty(),
-                attempt);
-    assertThat(outcome.producedCommits()).isFalse();
-    assertThat(attempt.resolve("post-error.txt")).exists();
+    var outcome = buildWith(agent, attempt);
+    assertThat(attempt.resolve("SUB_RAN")).doesNotExist();
+    assertThat(attempt.resolve("MOD_RAN")).doesNotExist();
+    assertThat(outcome.producedCommits()).isTrue();
+    assertThat(onlyNewCommit(outcome))
+        .contains("+++ b/sub/f.txt")
+        .contains("+two")
+        .contains("+++ b/mod/g.txt")
+        .doesNotContain("Subproject commit")
+        .doesNotContainPattern("b/(sub|mod)/\\.git(/|\\n)")
+        .doesNotContain(".git/modules");
+  }
+
+  static void deleteTree(Path p) {
+    if (!Files.exists(p, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+      return;
+    }
+    try (var paths = Files.walk(p)) {
+      for (var f : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+        Files.delete(f);
+      }
+    } catch (java.io.IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
   }
 
   /** Appends builder-written git configuration that would run code during the post step. */
@@ -258,7 +344,7 @@ class ContainerBuildRunnerIT {
             outcome.bundle(),
             tmp.resolve("inspect").toAbsolutePath())) {
       assertThat(repo.patchSince(base.sha(), BRANCH))
-          .contains("noir: uncommitted work at agent exit")
+          .contains("noir: attempt work")
           .contains("+++ b/" + COUNTER_PATH)
           .contains("+  public void reset() {");
     }
@@ -303,15 +389,5 @@ class ContainerBuildRunnerIT {
           .contains("Author: noir <noir@noir.invalid>")
           .doesNotContain("Author: evil");
     }
-  }
-
-  @Test
-  void linkedWorktreeGitDirIsNoOutput() {
-    var attempt = tmp.resolve("attempt");
-    var agent =
-        new ScriptedAgent((n, work) ->
-            BuildFixtures.write(work.resolve("repo"), Map.of(".git/commondir", "../elsewhere\n")));
-    assertThat(buildWith(agent, attempt).producedCommits()).isFalse();
-    assertThat(attempt.resolve("post-error.txt")).content().contains("worktree");
   }
 }

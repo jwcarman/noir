@@ -21,11 +21,11 @@ import org.jwcarman.noir.agent.ScriptedAgent;
 import org.jwcarman.noir.build.BuildFixtures;
 import org.jwcarman.noir.build.ContainerBuildRunner;
 import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.deliver.BundleRepo;
 import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.docker.Images;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.feedback.FeedbackInput;
-import org.jwcarman.noir.git.GitFixtures;
 
 @Tag("docker")
 class ContainerMeasureRunnerIT {
@@ -250,17 +250,21 @@ import java.time.Duration;
     files.put("pom.xml", BuildFixtures.pom(HOSTILE_BUILD));
     files.put(COUNTER_TEST_PATH, PARTIAL_TEST);
     files.put("jacoco.xml", FAKE_JACOCO_XML);
-    files.put("target/site/jacoco/jacoco.xml", FAKE_JACOCO_XML);
+    files.put("site/jacoco/jacoco.xml", FAKE_JACOCO_XML);
     files.put("jacoco.exec", "not a real exec file\n");
-    files.put("target/jacoco.exec", "not a real exec file\n");
-    var bundle =
-        attempt(
-            files,
-            repo -> {
-              GitFixtures.git(repo, "add", "-A", "-f");
-              GitFixtures.git(repo, "commit", "-q", "-m", "fake reports");
-            });
+    files.put("coverage/jacoco.exec", "not a real exec file\n");
+    var bundle = attempt(files);
+    try (var repo =
+        BundleRepo.open(
+            new ProcessCommandRunner(), bundle, tmp.resolve("inspect").toAbsolutePath())) {
+      assertThat(repo.patchSince(base.sha(), BRANCH))
+          .contains("+++ b/jacoco.xml")
+          .contains("+++ b/jacoco.exec")
+          .contains("+++ b/site/jacoco/jacoco.xml")
+          .contains("+++ b/coverage/jacoco.exec");
+    }
     var m = measure(bundle);
+    assertThat(m.artifacts().read("build.log")).contains("Tests run: 1, Failures: 0");
     assertThat(m.outcome())
         .as(m.artifacts().logTail("build", 80))
         .isInstanceOf(MeasureOutcome.Shortfall.class);
@@ -276,6 +280,7 @@ import java.time.Duration;
     var files = correct();
     files.put("src/test/java/com/example/api/HostileTest.java", HOSTILE_TEST);
     var m = measure(attempt(files));
+    assertThat(m.artifacts().read("build.log")).contains("Running com.example.api.HostileTest");
     assertThat(m.outcome())
         .as(m.artifacts().logTail("build", 80))
         .isInstanceOf(MeasureOutcome.Passed.class);

@@ -75,7 +75,13 @@ public final class DockerCli implements ContainerPort {
       deleteQuietly(envFile);
     }
     if (r.timedOut()) {
-      runner.run(Command.of("docker", "rm", "-f", name).withTimeout(Duration.ofMinutes(1)));
+      var rm =
+          runner.run(Command.of("docker", "rm", "-f", name).withTimeout(Duration.ofMinutes(1)));
+      // A container that is still running could keep writing into its mounts after we move on.
+      if (!rm.ok() && !rm.stderr().contains("No such container")) {
+        throw new DockerException(
+            "timed-out container " + name + " could not be removed: " + rm.tail(10));
+      }
     } else if (r.exitCode() == 125 || daemonDown(r)) {
       throw failure("docker run", r);
     }

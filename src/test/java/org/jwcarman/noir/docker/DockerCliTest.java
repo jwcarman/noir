@@ -133,6 +133,28 @@ class DockerCliTest {
   }
 
   @Test
+  void timeoutWithFailedRemovalIsAnInfrastructureError() {
+    runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
+    runner.whenArgvStartsWith(List.of("docker", "run"), new CommandResult(-1, "", "", true));
+    runner.whenArgvStartsWith(
+        List.of("docker", "rm"), new CommandResult(1, "", "error: device busy\n", false));
+    assertThatThrownBy(() -> docker.run(ContainerSpec.of("img")))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("noir-test1")
+        .hasMessageContaining("device busy");
+  }
+
+  @Test
+  void timeoutWhereTheContainerIsAlreadyGoneIsFine() {
+    runner.whenArgvStartsWith(List.of("docker", "image", "inspect"), ok("sha256:abc\n"));
+    runner.whenArgvStartsWith(List.of("docker", "run"), new CommandResult(-1, "", "", true));
+    runner.whenArgvStartsWith(
+        List.of("docker", "rm"),
+        new CommandResult(1, "", "Error response from daemon: No such container: x\n", false));
+    assertThat(docker.run(ContainerSpec.of("img")).timedOut()).isTrue();
+  }
+
+  @Test
   void neverMountsDockerSocket() {
     assertThatThrownBy(() ->
             docker.run(

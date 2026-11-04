@@ -101,9 +101,12 @@ public final class ContainerBuildRunner implements BuildRunner {
                 config.budgets().wallClock(),
                 config.limits()));
 
-    // The agent could have planted the post step's outputs; only the post step may write them.
+    // The agent could have planted the post step's outputs or replaced input.bundle; the post step
+    // must start from noir's own bundle, and only it may write its outputs.
     try {
       deleteStale(attemptDir, POST_OUTPUTS);
+      deleteStale(attemptDir, List.of("input.bundle"));
+      copyBundle(inputBundle, attemptDir.resolve("input.bundle"));
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
