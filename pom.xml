@@ -25,6 +25,7 @@
     <maven-jar-plugin.version>3.5.1</maven-jar-plugin.version>
     <maven-install-plugin.version>3.2.0</maven-install-plugin.version>
     <maven-deploy-plugin.version>3.2.0</maven-deploy-plugin.version>
+    <spotless-maven-plugin.version>3.11.0</spotless-maven-plugin.version>
   </properties>
 
   <dependencyManagement>
@@ -90,6 +91,26 @@
                 <filter><artifact>*:*</artifact><excludes><exclude>META-INF/*.SF</exclude><exclude>META-INF/*.DSA</exclude><exclude>META-INF/*.RSA</exclude><exclude>module-info.class</exclude></excludes></filter>
               </filters>
             </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <version>${spotless-maven-plugin.version}</version>
+        <configuration>
+          <java>
+            <googleJavaFormat>
+              <style>GOOGLE</style>
+            </googleJavaFormat>
+          </java>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <phase>validate</phase>
           </execution>
         </executions>
       </plugin>
