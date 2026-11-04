@@ -138,6 +138,33 @@ class StatusCommandTest {
     assertThat(stderr.toString().lines().toList()).singleElement().asString().startsWith(ID);
   }
 
+  @Test
+  void statusPrintsExperimentBlock() {
+    store.writeWorkItem(WorkItem.sealed(ID, "jwcarman/demo", 7));
+    var out = run("status");
+    assertThat(out)
+        .contains("\n\nExperiment (1 item)\n")
+        .contains("Auto-merge           not eligible: 0/20");
+    assertThat(run("status")).startsWith("ID");
+  }
+
+  @Test
+  void statusJsonIncludesMetrics() throws Exception {
+    store.writeWorkItem(WorkItem.sealed(ID, "jwcarman/demo", 7));
+    var node = Json.mapper().readTree(run("status", "--json"));
+    assertThat(node.at("/metrics/items").asInt()).isEqualTo(1);
+    assertThat(node.at("/metrics/firstPassRate").isNull()).isTrue();
+    assertThat(node.at("/metrics/autoMerge/required").asInt()).isEqualTo(20);
+    assertThat(node.at("/metrics/autoMerge/eligible").asBoolean()).isFalse();
+    assertThat(node.at("/metrics/byState/SEALED").asInt()).isEqualTo(1);
+  }
+
+  @Test
+  void jsonEmptyStillHasMetrics() throws Exception {
+    var node = Json.mapper().readTree(run("status", "--json"));
+    assertThat(node.at("/metrics/items").asInt()).isZero();
+  }
+
   private String run(String... args) {
     var out = new StringWriter();
     var ops =
