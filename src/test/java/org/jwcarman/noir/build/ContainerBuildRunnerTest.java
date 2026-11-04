@@ -109,4 +109,30 @@ class ContainerBuildRunnerTest {
         .isInstanceOf(DockerException.class)
         .hasMessageContaining("out.bundle");
   }
+
+  @Test
+  void postErrorMeansNoOutputNotAnInfrastructureError() {
+    postWrites.remove("out.bundle");
+    postWrites.remove("commits.txt");
+    postWrites.put("post-error.txt", "base commit is not an ancestor of noir/1-x\n");
+    var outcome = run();
+    assertThat(outcome.producedCommits()).isFalse();
+  }
+
+  @Test
+  void stalePlantedSymlinksAreNeverFollowed() throws IOException {
+    var attempt = Files.createDirectories(tmp.resolve("attempt"));
+    var outside = Files.writeString(tmp.resolve("outside.txt"), "original");
+    for (var name : List.of("SPEC.md", "FEEDBACK.md", "input.bundle", "post-error.txt")) {
+      Files.createSymbolicLink(attempt.resolve(name), outside);
+    }
+    new ContainerBuildRunner(port, agent, NoirConfig.defaults())
+        .run(Specs.valid(), List.of(), input, "noir/1-x", Optional.of("fb"), attempt);
+    assertThat(outside).hasContent("original");
+    for (var name : List.of("SPEC.md", "FEEDBACK.md", "input.bundle")) {
+      assertThat(Files.isSymbolicLink(attempt.resolve(name))).as(name).isFalse();
+      assertThat(attempt.resolve(name)).isRegularFile();
+    }
+    assertThat(attempt.resolve("FEEDBACK.md")).hasContent("fb");
+  }
 }

@@ -7,6 +7,7 @@ import static org.jwcarman.noir.build.BuildFixtures.COUNTER_TEST_PATH;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,11 +73,12 @@ class ContainerMeasureRunnerIT {
 
   /** Tries to overwrite judged files from inside the builder's own test run. */
   static final String HOSTILE_TEST =
-      """
+"""
       package com.example.api;
 
       import java.nio.file.Files;
       import java.nio.file.Path;
+import java.time.Duration;
       import org.junit.jupiter.api.Test;
 
       class HostileTest {
@@ -107,7 +109,7 @@ class ContainerMeasureRunnerIT {
           }
         }
       }
-      """;
+""";
 
   static final String FAKE_JACOCO_XML =
       """
@@ -177,9 +179,13 @@ class ContainerMeasureRunnerIT {
       MeasureArtifacts artifacts, MeasureOutcome outcome, BuildFixtures.Recording rec) {}
 
   Measured measure(Path bundle) {
+    return measure(bundle, ContainerMeasureRunner.Timeouts.DEFAULT);
+  }
+
+  Measured measure(Path bundle, ContainerMeasureRunner.Timeouts timeouts) {
     var rec = new BuildFixtures.Recording(docker);
     var artifacts =
-        new ContainerMeasureRunner(rec, config)
+        new ContainerMeasureRunner(rec, config, timeouts)
             .run(
                 BuildFixtures.spec(base.sha()),
                 bundle,
@@ -288,5 +294,62 @@ class ContainerMeasureRunnerIT {
     }
     assertThat(Files.readString(m.artifacts().path("jacoco.xml"))).doesNotContain("forged");
     assertThat(m.artifacts().exportClasses().resolve("x.class")).doesNotExist();
+  }
+
+  /** Hangs forever; with {@code underPit} only when PIT's classes are on the classpath. */
+  static String hangingTest(boolean underPit) {
+    return """
+    package com.example.api;
+
+    import org.junit.jupiter.api.Test;
+
+    class HangTest {
+      @Test
+      void hang() throws Exception {
+        if (%s) {
+          Thread.sleep(Long.MAX_VALUE);
+        }
+      }
+
+      static boolean underPit() {
+        try {
+          Class.forName("org.pitest.testapi.TestUnit");
+          return true;
+        } catch (ClassNotFoundException e) {
+          return false;
+        }
+      }
+    }
+    """
+        .formatted(underPit ? "underPit()" : "true");
+  }
+
+  static final ContainerMeasureRunner.Timeouts SHORT =
+      new ContainerMeasureRunner.Timeouts(
+          Duration.ofSeconds(90), Duration.ofSeconds(45), Duration.ofMinutes(10));
+
+  @Test
+  void hangingBuilderTestIsABuildFailure() {
+    var files = correct();
+    files.put("src/test/java/com/example/api/HangTest.java", hangingTest(false));
+    var m = measure(attempt(files), SHORT);
+    // The script's step timeout fired (124), long before the container's own limit.
+    assertThat(m.artifacts().exit("build")).contains(124);
+    assertThat(m.outcome()).isInstanceOf(MeasureOutcome.Shortfall.class);
+    assertThat(((MeasureOutcome.Shortfall) m.outcome()).input())
+        .isInstanceOf(FeedbackInput.BuildFailed.class);
+  }
+
+  @Test
+  void builderTestHangingUnderPitIsAMutationTestingFailure() {
+    var files = correct();
+    files.put("src/test/java/com/example/api/HangTest.java", hangingTest(true));
+    var m = measure(attempt(files), SHORT);
+    assertThat(m.artifacts().exit("build")).contains(0);
+    assertThat(m.artifacts().exit("pit")).contains(124);
+    var input = ((MeasureOutcome.Shortfall) m.outcome()).input();
+    assertThat(input).isInstanceOf(FeedbackInput.BuildFailed.class);
+    assertThat(((FeedbackInput.BuildFailed) input).mavenOutput())
+        .startsWith("Mutation testing failed");
   }
 }

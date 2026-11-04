@@ -19,6 +19,7 @@ import org.jwcarman.noir.deliver.BundleRepo;
 import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.docker.Images;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
+import org.jwcarman.noir.git.GitFixtures;
 
 @Tag("docker")
 class ContainerBuildRunnerIT {
@@ -149,5 +150,56 @@ class ContainerBuildRunnerIT {
                 tmp.resolve("attempt"));
     assertThat(outcome.producedCommits()).isFalse();
     assertThat(outcome.bundle()).isRegularFile();
+  }
+
+  @Test
+  void historyRewrittenPastTheBaseIsNoOutput() {
+    var agent =
+        new ScriptedAgent((n, work) -> {
+          var repo = work.resolve("repo");
+          GitFixtures.git(repo, "checkout", "-q", "--orphan", "rewritten");
+          BuildFixtures.write(repo, Map.of(COUNTER_PATH, BuildFixtures.reference()));
+          GitFixtures.git(repo, "add", "-A");
+          GitFixtures.git(repo, "commit", "-q", "-m", "fresh history");
+          GitFixtures.git(repo, "branch", "-M", BRANCH);
+        });
+    var attempt = tmp.resolve("attempt");
+    var outcome =
+        new ContainerBuildRunner(docker, agent, config)
+            .run(
+                BuildFixtures.spec(base.sha()),
+                BuildFixtures.stubs(),
+                base.bundle(),
+                BRANCH,
+                Optional.empty(),
+                attempt);
+    assertThat(outcome.producedCommits()).isFalse();
+    assertThat(attempt.resolve("post-error.txt")).content().contains("not an ancestor");
+  }
+
+  @Test
+  void destroyedRepositoryIsNoOutput() {
+    var agent =
+        new ScriptedAgent((n, work) -> {
+          try (var paths = Files.walk(work.resolve("repo/.git"))) {
+            for (var p : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+              Files.delete(p);
+            }
+          } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+          }
+        });
+    var attempt = tmp.resolve("attempt");
+    var outcome =
+        new ContainerBuildRunner(docker, agent, config)
+            .run(
+                BuildFixtures.spec(base.sha()),
+                BuildFixtures.stubs(),
+                base.bundle(),
+                BRANCH,
+                Optional.empty(),
+                attempt);
+    assertThat(outcome.producedCommits()).isFalse();
+    assertThat(attempt.resolve("post-error.txt")).exists();
   }
 }

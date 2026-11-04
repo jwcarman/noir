@@ -32,13 +32,14 @@ import org.jwcarman.noir.spec.Spec;
  * then copies the builder-phase step records and PIT's report into the output directory with
  * symlink, size and format checks, and writes {@code stubs.txt} from the spec.
  *
- * <p>Any container failure, timeout, or missing infrastructure step is a {@link DockerException},
- * so the judge never sees an incomplete measurement.
+ * <p>Builder faults are builder failures: a build or PIT step that hangs, crashes, or dies with its
+ * container is recorded as that step's failure (exit 1, with the container's log tail), which the
+ * judge reports as a build or mutation-testing failure. Failures of noir-only work (the analyze
+ * container, its infrastructure steps, missing judged files) are a {@link DockerException}, so the
+ * judge never sees an incomplete measurement.
  */
 public final class ContainerMeasureRunner implements MeasureRunner {
-  static final Duration BUILD_TIMEOUT = Duration.ofMinutes(30);
-  static final Duration ANALYZE_TIMEOUT = Duration.ofMinutes(10);
-  static final Duration PIT_TIMEOUT = Duration.ofMinutes(30);
+  static final int LOG_TAIL_LINES = 80;
   static final long MAX_LOG_BYTES = 256 * 1024;
   static final long MAX_EXIT_BYTES = 16;
   static final String SCRIPT = "/opt/noir/bin/measure.sh";
@@ -77,10 +78,35 @@ public final class ContainerMeasureRunner implements MeasureRunner {
 
   private final ContainerPort docker;
   private final NoirConfig config;
+  private final Timeouts timeouts;
 
   public ContainerMeasureRunner(ContainerPort docker, NoirConfig config) {
+    this(docker, config, Timeouts.DEFAULT);
+  }
+
+  ContainerMeasureRunner(ContainerPort docker, NoirConfig config, Timeouts timeouts) {
     this.docker = docker;
     this.config = config;
+    this.timeouts = timeouts;
+  }
+
+  /**
+   * Time limits. {@code buildStep} bounds each builder-code step of the build phase (build, deps)
+   * and {@code pitStep} the PIT run; the script enforces them with {@code timeout}, so a hanging
+   * builder test is a recorded step failure. The containers get extra headroom on top.
+   */
+  record Timeouts(Duration buildStep, Duration pitStep, Duration analyze) {
+    static final Timeouts DEFAULT =
+        new Timeouts(Duration.ofMinutes(20), Duration.ofMinutes(25), Duration.ofMinutes(10));
+    static final Duration HEADROOM = Duration.ofMinutes(5);
+
+    Duration buildContainer() {
+      return buildStep.multipliedBy(2).plus(HEADROOM);
+    }
+
+    Duration pitContainer() {
+      return pitStep.plus(HEADROOM);
+    }
   }
 
   @Override
@@ -102,34 +128,45 @@ public final class ContainerMeasureRunner implements MeasureRunner {
       throw new UncheckedIOException(e);
     }
     var log = new StringBuilder();
+    Throwable primary = null;
     try {
       var env = Map.of("BASE_SHA", spec.baseSha(), "BRANCH", branch);
       var bundle = Mount.ro(attemptBundle, "/work/attempt.bundle");
 
-      phase(
-          log,
-          "build",
-          List.of(bundle, Mount.rw(buildDir, "/work/build")),
-          env,
-          true,
-          BUILD_TIMEOUT);
+      var buildEnv = new HashMap<>(env);
+      buildEnv.put("STEP_TIMEOUT", String.valueOf(timeouts.buildStep().toSeconds()));
+      var build =
+          phase(
+              log,
+              "build",
+              List.of(bundle, Mount.rw(buildDir, "/work/build")),
+              buildEnv,
+              true,
+              timeouts.buildContainer());
 
       var analyzeEnv = new HashMap<>(env);
       analyzeEnv.put("STUB_CLASSES", String.join(",", stubClasses(spec)));
-      phase(
-          log,
+      requireOk(
           "analyze",
-          List.of(
-              bundle,
-              Mount.ro(buildDir, "/work/build"),
-              Mount.ro(stubsDir, "/work/stubs"),
-              Mount.rw(outDir, "/work/out")),
-          analyzeEnv,
-          false,
-          ANALYZE_TIMEOUT);
+          phase(
+              log,
+              "analyze",
+              List.of(
+                  bundle,
+                  Mount.ro(buildDir, "/work/build"),
+                  Mount.ro(stubsDir, "/work/stubs"),
+                  Mount.rw(outDir, "/work/out")),
+              analyzeEnv,
+              false,
+              timeouts.analyze()));
 
-      copyRecord(buildDir.resolve("steps"), outDir, "build");
-      copyRecord(buildDir.resolve("steps"), outDir, "deps");
+      var buildFailure = failure("build", build);
+      copyRecord(buildDir.resolve("steps"), outDir, "build", buildFailure);
+      copyRecord(buildDir.resolve("steps"), outDir, "deps", buildFailure);
+      if (buildFailure != null) {
+        failStep(outDir, "build", buildFailure);
+      }
+      failBuildOnDeps(outDir);
       var a = new MeasureArtifacts(outDir);
       var targets = lines(a.read("target-classes.txt"));
       if (a.exit("build").orElse(1) != 0) {
@@ -137,24 +174,60 @@ public final class ContainerMeasureRunner implements MeasureRunner {
       } else if (targets.isEmpty()) {
         skip(outDir, 0, "skipped: no changed classes");
       } else {
-        phase(
-            log,
-            "pit",
-            List.of(Mount.ro(buildDir, "/work/build"), Mount.rw(pitDir, "/work/pit")),
-            Map.of("TARGET_CLASSES", String.join(",", targets)),
-            false,
-            PIT_TIMEOUT);
-        copyRecord(pitDir, outDir, "pit");
+        var pit =
+            phase(
+                log,
+                "pit",
+                List.of(Mount.ro(buildDir, "/work/build"), Mount.rw(pitDir, "/work/pit")),
+                Map.of(
+                    "TARGET_CLASSES",
+                    String.join(",", targets),
+                    "STEP_TIMEOUT",
+                    String.valueOf(timeouts.pitStep().toSeconds())),
+                false,
+                timeouts.pitContainer());
+        var pitFailure = failure("pit", pit);
+        copyRecord(pitDir, outDir, "pit", pitFailure);
+        if (pitFailure != null) {
+          failStep(outDir, "pit", pitFailure);
+        }
         copyMutations(pitDir, outDir);
       }
       writeStubs(outDir, stubClasses(spec));
+    } catch (RuntimeException | Error e) {
+      primary = e;
+      throw e;
     } finally {
-      writeLog(outDir, log);
-      deleteRecursively(scratch);
+      cleanup(outDir, log, scratch, primary);
     }
     var artifacts = new MeasureArtifacts(outDir);
     requireSteps(artifacts);
     return artifacts;
+  }
+
+  /**
+   * Writes the container log and removes scratch. A cleanup failure never masks the error that
+   * ended the run: it is added to that error as suppressed.
+   */
+  private static void cleanup(Path outDir, StringBuilder log, Path scratch, Throwable primary) {
+    RuntimeException failure = null;
+    for (Runnable step :
+        List.<Runnable>of(() -> writeLog(outDir, log), () -> deleteRecursively(scratch))) {
+      try {
+        step.run();
+      } catch (RuntimeException e) {
+        if (primary != null) {
+          primary.addSuppressed(e);
+        } else if (failure == null) {
+          failure = e;
+        } else {
+          failure.addSuppressed(e);
+        }
+      }
+    }
+    if (failure != null) {
+      throw failure;
+    }
   }
 
   /** Stub FQNs from the spec's stub paths ({@code src/main/java/a/b/C.java} → {@code a.b.C}). */
@@ -173,7 +246,7 @@ public final class ContainerMeasureRunner implements MeasureRunner {
     return classes;
   }
 
-  private void phase(
+  private ContainerResult phase(
       StringBuilder log,
       String name,
       List<Mount> mounts,
@@ -193,31 +266,79 @@ public final class ContainerMeasureRunner implements MeasureRunner {
       log.append(", timed out");
     }
     log.append(")\n").append(r.stdout()).append(r.stderr()).append('\n');
-    if (!r.ok()) {
-      throw new DockerException(
-          "measurement "
-              + name
-              + " container "
-              + (r.timedOut() ? "timed out" : "exited " + r.exitCode())
-              + ":\n"
-              + r.tail(40));
+    return r;
+  }
+
+  /** The analyze phase runs only noir code: any container failure is infrastructure. */
+  private static void requireOk(String name, ContainerResult r) {
+    var failure = failure(name, r);
+    if (failure != null) {
+      throw new DockerException("measurement " + failure);
+    }
+  }
+
+  /** A description of a failed container with its log tail, or null if it succeeded. */
+  private static String failure(String name, ContainerResult r) {
+    if (r.ok()) {
+      return null;
+    }
+    return name
+        + " container "
+        + (r.timedOut() ? "timed out" : "exited " + r.exitCode())
+        + ":\n"
+        + r.tail(LOG_TAIL_LINES);
+  }
+
+  /**
+   * A builder-code container (build, pit) that died or timed out is the builder's failure, not
+   * infrastructure: any step it left without a valid record already reads exit 1; this also fails a
+   * step that recorded success, since its container did not finish cleanly.
+   */
+  private static void failStep(Path outDir, String step, String failure) {
+    var a = new MeasureArtifacts(outDir);
+    if (a.exit(step).orElse(1) == 0) {
+      write(outDir, step + ".log", a.read(step + ".log") + "\nnoir: " + failure + "\n");
+      write(outDir, step + ".exit", "1\n");
+    }
+  }
+
+  /**
+   * Copying the build's dependencies runs the builder's POM, so its failure after a successful
+   * build is the builder's build failure (with the deps log), not an infrastructure error.
+   */
+  private static void failBuildOnDeps(Path outDir) {
+    var a = new MeasureArtifacts(outDir);
+    int deps = a.exit("deps").orElse(1);
+    if (a.exit("build").orElse(1) == 0 && deps != 0) {
+      write(
+          outDir,
+          "build.log",
+          a.read("build.log")
+              + "\nnoir: copying the build's dependencies failed (exit "
+              + deps
+              + "):\n"
+              + a.logTail("deps", LOG_TAIL_LINES)
+              + "\n");
+      write(outDir, "build.exit", "1\n");
     }
   }
 
   /**
    * Copies {@code <step>.log} (its tail) and {@code <step>.exit} from a scratch directory that
    * builder code could write. A missing, symlinked, oversized or malformed record means the step
-   * failed: that is the builder's doing, never an infrastructure error.
+   * failed: that is the builder's doing, never an infrastructure error. {@code containerFailure}
+   * (or null) explains a container that died before the step could record anything.
    */
-  static void copyRecord(Path from, Path outDir, String step) {
+  static void copyRecord(Path from, Path outDir, String step, String containerFailure) {
     var exit = safeFile(from, step + ".exit", MAX_EXIT_BYTES).map(ContainerMeasureRunner::text);
     var logText =
         safeFile(from, step + ".log", Long.MAX_VALUE).map(ContainerMeasureRunner::tail).orElse("");
     if (exit.isEmpty() || !EXIT.matcher(exit.get().strip()).matches()) {
-      write(
-          outDir,
-          step + ".log",
-          logText + "\nnoir: the " + step + " step left no valid exit record\n");
+      var why =
+          containerFailure != null
+              ? containerFailure
+              : "the " + step + " step left no valid exit record";
+      write(outDir, step + ".log", logText + "\nnoir: " + why + "\n");
       write(outDir, step + ".exit", "1\n");
       return;
     }

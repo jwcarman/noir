@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -159,11 +160,11 @@ class ContainerMeasureRunnerTest {
   }
 
   @Test
-  void timedOutContainerIsAnInfrastructureError() {
-    results.put("build", new ContainerResult(137, "", "", true, "sha"));
+  void timedOutAnalyzeContainerIsAnInfrastructureError() {
+    results.put("analyze", new ContainerResult(137, "", "", true, "sha"));
     assertThatThrownBy(this::run)
         .isInstanceOf(DockerException.class)
-        .hasMessageContaining("build container timed out");
+        .hasMessageContaining("analyze container timed out");
   }
 
   @Test
@@ -191,11 +192,85 @@ class ContainerMeasureRunnerTest {
   }
 
   @Test
-  void depsFailureAfterASuccessfulBuildIsAnInfrastructureError() {
+  void depsFailureAfterASuccessfulBuildIsABuildFailure() {
     writes.get("build").put("steps/deps.exit", "1\n");
-    assertThatThrownBy(this::run)
-        .isInstanceOf(DockerException.class)
-        .hasMessageContaining("deps exited 1");
+    writes.get("build").put("steps/deps.log", "Could not resolve dependencies\n");
+    var a = run();
+    assertThat(a.exit("build")).contains(1);
+    assertThat(a.read("build.log")).contains("Could not resolve dependencies");
+    assertThat(port.specs()).extracting(s -> s.command().get(1)).doesNotContain("pit");
+  }
+
+  @Test
+  void killedBuildContainerIsABuildFailureNotAnInfrastructureError() {
+    writes.put("build", new HashMap<>());
+    results.put("build", new ContainerResult(137, "[INFO] Running HangTest\n", "", true, "sha"));
+    var a = run();
+    assertThat(a.exit("build")).contains(1);
+    assertThat(a.exit("deps")).contains(1);
+    assertThat(a.read("build.log")).contains("Running HangTest").contains("timed out");
+    assertThat(a.exit("pit")).contains(1);
+  }
+
+  @Test
+  void crashedBuildContainerKeepsValidRecords() {
+    writes.get("build").remove("steps/deps.exit");
+    results.put("build", new ContainerResult(1, "", "killed", false, "sha"));
+    var a = run();
+    assertThat(a.exit("build")).contains(1);
+    assertThat(a.read("build.log")).contains("BUILD SUCCESS");
+  }
+
+  @Test
+  void killedPitContainerIsAMutationTestingFailure() {
+    writes.put("pit", new HashMap<>());
+    results.put("pit", new ContainerResult(137, "PIT >> scanning\n", "", true, "sha"));
+    var a = run();
+    assertThat(a.exit("pit")).contains(1);
+    assertThat(a.read("pit.log")).contains("PIT >> scanning").contains("timed out");
+  }
+
+  @Test
+  void builderStepsGetTimeoutsBelowTheirContainers() {
+    var t =
+        new ContainerMeasureRunner.Timeouts(
+            Duration.ofSeconds(30), Duration.ofSeconds(40), Duration.ofMinutes(10));
+    new ContainerMeasureRunner(port, NoirConfig.defaults(), t)
+        .run(
+            Specs.valid().withApiStubs(List.of("src/main/java/com/example/api/Foo.java")),
+            tmp.resolve("attempt.bundle"),
+            "noir/1-x",
+            tmp.resolve("stubs"),
+            tmp.resolve("measure"));
+    assertThat(phase("build").env()).containsEntry("STEP_TIMEOUT", "30");
+    assertThat(phase("build").timeout()).isGreaterThan(Duration.ofSeconds(60));
+    assertThat(phase("pit").env()).containsEntry("STEP_TIMEOUT", "40");
+    assertThat(phase("pit").timeout()).isGreaterThan(Duration.ofSeconds(40));
+  }
+
+  @Test
+  void failedCleanupDoesNotMaskTheOriginalError() throws IOException {
+    results.put("analyze", new ContainerResult(2, "", "boom", false, "sha"));
+    var locked = tmp.resolve("measure.scratch/build/locked");
+    writes.get("build").put("locked/file", "x");
+    port =
+        new FakeContainerPort(spec -> {
+          var phase = spec.command().get(1);
+          var rw = spec.mounts().stream().filter(m -> !m.readOnly()).findFirst().orElseThrow();
+          writes.getOrDefault(phase, Map.of()).forEach((k, v) -> write(rw.host().resolve(k), v));
+          if (phase.equals("build")) {
+            locked.toFile().setWritable(false);
+          }
+          return results.getOrDefault(phase, OK);
+        });
+    try {
+      assertThatThrownBy(this::run)
+          .isInstanceOf(DockerException.class)
+          .hasMessageContaining("analyze container exited 2")
+          .satisfies(e -> assertThat(e.getSuppressed()).isNotEmpty());
+    } finally {
+      locked.toFile().setWritable(true);
+    }
   }
 
   @Test

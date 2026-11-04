@@ -24,6 +24,8 @@ import java.util.regex.Pattern;
 public class ClassScan {
   static final Pattern SOURCE = Pattern.compile("src/main/java/(?:(.+)/)?([^/]+\\.java)");
   static final long MAX_CLASS_BYTES = 16L * 1024 * 1024;
+  // Nesting of annotation and array element values; javac output never comes close.
+  static final int MAX_DEPTH = 64;
 
   public static void main(String[] args) throws IOException {
     var classes = Path.of(args[0]);
@@ -53,7 +55,7 @@ public class ClassScan {
         Info info;
         try {
           info = read(file);
-        } catch (IOException | RuntimeException e) {
+        } catch (Throwable e) { // fail closed on anything, including StackOverflowError/OOM
           generated.add("unreadable class file: " + rel);
           continue;
         }
@@ -139,7 +141,11 @@ public class ClassScan {
     int n = in.readUnsignedShort();
     for (int i = 0; i < n; i++) {
       var attr = utf8[in.readUnsignedShort()];
-      var body = new byte[in.readInt()];
+      int length = in.readInt();
+      if (length < 0 || length > in.available()) {
+        throw new IOException("attribute length exceeds the class file");
+      }
+      var body = new byte[length];
       in.readFully(body);
       var data = new DataInputStream(new ByteArrayInputStream(body));
       if (sourceFile != null && "SourceFile".equals(attr)) {
@@ -149,7 +155,7 @@ public class ClassScan {
               || "RuntimeInvisibleAnnotations".equals(attr))) {
         int count = data.readUnsignedShort();
         for (int a = 0; a < count; a++) {
-          if (annotation(data, utf8)) {
+          if (annotation(data, utf8, 0)) {
             generated[0] = true;
           }
         }
@@ -158,12 +164,15 @@ public class ClassScan {
   }
 
   /** Skips one annotation; true if its type's simple name contains "Generated". */
-  static boolean annotation(DataInputStream in, String[] utf8) throws IOException {
+  static boolean annotation(DataInputStream in, String[] utf8, int depth) throws IOException {
+    if (depth > MAX_DEPTH) {
+      throw new IOException("annotation nesting too deep");
+    }
     var type = utf8[in.readUnsignedShort()];
     int pairs = in.readUnsignedShort();
     for (int i = 0; i < pairs; i++) {
       in.readUnsignedShort();
-      elementValue(in, utf8);
+      elementValue(in, utf8, depth + 1);
     }
     if (type == null) {
       throw new IOException("bad annotation type");
@@ -172,16 +181,19 @@ public class ClassScan {
     return simple.contains("Generated");
   }
 
-  static void elementValue(DataInputStream in, String[] utf8) throws IOException {
+  static void elementValue(DataInputStream in, String[] utf8, int depth) throws IOException {
+    if (depth > MAX_DEPTH) {
+      throw new IOException("element value nesting too deep");
+    }
     int tag = in.readUnsignedByte();
     switch (tag) {
       case 'B', 'C', 'D', 'F', 'I', 'J', 'S', 'Z', 's', 'c' -> in.readUnsignedShort();
       case 'e' -> in.readInt();
-      case '@' -> annotation(in, utf8);
+      case '@' -> annotation(in, utf8, depth + 1);
       case '[' -> {
         int n = in.readUnsignedShort();
         for (int i = 0; i < n; i++) {
-          elementValue(in, utf8);
+          elementValue(in, utf8, depth + 1);
         }
       }
       default -> throw new IOException("bad element value tag " + tag);

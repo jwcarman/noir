@@ -30,7 +30,9 @@
 # the acceptance gate (spec §7).
 #
 # Usage: measure.sh build|analyze|pit
-# Env: BRANCH, BASE_SHA; analyze also STUB_CLASSES (comma-separated FQNs); pit TARGET_CLASSES.
+# Env: BRANCH, BASE_SHA; build and pit also STEP_TIMEOUT (seconds per builder-code step: a step
+# that hangs is killed and records exit 124, a build or mutation-testing failure for the judge);
+# analyze also STUB_CLASSES (comma-separated FQNs); pit also TARGET_CLASSES.
 set -u
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0
 
@@ -49,6 +51,11 @@ MAX_EXEC_BYTES=$((256 * 1024 * 1024))
 reap() {
   kill -KILL -1 2>/dev/null
   return 0
+}
+
+# limited <function>: runs a builder-code step under STEP_TIMEOUT (exit 124 when it expires).
+limited() {
+  timeout -k 10s "${STEP_TIMEOUT:-1200}s" bash -c "$1"
 }
 
 # run <records-dir> <step> <function...>: runs the function, captures its output and exit code.
@@ -84,8 +91,8 @@ changed_includes() {
       *) d="*" ;; # the unnamed package
     esac
     case ":$out:" in *":$d:"*) ;; *) out="${out:+$out:}$d" ;; esac
-  done < <(g diff --name-only --diff-filter=AMR "$BASE_SHA" "refs/heads/$BRANCH" \
-    -- 'src/main/java/*.java')
+  done < <(g diff -z --name-only --diff-filter=AMR "$BASE_SHA" "refs/heads/$BRANCH" \
+    -- 'src/main/java/*.java' | tr '\0\n' '\n?')
   echo "$out"
 }
 
@@ -131,8 +138,8 @@ launcher() {
 build_phase() {
   mkdir -p "$BUILD/steps"
   run "$BUILD/steps" clone build_clone || exit 0
-  run "$BUILD/steps" build build
-  run "$BUILD/steps" deps deps
+  run "$BUILD/steps" build limited build
+  run "$BUILD/steps" deps limited deps
   exit 0
 }
 
@@ -167,11 +174,19 @@ holdout_sources() {
     >"$OUT/holdout-sources.txt"
 }
 
+# Paths come NUL-separated (-z), so no name is quoted or split. A name with a line break or other
+# control character cannot be one line of changed.txt: it is written with those characters
+# replaced by '?', which can never match a real source and so fails the judge's checks (closed).
 changed() {
   cd /tmp/repo || return 1
-  g diff --name-only --no-ext-diff --diff-filter=AMR "$BASE_SHA" "refs/heads/$BRANCH" \
-    >/tmp/changed-all.txt || return 1
-  { grep '\.java$' /tmp/changed-all.txt || true; } >"$OUT/changed.txt"
+  g diff -z --name-only --no-ext-diff --diff-filter=AMR "$BASE_SHA" "refs/heads/$BRANCH" \
+    >/tmp/changed-all || return 1
+  local f
+  while IFS= read -r -d '' f; do
+    case "$f" in
+      *.java) printf '%s\n' "${f//[[:cntrl:]]/?}" ;;
+    esac
+  done </tmp/changed-all >"$OUT/changed.txt"
 }
 
 forbidden() {
@@ -257,9 +272,13 @@ pit() {
 
 pit_phase() {
   mkdir -p "$PIT"
-  run "$PIT" pit pit
+  run "$PIT" pit limited pit
   exit 0
 }
+
+# limited steps run in a child bash: it needs the functions and settings.
+export BUILD OUT PIT LIB JACOCO_AGENT JACOCO_CLI LAUNCHER DEPENDENCY_PLUGIN
+export -f g changed_includes build deps launcher pit
 
 case "${1:-}" in
   build) build_phase ;;

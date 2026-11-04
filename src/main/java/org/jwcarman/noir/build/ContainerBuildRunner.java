@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.List;
@@ -36,6 +36,8 @@ import org.jwcarman.noir.spec.Spec;
 public final class ContainerBuildRunner implements BuildRunner {
   static final Duration GIT_TIMEOUT = Duration.ofMinutes(10);
   static final long MAX_COMMITS_BYTES = 64;
+  static final List<String> INPUTS = List.of("input.bundle", "SPEC.md", "FEEDBACK.md");
+  static final List<String> POST_OUTPUTS = List.of("out.bundle", "commits.txt", "post-error.txt");
 
   private final ContainerPort docker;
   private final AgentPort agent;
@@ -61,13 +63,21 @@ public final class ContainerBuildRunner implements BuildRunner {
     var env = Map.of("BRANCH", branch, "BASE_SHA", spec.baseSha());
     try {
       Files.createDirectories(attemptDir);
-      for (var stale : List.of("repo", "out.bundle", "commits.txt", "FEEDBACK.md")) {
-        deleteRecursively(attemptDir.resolve(stale));
-      }
+      deleteRecursively(attemptDir.resolve("repo"));
+      deleteStale(attemptDir, INPUTS);
+      deleteStale(attemptDir, POST_OUTPUTS);
       copyBundle(inputBundle, attemptDir.resolve("input.bundle"));
-      Files.writeString(attemptDir.resolve("SPEC.md"), SpecRenderer.specMd(spec, stubs));
+      Files.writeString(
+          attemptDir.resolve("SPEC.md"),
+          SpecRenderer.specMd(spec, stubs),
+          StandardOpenOption.CREATE_NEW,
+          StandardOpenOption.WRITE);
       if (feedback.isPresent()) {
-        Files.writeString(attemptDir.resolve("FEEDBACK.md"), feedback.get());
+        Files.writeString(
+            attemptDir.resolve("FEEDBACK.md"),
+            feedback.get(),
+            StandardOpenOption.CREATE_NEW,
+            StandardOpenOption.WRITE);
       }
     } catch (IOException e) {
       throw new UncheckedIOException(e);
@@ -87,9 +97,20 @@ public final class ContainerBuildRunner implements BuildRunner {
                 config.budgets().wallClock(),
                 config.limits()));
 
+    // The agent could have planted the post step's outputs; only the post step may write them.
+    try {
+      deleteStale(attemptDir, POST_OUTPUTS);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
     require("post", docker.run(gitStep("/opt/noir/bin/build-post.sh", attemptDir, env)));
 
     var bundle = attemptDir.resolve("out.bundle");
+    if (Files.exists(attemptDir.resolve("post-error.txt"), LinkOption.NOFOLLOW_LINKS)) {
+      // The agent left the repository unusable or rewrote history past the base commit: the
+      // attempt produced nothing noir can measure (NO_OUTPUT), which is the builder's failure.
+      return new BuildOutcome(bundle, false, result);
+    }
     if (!Files.isRegularFile(bundle, LinkOption.NOFOLLOW_LINKS)) {
       throw new DockerException("builder post step wrote no out.bundle");
     }
@@ -140,8 +161,19 @@ public final class ContainerBuildRunner implements BuildRunner {
       throw new IllegalArgumentException("Not a regular bundle file: " + from);
     }
     try (InputStream in = Files.newInputStream(from, LinkOption.NOFOLLOW_LINKS)) {
-      Files.deleteIfExists(to);
-      Files.copy(in, to, StandardCopyOption.REPLACE_EXISTING);
+      Files.copy(in, to); // fails if anything is (still) there; never follows a link
+    }
+  }
+
+  /** Deletes each name in {@code dir} without following links (a symlink itself is removed). */
+  private static void deleteStale(Path dir, List<String> names) throws IOException {
+    for (var name : names) {
+      var p = dir.resolve(name);
+      if (Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) {
+        deleteRecursively(p);
+      } else {
+        Files.deleteIfExists(p);
+      }
     }
   }
 

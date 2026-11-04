@@ -8,7 +8,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -135,9 +134,79 @@ class ClassScanTest {
     assertThat(scan().targets()).isEmpty();
   }
 
-  static List<Path> files(Path root) throws IOException {
-    try (Stream<Path> s = Files.walk(root)) {
-      return s.toList();
+  /** A minimal class file for com.example.api.A from A.java with one class-level attribute. */
+  static byte[] craftedClass(String attrName, byte[] attrBody, int declaredLength)
+      throws IOException {
+    var bytes = new java.io.ByteArrayOutputStream();
+    var out = new java.io.DataOutputStream(bytes);
+    out.writeInt(0xCAFEBABE);
+    out.writeShort(0);
+    out.writeShort(65);
+    String[] utf8 = {"com/example/api/A", "java/lang/Object", "SourceFile", "A.java", attrName};
+    out.writeShort(1 + utf8.length + 2); // utf8 entries #1..#5, classes #6, #7
+    for (var u : utf8) {
+      out.writeByte(1);
+      out.writeUTF(u);
     }
+    out.writeByte(7);
+    out.writeShort(1);
+    out.writeByte(7);
+    out.writeShort(2);
+    out.writeShort(0x21);
+    out.writeShort(6);
+    out.writeShort(7);
+    out.writeShort(0); // interfaces
+    out.writeShort(0); // fields
+    out.writeShort(0); // methods
+    out.writeShort(2);
+    out.writeShort(3);
+    out.writeInt(2);
+    out.writeShort(4);
+    out.writeShort(5);
+    out.writeInt(declaredLength);
+    out.write(attrBody);
+    out.flush();
+    return bytes.toByteArray();
+  }
+
+  void plant(byte[] classFile) throws IOException {
+    var dir = Files.createDirectories(classes.resolve("com/example/api"));
+    Files.write(dir.resolve("A.class"), classFile);
+  }
+
+  @Test
+  void deeplyNestedAnnotationValuesFailClosed() throws Exception {
+    int depth = 200_000;
+    var body = new java.io.ByteArrayOutputStream();
+    var out = new java.io.DataOutputStream(body);
+    out.writeShort(1); // one annotation
+    out.writeShort(1); // type: com/example/api/A (any utf8)
+    out.writeShort(1); // one element pair
+    out.writeShort(1);
+    for (int i = 0; i < depth; i++) {
+      out.writeByte('[');
+      out.writeShort(1);
+    }
+    out.writeByte('I');
+    out.writeShort(1);
+    out.flush();
+    plant(craftedClass("RuntimeVisibleAnnotations", body.toByteArray(), body.size()));
+    var s = scan("src/main/java/com/example/api/A.java");
+    assertThat(s.generated()).containsExactly("unreadable class file: com/example/api/A.class");
+  }
+
+  @Test
+  void hugeAttributeLengthFailsClosed() throws Exception {
+    plant(craftedClass("Junk", new byte[] {1, 2, 3}, Integer.MAX_VALUE));
+    var s = scan("src/main/java/com/example/api/A.java");
+    assertThat(s.generated()).containsExactly("unreadable class file: com/example/api/A.class");
+  }
+
+  @Test
+  void craftedClassWithinBoundsIsRead() throws Exception {
+    plant(craftedClass("Junk", new byte[] {1, 2, 3}, 3));
+    var s = scan("src/main/java/com/example/api/A.java");
+    assertThat(s.generated()).isEmpty();
+    assertThat(s.targets()).containsExactly("com.example.api.A");
   }
 }
