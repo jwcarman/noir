@@ -202,4 +202,116 @@ class ContainerBuildRunnerIT {
     assertThat(outcome.producedCommits()).isFalse();
     assertThat(attempt.resolve("post-error.txt")).exists();
   }
+
+  /** Appends builder-written git configuration that would run code during the post step. */
+  static void plant(Path repo, String config, Map<String, String> files) {
+    try {
+      Files.writeString(
+          repo.resolve(".git/config"), config, java.nio.file.StandardOpenOption.APPEND);
+    } catch (java.io.IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
+    BuildFixtures.write(repo, files);
+  }
+
+  BuildOutcome buildWith(ScriptedAgent agent, Path attempt) {
+    return new ContainerBuildRunner(docker, agent, config)
+        .run(
+            BuildFixtures.spec(base.sha()),
+            BuildFixtures.stubs(),
+            base.bundle(),
+            BRANCH,
+            Optional.empty(),
+            attempt);
+  }
+
+  @Test
+  void builderFilterDriversNeverRunInThePostStep() throws Exception {
+    var attempt = tmp.resolve("attempt");
+    var agent =
+        new ScriptedAgent((n, work) -> {
+          var repo = work.resolve("repo");
+          BuildFixtures.write(repo, Map.of(COUNTER_PATH, BuildFixtures.reference()));
+          plant(
+              repo,
+              """
+              [filter "x"]
+              \tclean = "sh -c 'touch /work/FILTER_RAN; kill -9 $PPID; cat'"
+              \tprocess = "sh -c 'touch /work/FILTER_RAN; kill -9 $PPID'"
+              \trequired = true
+              [core]
+              \tattributesFile = /work/repo/attrs
+              \tfsmonitor = "sh -c 'touch /work/FILTER_RAN'"
+              """,
+              Map.of(
+                  ".git/info/attributes", "* filter=x\n",
+                  ".gitattributes", "* filter=x\n",
+                  "attrs", "* filter=x\n"));
+        });
+    var outcome = buildWith(agent, attempt);
+    assertThat(attempt.resolve("FILTER_RAN")).doesNotExist();
+    assertThat(attempt.resolve("post-error.txt")).doesNotExist();
+    assertThat(outcome.producedCommits()).isTrue();
+    try (var repo =
+        BundleRepo.open(
+            new ProcessCommandRunner(),
+            outcome.bundle(),
+            tmp.resolve("inspect").toAbsolutePath())) {
+      assertThat(repo.patchSince(base.sha(), BRANCH))
+          .contains("noir: uncommitted work at agent exit")
+          .contains("+++ b/" + COUNTER_PATH)
+          .contains("+  public void reset() {");
+    }
+  }
+
+  @Test
+  void builderConfigIncludesAreIgnored() throws Exception {
+    var attempt = tmp.resolve("attempt");
+    var agent =
+        new ScriptedAgent((n, work) -> {
+          var repo = work.resolve("repo");
+          BuildFixtures.write(repo, Map.of(COUNTER_PATH, BuildFixtures.reference()));
+          plant(
+              repo,
+              """
+              [include]
+              \tpath = /work/repo/evil.config
+              [includeIf "gitdir:/work/"]
+              \tpath = /work/repo/evil.config
+              """,
+              Map.of(
+                  "evil.config",
+                  """
+                  [filter "y"]
+                  \tclean = "sh -c 'touch /work/INCLUDE_RAN; cat'"
+                  \trequired = true
+                  [user]
+                  \tname = evil
+                  """,
+                  ".gitattributes",
+                  "*.java filter=y\n"));
+        });
+    var outcome = buildWith(agent, attempt);
+    assertThat(attempt.resolve("INCLUDE_RAN")).doesNotExist();
+    assertThat(outcome.producedCommits()).isTrue();
+    try (var repo =
+        BundleRepo.open(
+            new ProcessCommandRunner(),
+            outcome.bundle(),
+            tmp.resolve("inspect").toAbsolutePath())) {
+      assertThat(repo.patchSince(base.sha(), BRANCH))
+          .contains("Author: noir <noir@noir.invalid>")
+          .doesNotContain("Author: evil");
+    }
+  }
+
+  @Test
+  void linkedWorktreeGitDirIsNoOutput() {
+    var attempt = tmp.resolve("attempt");
+    var agent =
+        new ScriptedAgent((n, work) ->
+            BuildFixtures.write(work.resolve("repo"), Map.of(".git/commondir", "../elsewhere\n")));
+    assertThat(buildWith(agent, attempt).producedCommits()).isFalse();
+    assertThat(attempt.resolve("post-error.txt")).content().contains("worktree");
+  }
 }

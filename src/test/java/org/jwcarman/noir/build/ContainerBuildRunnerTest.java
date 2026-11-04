@@ -87,11 +87,30 @@ class ContainerBuildRunnerTest {
   }
 
   @Test
-  void postTimeoutIsAnInfrastructureError() {
-    results.put("post", new ContainerResult(137, "", "", true, "sha"));
-    assertThatThrownBy(this::run)
-        .isInstanceOf(DockerException.class)
-        .hasMessageContaining("post container timed out");
+  void postTimeoutIsABuilderFault() {
+    postWrites.clear();
+    results.put("post", new ContainerResult(137, "git add hung\n", "", true, "sha"));
+    assertThat(run().producedCommits()).isFalse();
+  }
+
+  @Test
+  void killedPostContainerIsABuilderFault() {
+    postWrites.clear();
+    results.put("post", new ContainerResult(137, "", "Killed\n", false, "sha"));
+    var outcome = run();
+    assertThat(outcome.producedCommits()).isFalse();
+    assertThat(tmp.resolve("attempt/post-error.txt")).content().contains("exited 137");
+  }
+
+  @Test
+  void dockerLevelPostFailuresStayInfrastructureErrors() {
+    for (int exit : new int[] {125, 126, 127}) {
+      results.put("post", new ContainerResult(exit, "", "docker: error", false, "sha"));
+      assertThatThrownBy(this::run)
+          .as("exit " + exit)
+          .isInstanceOf(DockerException.class)
+          .hasMessageContaining("post container exited " + exit);
+    }
   }
 
   @Test

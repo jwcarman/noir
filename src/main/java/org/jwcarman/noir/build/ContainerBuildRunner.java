@@ -36,6 +36,10 @@ import org.jwcarman.noir.spec.Spec;
 public final class ContainerBuildRunner implements BuildRunner {
   static final Duration GIT_TIMEOUT = Duration.ofMinutes(10);
   static final long MAX_COMMITS_BYTES = 64;
+
+  /** Exit codes from {@code docker run} itself (daemon error, cannot invoke, command missing). */
+  static final java.util.Set<Integer> DOCKER_EXITS = java.util.Set.of(125, 126, 127);
+
   static final List<String> INPUTS = List.of("input.bundle", "SPEC.md", "FEEDBACK.md");
   static final List<String> POST_OUTPUTS = List.of("out.bundle", "commits.txt", "post-error.txt");
 
@@ -103,9 +107,17 @@ public final class ContainerBuildRunner implements BuildRunner {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
-    require("post", docker.run(gitStep("/opt/noir/bin/build-post.sh", attemptDir, env)));
-
+    var post = docker.run(gitStep("/opt/noir/bin/build-post.sh", attemptDir, env));
     var bundle = attemptDir.resolve("out.bundle");
+    if (!post.ok()) {
+      if (!post.timedOut() && DOCKER_EXITS.contains(post.exitCode())) {
+        require("post", post); // Docker itself could not run the step: infrastructure
+      }
+      // Anything else (killed, crashed, hung) happened while git ran in the agent's repository:
+      // the builder's failure, recorded as NO_OUTPUT with the post step's log tail.
+      postFailed(attemptDir, post);
+      return new BuildOutcome(bundle, false, result);
+    }
     if (Files.exists(attemptDir.resolve("post-error.txt"), LinkOption.NOFOLLOW_LINKS)) {
       // The agent left the repository unusable or rewrote history past the base commit: the
       // attempt produced nothing noir can measure (NO_OUTPUT), which is the builder's failure.
@@ -115,6 +127,23 @@ public final class ContainerBuildRunner implements BuildRunner {
       throw new DockerException("builder post step wrote no out.bundle");
     }
     return new BuildOutcome(bundle, commits(attemptDir.resolve("commits.txt")) > 0, result);
+  }
+
+  private static void postFailed(Path attemptDir, ContainerResult post) {
+    try {
+      deleteStale(attemptDir, POST_OUTPUTS);
+      Files.writeString(
+          attemptDir.resolve("post-error.txt"),
+          "noir post step: container "
+              + (post.timedOut() ? "timed out" : "exited " + post.exitCode())
+              + "\n"
+              + post.tail(40)
+              + "\n",
+          StandardOpenOption.CREATE_NEW,
+          StandardOpenOption.WRITE);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   private ContainerSpec gitStep(String script, Path attemptDir, Map<String, String> env) {
