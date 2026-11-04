@@ -57,9 +57,17 @@ test_classpath() {
 }
 
 # Pre-scan for builder entries that could subvert grading (see ForbiddenScan.java). It runs in its
-# own JVM, never loads builder classes, and fails closed. Tests only run when its list is empty.
+# own JVM, never loads builder classes, and fails closed. Tests only run when it exited 0 and wrote
+# an empty list (see scan_clean).
 forbidden_check() {
   java /opt/noir/bin/ForbiddenScan.java /work/classes /work/deps "$OUT/forbidden.txt"
+}
+
+# Fail closed: a scanner that crashed, was killed, or wrote no regular list is never clean.
+scan_clean() {
+  [ "$(cat "$OUT/forbidden.exit" 2>/dev/null)" = 0 ] &&
+    [ -f "$OUT/forbidden.txt" ] && [ ! -L "$OUT/forbidden.txt" ] &&
+    [ ! -s "$OUT/forbidden.txt" ]
 }
 
 holdout_compile() {
@@ -85,7 +93,7 @@ holdout_run() { # holdout_run <reports-dir-name>
 }
 
 run forbidden forbidden_check
-[ -s "$OUT/forbidden.txt" ] && exit 0
+scan_clean || exit 0
 run holdout-compile holdout_compile || exit 0
 run run-1 holdout_run run-1
 if [ "$(cat "$OUT/run-1.exit")" != 0 ]; then

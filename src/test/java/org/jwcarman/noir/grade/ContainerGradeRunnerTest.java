@@ -44,7 +44,68 @@ class ContainerGradeRunnerTest {
   }
 
   static final Map<String, String> GOOD =
-      Map.of("forbidden.exit", "0", "holdout-compile.exit", "0", "run-1.exit", "0");
+      Map.of(
+          "forbidden.exit",
+          "0",
+          "forbidden.txt",
+          "",
+          "holdout-compile.exit",
+          "0",
+          "run-1.exit",
+          "0");
+
+  static Map<String, String> without(Map<String, String> files, String key) {
+    var copy = new java.util.HashMap<>(files);
+    copy.remove(key);
+    return copy;
+  }
+
+  static Map<String, String> with(Map<String, String> files, String key, String value) {
+    var copy = new java.util.HashMap<>(files);
+    copy.put(key, value);
+    return copy;
+  }
+
+  @Test
+  void missingScanExitIsIncompleteGrade() {
+    assertThatThrownBy(() -> run(runner(result(0, false), without(GOOD, "forbidden.exit"))))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("forbidden");
+  }
+
+  @Test
+  void nonZeroScanExitIsIncompleteGrade() {
+    assertThatThrownBy(() -> run(runner(result(0, false), with(GOOD, "forbidden.exit", "1"))))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("forbidden");
+  }
+
+  @Test
+  void missingForbiddenListIsIncompleteGrade() {
+    assertThatThrownBy(() -> run(runner(result(0, false), without(GOOD, "forbidden.txt"))))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("forbidden.txt");
+  }
+
+  @Test
+  void symlinkedForbiddenListIsIncompleteGrade() {
+    var port =
+        new FakeContainerPort(spec -> {
+          var out = spec.mounts().get(3).host();
+          try {
+            for (var e : without(GOOD, "forbidden.txt").entrySet()) {
+              Files.writeString(out.resolve(e.getKey()), e.getValue());
+            }
+            Files.writeString(tmp.resolve("elsewhere.txt"), "");
+            Files.createSymbolicLink(out.resolve("forbidden.txt"), tmp.resolve("elsewhere.txt"));
+          } catch (IOException e) {
+            throw new UncheckedIOException(e);
+          }
+          return result(0, false);
+        });
+    assertThatThrownBy(() -> run(new ContainerGradeRunner(port, NoirConfig.defaults())))
+        .isInstanceOf(DockerException.class);
+  }
 
   @Test
   void completeRunReturnsArtifacts() {
@@ -68,13 +129,15 @@ class ContainerGradeRunnerTest {
     assertThatThrownBy(() ->
             run(
                 runner(
-                    result(0, false), Map.of("forbidden.exit", "0", "holdout-compile.exit", "0"))))
+                    result(0, false),
+                    Map.of(
+                        "forbidden.exit", "0", "forbidden.txt", "", "holdout-compile.exit", "0"))))
         .isInstanceOf(DockerException.class);
   }
 
   @Test
   void compileFailureNeedsNoRunExit() {
-    var files = Map.of("forbidden.exit", "0", "holdout-compile.exit", "1");
+    var files = Map.of("forbidden.exit", "0", "forbidden.txt", "", "holdout-compile.exit", "1");
     assertThat(run(runner(result(0, false), files)).exit("holdout-compile")).contains(1);
   }
 
@@ -84,6 +147,8 @@ class ContainerGradeRunnerTest {
         Map.of(
             "forbidden.exit",
             "0",
+            "forbidden.txt",
+            "",
             "holdout-compile.exit",
             "0",
             "run-1.exit",

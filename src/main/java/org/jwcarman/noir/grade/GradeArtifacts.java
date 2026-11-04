@@ -52,6 +52,16 @@ public record GradeArtifacts(Path outDir) {
     }
   }
 
+  /** Whether {@code file} exists as a regular file (not a symlink), whatever its size. */
+  public boolean present(String file) {
+    return regular(outDir.resolve(file), Long.MAX_VALUE);
+  }
+
+  /** Whether {@code file} exists as a regular file (not a symlink) with no content at all. */
+  public boolean empty(String file) {
+    return regular(outDir.resolve(file), 0);
+  }
+
   public Path path(String relative) {
     return outDir.resolve(relative);
   }

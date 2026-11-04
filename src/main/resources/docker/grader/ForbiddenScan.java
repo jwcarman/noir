@@ -1,14 +1,15 @@
 // noir grader pre-scan. Usage: java ForbiddenScan.java <classesDir> <depsDir> <outFile>
 //
 // Lists everything in the builder's classes and dependency jars that could subvert grading:
-// holdout lookalikes, JUnit service registrations, a root junit-platform.properties (also under a
-// multi-release META-INF/versions/<N>/ prefix), manifests
-// with Class-Path (they pull in archives this scan never sees), odd manifest names, symlinks, and
-// anything in the deps directory that is not a plainly named regular .jar file.
+// holdout lookalikes, JUnit service registrations, a root junit-platform.properties (each also under
+// a multi-release META-INF/versions/<N>/ prefix), manifests with Class-Path (they pull in archives
+// this scan never sees), odd manifest names, symlinks, and anything in the deps directory that is
+// not a plainly named regular .jar file.
 //
-// One line per problem is written to <outFile>; the exit code is always 0 once the file is
-// written. The scan fails closed: anything unexpected becomes a problem line. It only reads files
-// and zip entries and never loads builder classes.
+// One line per problem is written to <outFile>; the exit code is 0 once the file is written.
+// grade.sh runs the tests only if this exits 0 and leaves an empty file. The scan fails closed:
+// anything unexpected becomes a problem line. It only reads files and zip entries and never loads
+// builder classes.
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

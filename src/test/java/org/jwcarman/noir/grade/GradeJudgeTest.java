@@ -30,6 +30,8 @@ class GradeJudgeTest {
 
   @BeforeEach
   void compiled() {
+    exit("forbidden", 0);
+    file("forbidden.txt", "");
     exit("holdout-compile", 0);
   }
 
@@ -262,5 +264,40 @@ class GradeJudgeTest {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  @Test
+  void missingForbiddenListIsIncompleteGrade() throws IOException {
+    Files.delete(out.resolve("forbidden.txt"));
+    exit("run-1", 0);
+    junit("run-1", "a", true, "b", true, "c", true);
+    assertThatThrownBy(this::judge).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void nonZeroScanExitIsIncompleteGrade() {
+    exit("forbidden", 1);
+    exit("run-1", 0);
+    junit("run-1", "a", true, "b", true, "c", true);
+    assertThatThrownBy(this::judge).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void missingScanExitIsIncompleteGrade() throws IOException {
+    Files.delete(out.resolve("forbidden.exit"));
+    exit("run-1", 0);
+    junit("run-1", "a", true, "b", true, "c", true);
+    assertThatThrownBy(this::judge).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void oversizedForbiddenListIsNotClean() {
+    file("forbidden.txt", "x".repeat(2 * 1024 * 1024));
+    exit("run-1", 0);
+    junit("run-1", "a", true, "b", true, "c", true);
+    assertThat(judge())
+        .isEqualTo(
+            new GradeOutcome.Failed(
+                List.of(new RequirementResult("R1", 0, 0), new RequirementResult("R2", 0, 0))));
   }
 }

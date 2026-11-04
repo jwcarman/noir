@@ -18,7 +18,12 @@ public final class GradeJudge {
   private GradeJudge() {}
 
   public static GradeOutcome judge(GradeArtifacts a, TagIndex tags, List<String> requirementIds) {
-    if (!a.read("forbidden.txt").isEmpty()) {
+    int scan = a.exit("forbidden").orElseThrow(() -> missing("forbidden"));
+    if (scan != 0 || !a.present("forbidden.txt")) {
+      throw new IllegalStateException("grade step forbidden did not complete (exit " + scan + ")");
+    }
+    // Only an empty list is clean; anything else, even content too large to read, is a violation.
+    if (!a.empty("forbidden.txt")) {
       return new GradeOutcome.Failed(
           requirementIds.stream().map(id -> new RequirementResult(id, 0, 0)).toList());
     }

@@ -1,6 +1,7 @@
 package org.jwcarman.noir.grade;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -20,7 +21,9 @@ import org.jwcarman.noir.docker.ContainerPort;
 import org.jwcarman.noir.docker.ContainerResult;
 import org.jwcarman.noir.docker.ContainerSpec;
 import org.jwcarman.noir.docker.DockerCli;
+import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.docker.Images;
+import org.jwcarman.noir.docker.Mount;
 import org.jwcarman.noir.exec.Command;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.feedback.RequirementResult;
@@ -42,7 +45,7 @@ class ContainerGradeRunnerIT {
   @TempDir Path tmp;
 
   /** Records every container spec while delegating to Docker. */
-  static final class Recording implements ContainerPort {
+  static class Recording implements ContainerPort {
     final List<ContainerSpec> specs = new ArrayList<>();
 
     @Override
@@ -349,5 +352,59 @@ class ContainerGradeRunnerIT {
     Files.writeString(deps.resolve("notes.txt"), "x");
     assertThat(grade(classes, deps).outcome()).isEqualTo(ZERO);
     assertThat(new GradeArtifacts(tmp.resolve("out")).read("forbidden.txt")).contains("notes.txt");
+  }
+
+  /**
+   * Grades the reference classes with the image's scanner replaced (test-only bind mount) by one
+   * whose {@code main} body is {@code body}, then checks the tests never ran and the host refused
+   * the incomplete grade.
+   */
+  void assertBrokenScanSkipsTests(String body) throws Exception {
+    var scanner = tmp.resolve("FakeScan.java");
+    Files.writeString(
+        scanner,
+        "public class FakeScan { public static void main(String[] args) throws Exception { "
+            + body
+            + " } }");
+    var classes = referenceClasses();
+    var deps = Files.createDirectories(tmp.resolve("deps"));
+    var holdout = fixture("holdout-good");
+    var port =
+        new Recording() {
+          @Override
+          public ContainerResult run(ContainerSpec spec) {
+            var mounts = new ArrayList<>(spec.mounts());
+            mounts.add(Mount.ro(scanner, "/opt/noir/bin/ForbiddenScan.java"));
+            return super.run(spec.withMounts(mounts));
+          }
+        };
+    var runner = new ContainerGradeRunner(port, config);
+    var out = tmp.resolve("out");
+    assertThatThrownBy(
+            () -> runner.run(classes, deps, holdout, ItemId.holdoutPackage(Specs.ID), out))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("forbidden");
+    assertThat(out.resolve("forbidden.exit")).exists();
+    assertThat(out.resolve("holdout-compile.exit")).doesNotExist();
+    assertThat(out.resolve("holdout-compile.log")).doesNotExist();
+    assertThat(out.resolve("run-1.exit")).doesNotExist();
+    assertThat(out.resolve("run-1")).doesNotExist();
+  }
+
+  @Test
+  void scannerCrashWithoutListSkipsTests() throws Exception {
+    assertBrokenScanSkipsTests("System.exit(1);");
+  }
+
+  @Test
+  void scannerExitingCleanWithoutListSkipsTests() throws Exception {
+    assertBrokenScanSkipsTests("System.exit(0);");
+  }
+
+  @Test
+  void scannerFailingAfterEmptyListSkipsTests() throws Exception {
+    assertBrokenScanSkipsTests(
+        "java.nio.file.Files.write(java.nio.file.Path.of(args[2]), new byte[0]);"
+            + " System.exit(3);");
   }
 }

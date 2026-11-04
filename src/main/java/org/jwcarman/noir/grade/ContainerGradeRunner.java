@@ -79,10 +79,20 @@ public final class ContainerGradeRunner implements GradeRunner {
     return artifacts;
   }
 
-  /** Every step the script should have finished must have recorded an exit. */
+  /**
+   * Every step the script should have finished must have recorded an exit. The forbidden scan must
+   * also have exited 0 and written its list; a non-empty list is the judge's Failed verdict.
+   */
   private static void requireSteps(GradeArtifacts a) {
     require(a, "forbidden");
-    if (!a.read("forbidden.txt").isEmpty()) {
+    int scan = a.exit("forbidden").orElseThrow();
+    if (scan != 0) {
+      throw new DockerException("grader forbidden scan exited " + scan);
+    }
+    if (!a.present("forbidden.txt")) {
+      throw new DockerException("grader forbidden scan wrote no forbidden.txt");
+    }
+    if (!a.empty("forbidden.txt")) {
       return;
     }
     require(a, "holdout-compile");
