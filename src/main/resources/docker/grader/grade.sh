@@ -26,8 +26,13 @@ run() {
   return $rc
 }
 
+# Safe because the pre-scan guarantees plain jar names before any test runs.
 deps() {
-  find /work/deps -name '*.jar' 2>/dev/null | sort | paste -sd : -
+  local out="" f
+  while IFS= read -r -d '' f; do
+    out="${out:+$out:}$f"
+  done < <(find /work/deps -type f -name '*.jar' -print0 2>/dev/null | sort -z)
+  echo "$out"
 }
 
 # Compile classpath: launcher, builder classes, dependencies.
@@ -51,35 +56,10 @@ test_classpath() {
   echo "$cp"
 }
 
-# Lists builder entries that must not exist: holdout lookalikes, JUnit service registrations,
-# a root junit-platform.properties (the launcher would read builder-controlled configuration),
-# jars whose manifest has Class-Path (they would pull in archives never scanned here), and
-# anything in /work/deps that is not a plain .jar file.
+# Pre-scan for builder entries that could subvert grading (see ForbiddenScan.java). It runs in its
+# own JVM, never loads builder classes, and fails closed. Tests only run when its list is empty.
 forbidden_check() {
-  : >"$OUT/forbidden.txt"
-  find /work/classes \( -path '*/noir/holdout' -o -path '*/noir/holdout/*' \
-    -o -path '*/META-INF/services/org.junit.*' -o -path /work/classes/junit-platform.properties \) \
-    2>/dev/null >>"$OUT/forbidden.txt"
-  find /work/deps -mindepth 1 \( -type d -o ! -type f -o ! -name '*.jar' \) 2>/dev/null \
-    | sed 's|^|not a plain jar: |' >>"$OUT/forbidden.txt"
-  local jar listing scratch
-  scratch=$(mktemp -d)
-  for jar in $(find /work/deps -type f -name '*.jar' 2>/dev/null | sort); do
-    if listing=$(jar tf "$jar" 2>/dev/null); then
-      echo "$listing" \
-        | grep -E '(^|/)noir/holdout(/|$)|^META-INF/services/org\.junit\.|^junit-platform\.properties$' \
-        | sed "s|^|$jar: |" >>"$OUT/forbidden.txt"
-      rm -rf "${scratch:?}"/*
-      if (cd "$scratch" && jar xf "$jar" META-INF/MANIFEST.MF 2>/dev/null) \
-        && grep -qi '^Class-Path:' "$scratch/META-INF/MANIFEST.MF" 2>/dev/null; then
-        echo "$jar: manifest has Class-Path" >>"$OUT/forbidden.txt"
-      fi
-    else
-      echo "$jar: unreadable jar" >>"$OUT/forbidden.txt"
-    fi
-  done
-  rm -rf "$scratch"
-  return 0
+  java /opt/noir/bin/ForbiddenScan.java /work/classes /work/deps "$OUT/forbidden.txt"
 }
 
 holdout_compile() {

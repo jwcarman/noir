@@ -13,6 +13,7 @@ ADD --chmod=644 --checksum=sha256:e62b96ac475dbcde8599ea905d088f65d90778f86e259b
 
 COPY --chmod=755 grade.sh /opt/noir/bin/grade.sh
 COPY --chmod=644 grader.policy /opt/noir/grader.policy
+COPY --chmod=644 ForbiddenScan.java /opt/noir/bin/ForbiddenScan.java
 RUN chown -R root:root /opt/noir && chmod -R go-w /opt/noir
 
 ENV HOME=/home/noir

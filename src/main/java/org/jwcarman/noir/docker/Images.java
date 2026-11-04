@@ -13,7 +13,8 @@ public final class Images {
       List.of("Dockerfile", "toolchain/pom.xml", "seal-check.sh");
 
   static final String GRADER_ROOT = "/docker/grader/";
-  static final List<String> GRADER_FILES = List.of("Dockerfile", "grade.sh", "grader.policy");
+  static final List<String> GRADER_FILES =
+      List.of("Dockerfile", "grade.sh", "grader.policy", "ForbiddenScan.java");
 
   private Images() {}
 
