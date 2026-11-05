@@ -82,4 +82,37 @@ class RepoMirrorTest {
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> mirror.sync("a/b", "main"))
         .isInstanceOf(GitException.class);
   }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(
+      strings = {"../x", "a/..", "./b", "a/.", "/abs/path", "a/b/c", "a", "a/", "/a", "a\\b/c", ""})
+  void rejectsRepositoriesThatAreNotOwnerSlashName(String repo) {
+    var git = new RecordingGit();
+    var mirror = new RepoMirror(git, tmp.resolve("repos"));
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> mirror.sync(repo, "main"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("invalid repository: " + repo);
+    assertThat(git.calls).isEmpty();
+  }
+
+  @Test
+  void rejectsAnAbsolutePath() {
+    var git = new RecordingGit();
+    var mirror = new RepoMirror(git, tmp.resolve("repos"));
+    var abs = tmp.resolve("elsewhere/repo").toAbsolutePath().toString();
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> mirror.sync(abs, "main"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("invalid repository: " + abs);
+    assertThat(git.calls).isEmpty();
+  }
+
+  @Test
+  void acceptsOwnerSlashNameWithDotsDashesAndUnderscores() {
+    var git = new RecordingGit();
+    var root = tmp.resolve("repos");
+    var mirror = new RepoMirror(git, root);
+    assertThat(mirror.sync("jwcarman/noir-test", "main"))
+        .isEqualTo(root.resolve("jwcarman/noir-test"));
+    assertThat(mirror.sync("a_b.c/x.y-z_1", "main")).isEqualTo(root.resolve("a_b.c/x.y-z_1"));
+  }
 }

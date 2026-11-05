@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.stream.Stream;
 import org.jwcarman.noir.json.Json;
 import org.jwcarman.noir.spec.Spec;
+import org.jwcarman.noir.store.AtomicFiles;
 
 /** Canonical hashing of sealed material (spec §4.4). */
 public final class Commitments {
@@ -85,12 +86,9 @@ public final class Commitments {
     return sha256Hex(canonicalBytes(commitment));
   }
 
+  /** Writes atomically (temp file + rename): a crash never leaves a torn commitment. */
   public static void write(Commitment commitment, Path path) {
-    try {
-      Files.write(path, canonicalBytes(commitment));
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
+    AtomicFiles.write(path, canonicalBytes(commitment));
   }
 
   public static Commitment read(Path path) {

@@ -385,14 +385,12 @@ class ApprovalSealerTest {
     for (int i = 0; i < 3; i++) {
       checkResults.add((in, out) -> SealArtifactsFixture.vacuous(out));
     }
-    sealer.seal(item);
-    assertRejected(
-        new SealOutcome.Rejected(
-            SealRejection.SUITE_TOO_WEAK,
-            ApprovalComments.suiteTooWeak(3, List.of("1 hidden test passed against the stubs"))),
-        SealRejection.SUITE_TOO_WEAK,
-        ApprovalComments.suiteTooWeak(3, List.of("1 hidden test passed against the stubs")),
-        1);
+    var outcome = (SealOutcome.Rejected) sealer.seal(item);
+    var expected =
+        ApprovalComments.suiteTooWeak(3, List.of("1 hidden test passed against the stubs"));
+    assertThat(outcome.reason()).isEqualTo(SealRejection.SUITE_TOO_WEAK);
+    assertThat(outcome.comment()).isEqualTo(expected);
+    assertRejected(outcome, SealRejection.SUITE_TOO_WEAK, expected, 1);
     assertThat(itemDir().resolve("examiner/attempt-1")).isDirectory();
     assertThat(itemDir().resolve("examiner/attempt-3")).isDirectory();
     assertThat(itemDir().resolve("events.jsonl")).exists();

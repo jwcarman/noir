@@ -98,6 +98,29 @@ class CommitmentsTest {
     assertThat(Commitments.specSha256(Specs.valid(), dir)).isNotEqualTo(before);
   }
 
+  @Test
+  void writeReplacesAPartialFileAtomically() throws IOException {
+    write("holdout/T.java", "t");
+    var c = Commitments.create(Specs.valid(), dir, "m", "deadbeef");
+    var target = dir.resolve("out/commitment.json");
+    Files.createDirectories(target.getParent());
+    Files.writeString(target, "{\"baseSha\":\"trunc");
+    // A second name for the torn file's inode: an in-place write would change what it sees.
+    var oldInode = dir.resolve("old-inode.json");
+    Files.createLink(oldInode, target);
+
+    Commitments.write(c, target);
+
+    assertThat(Commitments.read(target)).isEqualTo(c);
+    assertThat(target).hasBinaryContent(Commitments.canonicalBytes(c));
+    assertThat(oldInode)
+        .as("target is replaced by rename, never rewritten in place")
+        .hasContent("{\"baseSha\":\"trunc");
+    try (var files = Files.list(target.getParent())) {
+      assertThat(files).as("no temp file left behind").containsExactly(target);
+    }
+  }
+
   private void write(String rel, String content) throws IOException {
     var p = dir.resolve(rel);
     Files.createDirectories(p.getParent());
