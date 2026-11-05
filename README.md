@@ -69,6 +69,7 @@ Target repositories must be single-module Maven projects on Java 21.
 mvn -B package -DskipTests
 
 # ~/.noir/config.yaml
+mkdir -p ~/.noir
 cat > ~/.noir/config.yaml <<'EOF'
 repos:
   - you/your-repo
@@ -88,6 +89,10 @@ command line, and every outbound GitHub text is checked for them.
 mvn -B package -DskipTests
 bin/noir skill install     # installs /noir-spec into ~/.claude/skills
 ```
+
+A noir server must already be watching the repo: it creates the `noir:*` labels
+that `/noir-spec` checks for, and otherwise the skill stops with "No noir
+server watches".
 
 Open a Claude Code session inside a clone of the target repo and run
 `/noir-spec`. It reads the repo, works out the API stubs and numbered,

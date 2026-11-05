@@ -47,8 +47,9 @@ Run these from inside the repository and tell the user plainly which one failed.
 2. **`gh` is authenticated.** `gh auth status` succeeds.
 3. **A noir server watches the repo.** Run
    `gh label list --repo <repo> --search noir:ready --json name -q '.[].name'` and require the
-   exact line `noir:ready` in its output. If it is missing, stop and say: "No noir server watches
-   <repo> (its noir labels are missing)."
+   exact line `noir:ready` in its output; then run the same command with `--search noir:draft`
+   and require the exact line `noir:draft`. If either is missing, stop and say: "No noir server
+   watches <repo> (its noir labels are missing)."
 
 Read the code on the default branch as the build will see it. If the local checkout is on another
 branch or is behind origin, mention it, but do not switch branches or pull for the user.
@@ -75,13 +76,15 @@ Keep your summary brief and relevant to the user's request.
 
 ## 4. The conversation
 
-First create a scratch directory outside the repo and keep its path in a shell variable for the
-later steps: `tmp=$(mktemp -d)`. Get the skeleton for the body with a provisional title taken
+First create a scratch directory outside the repo with `mktemp -d` (run it once). Shell state
+does not carry across separate commands, so record the absolute path it prints and use that
+literal path in every later command and in Edit/Write tool calls. Below, `<tmpdir>` stands for
+that recorded path: always substitute it. Get the skeleton for the body with a provisional title taken
 from the user's first description of the work (ask for one sentence first if they have not
 described it yet):
 
 ```
-noir spec template --title "<title>" > "$tmp/body.md"
+noir spec template --title "<title>" > <tmpdir>/body.md
 ```
 
 The skeleton shows the format. The spec is the issue body, and the issue title is the spec title:
@@ -95,7 +98,7 @@ The skeleton shows the format. The spec is the issue body, and the issue title i
 - `## Quality bar`: leave the three generated bullets alone unless the user asks to change them.
 - Optional trailing `---` and a `_noir ..._` footer: leave it as generated.
 
-Work through these in order, one question at a time, editing `"$tmp/body.md"` as agreement forms.
+Work through these in order, one question at a time, editing `<tmpdir>/body.md` as agreement forms.
 
 ### 4a. Intent
 
@@ -171,7 +174,7 @@ Run the mechanical check with the agreed title and fix every problem it reports 
 repeating until it prints `OK`:
 
 ```
-noir spec check "$tmp/body.md" --title "<title>"
+noir spec check <tmpdir>/body.md --title "<title>"
 ```
 
 Show the user the exact title and the full body and ask them to approve **that exact text**.
@@ -179,29 +182,35 @@ Make any changes they ask for, re-check, and show it again. Do not publish witho
 approval of the current text. Then publish it as a draft:
 
 ```
-gh issue create --repo <repo> --title "<title>" --body-file "$tmp/body.md" --label noir:draft
+gh issue create --repo <repo> --title "<title>" --body-file <tmpdir>/body.md --label noir:draft
 ```
 
-Print the issue URL it returns, delete the scratch directory (`rm -rf "$tmp"`), and go to
+Print the issue URL it returns, delete the scratch directory (`rm -rf <tmpdir>`), and go to
 section 7.
 
 ## 6. Revising an existing draft (`/noir-spec #N`)
 
-1. Fetch it: `gh issue view N --repo <repo> --json state,labels,title,body`. Refuse unless the
-   issue is open and labelled `noir:draft`, and is not labelled `noir:sealing`, `noir:building`
-   or `noir:pr-open`. Say plainly why (for example "it is already being built"). If the
-   `noir:ready` label is still present, tell the user it will be re-sealed when they re-approve.
-2. Create the scratch directory (`tmp=$(mktemp -d)`), write the body to `"$tmp/body.md"`, and
-   keep the title. If a seal was rejected, noir left a comment on the issue
-   (`gh issue view N --repo <repo> --comments`): read it and address its problems.
+1. Fetch its state: `gh issue view N --repo <repo> --json state,labels,title`. Refuse if the
+   issue is closed, lacks `noir:draft`, or has any of `noir:sealing`, `noir:building`,
+   `noir:pr-open`, `noir:failed` or `noir:blocked`. Tell the user why: noir is already working on
+   it or has finished, so changing the spec now means closing the issue and opening a new one.
+   Also refuse if it has `noir:ready`: the server may seal the edited text immediately, which
+   would defeat the approval. Tell the user to remove the `noir:ready` label on GitHub first,
+   then re-run `/noir-spec #N`.
+2. Create the scratch directory with `mktemp -d` (once) and record its absolute path as
+   `<tmpdir>` (substitute the literal path everywhere). Save the current body with
+   `gh issue view N --repo <repo> --json body -q .body > <tmpdir>/original.md`, copy it to
+   `<tmpdir>/body.md`, and work on `body.md`. Keep the title. If a seal was rejected, noir left a
+   comment on the issue (`gh issue view N --repo <repo> --comments`): read it and address its
+   problems.
 3. Revise with the user, one question at a time, using the guidance in section 4. Check with
-   `noir spec check "$tmp/body.md" --title "<title>"` until `OK`.
-4. Show the user a diff of the old and new text, and on explicit approval run
-   `gh issue edit N --repo <repo> --body-file "$tmp/body.md"` (add `--title "<title>"` if the
-   title changed). Delete the scratch directory (`rm -rf "$tmp"`).
+   `noir spec check <tmpdir>/body.md --title "<title>"` until `OK`.
+4. Show the user a diff of `original.md` against `body.md`, and on explicit approval run
+   `gh issue edit N --repo <repo> --body-file <tmpdir>/body.md` (add `--title "<title>"` if the
+   title changed). Delete the scratch directory (`rm -rf <tmpdir>`).
 
 ## 7. Finish
 
 End every run with: "Review issue #N on GitHub and add the `noir:ready` label when you're happy
-with it. noir will seal and build it from there." If a previous seal was rejected, remind the
-user that after revising they re-add `noir:ready` themselves; you never do.
+with it. noir will seal and build it from there." After a revision, add that the user re-adds
+`noir:ready` themselves (they removed it before the revision); you never do.

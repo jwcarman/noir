@@ -129,6 +129,26 @@ class NoirSpecSkillTest {
   }
 
   @Test
+  void skillUsesLiteralTempDirNotShellVariable() throws IOException {
+    var skill = SkillCommandTest.skillResource();
+
+    assertThat(skill)
+        .doesNotContain("$tmp")
+        .contains("<tmpdir>/body.md")
+        .contains("rm -rf <tmpdir>");
+  }
+
+  @Test
+  void skillRefusesRevisionInEveryNonDraftState() throws IOException {
+    var skill = SkillCommandTest.skillResource();
+
+    assertThat(skill)
+        .contains("noir:sealing", "noir:building", "noir:pr-open", "noir:failed", "noir:blocked")
+        .contains("original.md")
+        .contains("--search noir:draft");
+  }
+
+  @Test
   void frontmatterHasNameAndDescription() throws IOException {
     var lines = SkillCommandTest.skillResource().lines().toList();
 
