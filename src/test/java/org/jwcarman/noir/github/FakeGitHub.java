@@ -39,6 +39,8 @@ public final class FakeGitHub implements GitHubPort {
   private boolean failNextComment;
   private boolean failNextSetNoirLabel;
   private String pullRequestFailure;
+  private RuntimeException issueFailure;
+  private int issueFailures;
 
   public FakeGitHub withDefaultBranch(String branch) {
     this.defaultBranch = branch;
@@ -66,6 +68,12 @@ public final class FakeGitHub implements GitHubPort {
    */
   public void failPullRequests(String message) {
     pullRequestFailure = message;
+  }
+
+  /** The next {@code times} {@link #issue(String, int)} reads throw {@code failure}. */
+  public void failIssueReads(int times, RuntimeException failure) {
+    issueFailures = times;
+    issueFailure = failure;
   }
 
   public List<Pr> pullRequests() {
@@ -123,6 +131,10 @@ public final class FakeGitHub implements GitHubPort {
 
   @Override
   public IssueSnapshot issue(String repo, int number) {
+    if (issueFailures > 0) {
+      issueFailures--;
+      throw issueFailure;
+    }
     var i = issue(number);
     var created = createdAt.getOrDefault(number, Instant.EPOCH);
     var edited = editedAt.getOrDefault(number, created);

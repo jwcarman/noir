@@ -60,6 +60,17 @@ final class RunCommand implements Callable<Integer> {
         err.println(message);
         err.flush();
       }
+
+      @Override
+      public void created(String itemId, String repo, int issue) {
+        out.println(createdLine(itemId, repo, issue));
+        out.flush();
+      }
     };
+  }
+
+  /** {@code nr-… jwcarman/demo#12 approved → SEALING}. */
+  static String createdLine(String itemId, String repo, int issue) {
+    return itemId + "  " + repo + "#" + issue + "  approved → SEALING";
   }
 }

@@ -39,11 +39,14 @@ import org.jwcarman.noir.grade.GradeRunner;
 import org.jwcarman.noir.holdout.HoldoutAnalyzer;
 import org.jwcarman.noir.lifecycle.BlockReason;
 import org.jwcarman.noir.lifecycle.State;
+import org.jwcarman.noir.lifecycle.Trigger;
 import org.jwcarman.noir.measure.MeasureArtifacts;
 import org.jwcarman.noir.measure.MeasureJudge;
 import org.jwcarman.noir.measure.MeasureOutcome;
 import org.jwcarman.noir.measure.MeasureRunner;
 import org.jwcarman.noir.render.StubSource;
+import org.jwcarman.noir.seal.ApprovalComments;
+import org.jwcarman.noir.seal.ApprovalSealer;
 import org.jwcarman.noir.spec.Spec;
 import org.jwcarman.noir.spec.SpecJson;
 import org.jwcarman.noir.spec.Specs;
@@ -69,6 +72,7 @@ class FactoryTest {
   final FakeGrade grade = new FakeGrade();
   final FakeBundles bundles = new FakeBundles();
   final List<Duration> sleeps = new ArrayList<>();
+  final Clock clock = Clock.fixed(Instant.parse("2026-11-04T00:00:00Z"), ZoneOffset.UTC);
 
   @BeforeEach
   void sealedItem() throws IOException {
@@ -91,16 +95,21 @@ class FactoryTest {
   }
 
   Factory factory(Set<String> secrets) {
+    // Only the GitHub-side paths of sealing run here: the commitment already exists (publish) or
+    // the issue carries no recorded approval (rejected before any git or examiner work).
+    var sealer =
+        new ApprovalSealer(store, gh, null, null, null, NoirConfig.defaults(), clock, secrets);
     return new Factory(
         store,
         delivery,
+        sealer,
         build,
         measure,
         grade,
         bundles,
         NoirConfig.defaults(),
         "sha256:grader-image-id",
-        Clock.fixed(Instant.parse("2026-11-04T00:00:00Z"), ZoneOffset.UTC),
+        clock,
         new Retry(6, Duration.ofSeconds(2), Duration.ofSeconds(60), sleeps::add),
         secrets);
   }
@@ -556,12 +565,121 @@ class FactoryTest {
     assertThat(sleeps).isEmpty();
   }
 
+  // ---- sealing -----------------------------------------------------------------------------
+
+  void sealingItem() {
+    store.writeWorkItem(WorkItem.approved(Specs.ID, REPO, 1));
+  }
+
+  @Test
+  void sealingPassedMovesToSealed() {
+    sealingItem(); // commitment.json already exists: the sealer publishes it
+
+    var item = factory().advance(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.SEALED);
+    assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:building");
+    var sha = Commitments.sha256(Commitments.read(itemDir.resolve("commitment.json")));
+    assertThat(gh.comments(1)).singleElement().asString().contains(sha);
+    assertThat(eventTypes()).containsExactly("commitment_posted", "sealed", "transition");
+    assertThat(transitionsTo("SEALED").getFirst())
+        .containsEntry("from", "SEALING")
+        .containsEntry("trigger", "SealPassed");
+    assertThat(build.calls).isEmpty();
+  }
+
+  @Test
+  void sealingRejectedCommentsRemovesReadyAndDrafts() throws IOException {
+    sealingItem();
+    // SEALING runs before spec.json exists; the issue carries noir:ready but no approval event.
+    Files.delete(itemDir.resolve("commitment.json"));
+    Files.delete(itemDir.resolve("spec.json"));
+
+    var item = factory().advance(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.DRAFT);
+    assertThat(gh.labels(1)).containsExactly("noir:draft");
+    assertThat(gh.comments(1)).containsExactly(ApprovalComments.editedAfterApproval());
+    assertThat(delivery.calls).containsExactly("rejectApproval", "label noir:draft");
+    assertThat(transitionsTo("DRAFT").getFirst())
+        .containsEntry("from", "SEALING")
+        .containsEntry("trigger", "SealRejected")
+        .containsEntry("reason", "edited_after_approval");
+    assertThat(eventTypes()).containsExactly("seal_rejected", "transition");
+
+    factory().drive(Specs.ID); // DRAFT waits for a human: nothing runs
+    assertThat(store.readWorkItem(Specs.ID).state()).isEqualTo(State.DRAFT);
+    assertThat(build.calls).isEmpty();
+  }
+
+  @Test
+  void sealingInfraFailureBlocks() {
+    sealingItem();
+    gh.failIssueReads(Integer.MAX_VALUE, new GitHubException("GitHub is down"));
+
+    var item = factory().advance(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
+    assertThat(item.blockedPhase()).isEqualTo(State.SEALING);
+    assertThat(sleeps).hasSize(5);
+    assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:blocked");
+    assertThat(gh.comments(1)).isEmpty();
+    assertThat(store.readEvents(Specs.ID))
+        .filteredOn(e -> e.type().equals("infra_failure"))
+        .singleElement()
+        .satisfies(e -> assertThat(e.data()).containsEntry("phase", "SEALING"));
+  }
+
+  @Test
+  void sealerErrorBlocksAndItsMessageStaysLocal() {
+    sealingItem();
+    var hidden = "examiner output naming HiddenHoldoutTest.secretCase with " + SECRET;
+    gh.failIssueReads(1, new IllegalStateException(hidden));
+
+    var item = factory().advance(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
+    assertThat(item.blockedPhase()).isEqualTo(State.SEALING);
+    assertThat(sleeps).isEmpty();
+    assertThat(gh.comments(1)).isEmpty();
+    assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:blocked");
+    var error =
+        (String)
+            store.readEvents(Specs.ID).stream()
+                .filter(e -> e.type().equals("infra_failure"))
+                .findFirst()
+                .orElseThrow()
+                .data()
+                .get("error");
+    assertThat(error).contains("HiddenHoldoutTest").doesNotContain(SECRET);
+  }
+
+  @Test
+  void resumeBlockedSealingReseals() {
+    sealingItem();
+    gh.failIssueReads(Integer.MAX_VALUE, new GitHubException("GitHub is down"));
+    var blocked = factory().advance(Specs.ID);
+    gh.failIssueReads(0, null);
+
+    var resumed =
+        Transitions.applyExternal(
+            store, clock, delivery::label, blocked, new Trigger.ResumeRequested());
+    assertThat(resumed.to()).isEqualTo(State.SEALING);
+    var item = factory().advance(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.SEALED);
+    assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:building");
+  }
+
   // ---- fakes -------------------------------------------------------------------------------
 
   /** Records every label applied, in order, then delegates. */
   static final class RecordingDelivery implements Delivery {
     final Delivery delegate;
     final List<String> labels = new ArrayList<>();
+    final List<String> calls = new ArrayList<>();
     boolean failPullRequests;
 
     RecordingDelivery(Delivery delegate) {
@@ -586,6 +704,13 @@ class FactoryTest {
     public void label(WorkItem item, State state) {
       delegate.label(item, state);
       labels.add(state.label().orElse(""));
+      calls.add("label " + state.label().orElse(""));
+    }
+
+    @Override
+    public void rejectApproval(WorkItem item, String comment) {
+      delegate.rejectApproval(item, comment);
+      calls.add("rejectApproval");
     }
   }
 

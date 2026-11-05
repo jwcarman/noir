@@ -64,6 +64,25 @@ class GitHubDeliveryTest {
   }
 
   @Test
+  void rejectApprovalCommentsThenRemovesReady() {
+    gh.setNoirLabel("jwcarman/demo", 1, State.SEALING.label());
+
+    delivery.rejectApproval(item, "not sealed");
+
+    assertThat(gh.comments(1)).containsExactly("not sealed");
+    assertThat(gh.labels(1)).containsExactly("noir:sealing");
+  }
+
+  @Test
+  void rejectApprovalLeavesReadyWhenTheCommentFails() {
+    gh.failNextComment();
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> delivery.rejectApproval(item, "x"))
+        .isInstanceOf(org.jwcarman.noir.github.GitHubException.class);
+    assertThat(gh.labels(1)).contains("noir:ready");
+  }
+
+  @Test
   void attemptPathsLayout() {
     assertThat(attempt.dir()).isEqualTo(Path.of("/store/item/attempts/2"));
     assertThat(attempt.build()).isEqualTo(Path.of("/store/item/attempts/2/build"));

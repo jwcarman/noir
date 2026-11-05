@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SplittableRandom;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,6 +66,11 @@ class DaemonTest {
         public void warning(String message) {
           reported.add("warning " + message);
         }
+
+        @Override
+        public void created(String itemId, String repo, int issue) {
+          reported.add("created " + itemId + " " + repo + "#" + issue);
+        }
       };
 
   @BeforeEach
@@ -93,7 +99,7 @@ class DaemonTest {
             defaults.images(),
             defaults.timeouts(),
             defaults.examiner());
-    var reconciler = new Reconciler(store, gh, reconcileDelivery, clock);
+    var reconciler = new Reconciler(store, gh, reconcileDelivery, clock, Set.of(SECRET));
     return new Daemon(
         store,
         gh,
@@ -105,6 +111,7 @@ class DaemonTest {
         config,
         sleeper,
         clock,
+        new SplittableRandom(7),
         Set.of(SECRET),
         listener);
   }
@@ -206,6 +213,11 @@ class DaemonTest {
 
           @Override
           public void label(WorkItem item, State state) {}
+
+          @Override
+          public void rejectApproval(WorkItem item, String comment) {
+            throw new UnsupportedOperationException();
+          }
         };
   }
 
@@ -218,7 +230,7 @@ class DaemonTest {
   }
 
   @Test
-  void picksOnlySealedItemsWhoseIssueIsReady() {
+  void picksSealedItemsOnlyInConfiguredRepos() {
     freezeLabels();
     item(A, REPO, issue(REPO, "noir:ready"), State.SEALED);
     item(B, REPO, issue(REPO, "noir:building"), State.SEALED);
@@ -226,11 +238,132 @@ class DaemonTest {
 
     int advanced = daemon().runOnce();
 
+    assertThat(advanced).isEqualTo(2);
+    assertThat(driver.driven).containsExactly(A, B);
+    assertThat(store.readWorkItem(A).state()).isEqualTo(State.PR_OPEN);
+    assertThat(store.readWorkItem(B).state()).isEqualTo(State.PR_OPEN);
+    assertThat(store.readWorkItem(C).state()).isEqualTo(State.SEALED);
+  }
+
+  // ---- approval discovery ------------------------------------------------------------------
+
+  @Test
+  void readyIssueCreatesItemAndSeals() {
+    int n = issue(REPO, "noir:ready");
+
+    int advanced = daemon().runOnce();
+
     assertThat(advanced).isEqualTo(1);
+    var ids = store.itemIds();
+    assertThat(ids).singleElement().matches(org.jwcarman.noir.spec.ItemId::isValid);
+    var id = ids.getFirst();
+    assertThat(store.readEvents(id).getFirst())
+        .satisfies(e -> {
+          assertThat(e.type()).isEqualTo("item_created");
+          assertThat(e.data()).containsEntry("issue", n);
+        });
+    assertThat(driver.driven).containsExactly(id);
+    assertThat(driver.states).startsWith(State.SEALING);
+    assertThat(reported)
+        .startsWith("created " + id + " " + REPO + "#" + n, id + " SEALING -> SEALED");
+    var item = store.readWorkItem(id);
+    assertThat(item.repo()).isEqualTo(REPO);
+    assertThat(item.issueNumber()).isEqualTo(n);
+    assertThat(item.state()).isEqualTo(State.PR_OPEN);
+  }
+
+  @Test
+  void readyIssueInUnconfiguredRepoIgnored() {
+    issue(OTHER_REPO, "noir:ready");
+
+    assertThat(daemon().runOnce()).isZero();
+
+    assertThat(store.itemIds()).isEmpty();
+    assertThat(reported).isEmpty();
+  }
+
+  @Test
+  void draftItemReapprovedMovesToSealing() {
+    int n = issue(REPO, "noir:ready", "noir:draft");
+    item(A, REPO, n, State.DRAFT);
+
+    daemon().runOnce();
+
+    assertThat(store.itemIds()).containsExactly(A);
+    assertThat(store.readEvents(A).getFirst().data())
+        .containsEntry("from", "DRAFT")
+        .containsEntry("to", "SEALING")
+        .containsEntry("trigger", "Approved");
+    assertThat(reported).startsWith(A + " DRAFT -> SEALING", A + " SEALING -> SEALED");
+    assertThat(driver.driven).containsExactly(A);
+  }
+
+  @Test
+  void terminalItemIsNeverRecreated() {
+    int n = issue(REPO, "noir:ready");
+    item(A, REPO, n, State.FAILED);
+    var daemon = daemon();
+
+    daemon.runOnce();
+    daemon.runOnce();
+
+    assertThat(store.itemIds()).containsExactly(A);
+    assertThat(driver.driven).isEmpty();
+    assertThat(reported)
+        .containsExactly(
+            "warning "
+                + REPO
+                + "#"
+                + n
+                + " has noir:ready but its work item "
+                + A
+                + " is FAILED; open a new issue");
+  }
+
+  @Test
+  void crashAfterItemCreationResumesSealing() {
+    int n = issue(REPO, "noir:ready");
+    store.writeWorkItem(WorkItem.approved(A, REPO, n));
+
+    daemon().runOnce();
+
+    assertThat(store.itemIds()).containsExactly(A);
+    assertThat(driver.driven).containsExactly(A);
+    assertThat(driver.states).startsWith(State.SEALING);
+    assertThat(reported).startsWith(A + " SEALING -> SEALED");
+  }
+
+  @Test
+  void draftIsNeverDriven() {
+    item(A, REPO, issue(REPO, "noir:draft"), State.DRAFT);
+
+    assertThat(daemon().runOnce()).isZero();
+
+    assertThat(driver.driven).isEmpty();
+    assertThat(store.readWorkItem(A).state()).isEqualTo(State.DRAFT);
+    assertThat(reported).isEmpty();
+  }
+
+  @Test
+  void sealedItemBuildsWithoutReadyLabel() {
+    item(A, REPO, issue(REPO), State.SEALED);
+
+    assertThat(daemon().runOnce()).isEqualTo(1);
+
     assertThat(driver.driven).containsExactly(A);
     assertThat(store.readWorkItem(A).state()).isEqualTo(State.PR_OPEN);
-    assertThat(store.readWorkItem(B).state()).isEqualTo(State.SEALED);
-    assertThat(store.readWorkItem(C).state()).isEqualTo(State.SEALED);
+  }
+
+  @Test
+  void rejectedSealStopsAtDraft() {
+    int n = issue(REPO, "noir:ready");
+    store.writeWorkItem(WorkItem.approved(A, REPO, n));
+    driver.rejectSealing = true;
+
+    daemon().runOnce();
+
+    assertThat(store.readWorkItem(A).state()).isEqualTo(State.DRAFT);
+    assertThat(reported).containsExactly(A + " SEALING -> DRAFT");
   }
 
   @Test
@@ -245,7 +378,7 @@ class DaemonTest {
     daemon.runOnce();
 
     assertThat(reported)
-        .filteredOn(r -> r.startsWith("warning"))
+        .filteredOn(r -> r.contains(" skipped: "))
         .containsExactly(
             "warning "
                 + C
@@ -450,7 +583,9 @@ class DaemonTest {
   final class FakeDriver implements ItemDriver {
     final List<String> driven = new ArrayList<>();
     final Map<String, Consumer<String>> failures = new HashMap<>();
+    final List<State> states = new ArrayList<>();
     Consumer<String> afterAdvance = id -> {};
+    boolean rejectSealing;
 
     @Override
     public WorkItem advance(String itemId) {
@@ -459,8 +594,10 @@ class DaemonTest {
       }
       failures.getOrDefault(itemId, id -> {}).accept(itemId);
       var item = store.readWorkItem(itemId);
+      states.add(item.state());
       var next =
           switch (item.state()) {
+            case SEALING -> rejectSealing ? State.DRAFT : State.SEALED;
             case SEALED, REWORK -> State.BUILDING;
             case BUILDING -> State.MEASURING;
             case MEASURING -> State.GRADING;

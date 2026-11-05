@@ -43,6 +43,21 @@ class StoreTest {
   }
 
   @Test
+  void findItemMatchesRepoAndIssueOldestFirst() throws IOException {
+    var older = "nr-01JBX4ZQ8K3V0M7N2P5R6S9T1A";
+    var newer = "nr-01JBX4ZQ8K3V0M7N2P5R6S9T1B";
+    store.writeWorkItem(WorkItem.approved(newer, "jwcarman/demo", 7));
+    store.writeWorkItem(WorkItem.approved(older, "jwcarman/demo", 7));
+    store.writeWorkItem(WorkItem.approved(ID, "jwcarman/other", 7));
+    Files.createDirectories(store.itemDir("nr-01JBX4ZQ8K3V0M7N2P5R6S9T1C"));
+
+    assertThat(store.findItem("jwcarman/demo", 7)).contains(older);
+    assertThat(store.findItems("jwcarman/demo", 7)).containsExactly(older, newer);
+    assertThat(store.findItem("jwcarman/other", 7)).contains(ID);
+    assertThat(store.findItem("jwcarman/demo", 8)).isEmpty();
+  }
+
+  @Test
   void blockedWorkItemRoundTrip() {
     var wi =
         WorkItem.sealed(ID, "jwcarman/demo", 7)

@@ -73,6 +73,21 @@ class RunCommandTest {
   }
 
   @Test
+  void printsCreatedItems() {
+    int code =
+        run(
+            (once, listener) -> {
+              listener.created(A, "jwcarman/demo", 12);
+              listener.transition(new StateChange(A, State.SEALING, State.SEALED));
+            },
+            "run",
+            "--once");
+    assertThat(code).isZero();
+    assertThat(out.toString())
+        .isEqualTo(A + "  jwcarman/demo#12  approved → SEALING\n" + A + " SEALING → SEALED\n");
+  }
+
+  @Test
   void heldLockExitsTwoWithoutRunning() {
     try (var held = InstanceLock.tryAcquire(new NoirHome(tmp).lock()).orElseThrow()) {
       int code = run((once, listener) -> runs.add(once), "run", "--once");

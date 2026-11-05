@@ -42,6 +42,8 @@ import org.jwcarman.noir.measure.MeasureJudge;
 import org.jwcarman.noir.measure.MeasureOutcome;
 import org.jwcarman.noir.measure.MeasureRunner;
 import org.jwcarman.noir.render.SpecRenderer;
+import org.jwcarman.noir.seal.ApprovalSealer;
+import org.jwcarman.noir.seal.SealOutcome;
 import org.jwcarman.noir.seal.Sealer;
 import org.jwcarman.noir.spec.ItemId;
 import org.jwcarman.noir.spec.QualityBar;
@@ -54,19 +56,25 @@ import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 
 /**
- * Drives one sealed work item through the {@link Lifecycle}: build, measure, grade, rework, and
- * deliver (spec §4.5, §6–§8). Each {@link #advance} runs the current phase, applies exactly one
- * transition, performs its side effects, then persists {@code workitem.json} and a {@code
- * transition} event.
+ * Drives one work item through the {@link Lifecycle}: seal an approved issue, then build, measure,
+ * grade, rework, and deliver (spec §4.5, §6–§8). Each {@link #advance} runs the current phase,
+ * applies exactly one transition, performs its side effects, then persists {@code workitem.json}
+ * and a {@code transition} event.
  *
  * <p>Infrastructure failures that outlast {@link Retry} block the item ({@code INFRASTRUCTURE}).
  * Feedback for the next attempt is written to {@code attempts/<n>/FEEDBACK.md}, outside the
  * directory mounted into the builder, and only ever from {@link FeedbackRenderer}: holdout test
  * names, sources, and compiler output over the holdout suite never reach it.
+ *
+ * <p>{@code SEALING} runs {@link ApprovalSealer} before any {@code spec.json} exists. A rejection
+ * posts the sealer's comment, removes {@code noir:ready} and returns the item to {@code DRAFT}. Any
+ * other failure of the sealer blocks the item ({@code INFRASTRUCTURE}); its message may name hidden
+ * tests, so it is kept in the local event log only.
  */
 public final class Factory implements ItemDriver {
   private final Store store;
   private final Delivery delivery;
+  private final ApprovalSealer approvalSealer;
   private final BuildRunner builder;
   private final MeasureRunner measurer;
   private final GradeRunner grader;
@@ -86,6 +94,7 @@ public final class Factory implements ItemDriver {
   public Factory(
       Store store,
       Delivery delivery,
+      ApprovalSealer approvalSealer,
       BuildRunner builder,
       MeasureRunner measurer,
       GradeRunner grader,
@@ -97,6 +106,7 @@ public final class Factory implements ItemDriver {
       Set<String> secrets) {
     this.store = store;
     this.delivery = delivery;
+    this.approvalSealer = approvalSealer;
     this.builder = builder;
     this.measurer = measurer;
     this.grader = grader;
@@ -111,14 +121,21 @@ public final class Factory implements ItemDriver {
             .collect(Collectors.toUnmodifiableSet());
   }
 
-  /** A phase's verdict, plus the feedback the next attempt gets if the lifecycle reworks. */
-  private record Step(Trigger trigger, FeedbackInput feedback) {
+  /**
+   * A phase's verdict, plus the feedback the next attempt gets if the lifecycle reworks, and the
+   * issue comment a seal rejection posts.
+   */
+  private record Step(Trigger trigger, FeedbackInput feedback, String comment) {
+    Step(Trigger trigger, FeedbackInput feedback) {
+      this(trigger, feedback, null);
+    }
+
     static Step of(Trigger trigger) {
       return new Step(trigger, null);
     }
   }
 
-  /** What every phase of one {@link #advance} shares. */
+  /** What every phase of one {@link #advance} shares; {@code spec} is null while sealing. */
   private record Ctx(WorkItem item, Spec spec, Path itemDir, String branch) {
     AttemptPaths attempt() {
       return new AttemptPaths(itemDir, item.attempt());
@@ -126,14 +143,19 @@ public final class Factory implements ItemDriver {
   }
 
   /**
-   * Advances until the item is terminal or {@code BLOCKED}. {@code REWORK} picks up the next
-   * attempt immediately.
+   * Advances until the item is terminal, {@code BLOCKED} or {@code DRAFT}. {@code REWORK} picks up
+   * the next attempt immediately.
    */
   public void drive(String itemId) {
     var item = store.readWorkItem(itemId);
-    while (!item.state().terminal() && item.state() != State.BLOCKED) {
+    while (runnable(item.state())) {
       item = advance(itemId);
     }
+  }
+
+  /** Whether {@link #advance} has a phase to run: not terminal, blocked or waiting for a human. */
+  static boolean runnable(State state) {
+    return !state.terminal() && state != State.BLOCKED && state != State.DRAFT;
   }
 
   /** Performs exactly one transition and returns the new work item. */
@@ -141,16 +163,22 @@ public final class Factory implements ItemDriver {
   public WorkItem advance(String itemId) {
     var item = store.readWorkItem(itemId);
     var from = item.state();
-    if (from.terminal() || from == State.BLOCKED) {
+    if (!runnable(from)) {
       throw new IllegalStateException("Work item " + itemId + " is " + from + ": nothing to run");
     }
     var itemDir = store.itemDir(itemId);
-    var spec = SpecJson.read(itemDir.resolve("spec.json"));
-    var ctx = new Ctx(item, spec, itemDir, BranchNames.of(item.issueNumber(), spec.title()));
+    Ctx ctx;
+    if (from == State.SEALING) {
+      // spec.json is written by the sealer: it does not exist yet.
+      ctx = new Ctx(item, null, itemDir, null);
+    } else {
+      var spec = SpecJson.read(itemDir.resolve("spec.json"));
+      ctx = new Ctx(item, spec, itemDir, BranchNames.of(item.issueNumber(), spec.title()));
+    }
 
     Step step;
     try {
-      step = runPhase(ctx);
+      step = from == State.SEALING ? seal(ctx) : runPhase(ctx);
     } catch (InfraFailure e) {
       infraEvent(ctx, from.name(), e);
       step = Step.of(new Trigger.InfraBlocked());
@@ -183,6 +211,9 @@ public final class Factory implements ItemDriver {
     data.put("from", from.name());
     data.put("to", next.state().name());
     data.put("trigger", step.trigger().getClass().getSimpleName());
+    if (step.trigger() instanceof Trigger.SealRejected r) {
+      data.put("reason", r.reason().eventValue());
+    }
     transition
         .failure()
         .ifPresent(c -> {
@@ -194,6 +225,26 @@ public final class Factory implements ItemDriver {
   }
 
   // ---- phases --------------------------------------------------------------------------------
+
+  /**
+   * Seals the approved issue. Infrastructure exceptions are retried; anything else the sealer
+   * throws (an examiner that kept failing, an unexpected error) is an infrastructure failure too.
+   */
+  private Step seal(Ctx ctx) {
+    SealOutcome outcome;
+    try {
+      outcome = retry.call(() -> approvalSealer.seal(ctx.item()));
+    } catch (InfraFailure e) {
+      throw e;
+    } catch (RuntimeException e) {
+      throw new InfraFailure(e);
+    }
+    return switch (outcome) {
+      case SealOutcome.Passed p -> Step.of(new Trigger.SealPassed());
+      case SealOutcome.Rejected r ->
+          new Step(new Trigger.SealRejected(r.reason()), null, r.comment());
+    };
+  }
 
   private Step runPhase(Ctx ctx) {
     return switch (ctx.item().state()) {
@@ -401,10 +452,18 @@ public final class Factory implements ItemDriver {
         case OPEN_PR -> deliver(ctx, next, ctx.attempt(), false);
         case OPEN_DRAFT_PR_OR_COMMENT -> draftOrComment(ctx, next);
         // The runners already extracted and exported; containers are --rm and phase-scoped.
-        case REJECT_APPROVAL -> throw new UnsupportedOperationException("wired in Task 6");
+        case REJECT_APPROVAL -> rejectApproval(next, step);
         case EXTRACT_BUNDLE, EXPORT_ARTIFACTS, STOP_CONTAINERS -> {}
       }
     }
+  }
+
+  private void rejectApproval(WorkItem next, Step step) {
+    if (step.comment() == null) {
+      throw new IllegalStateException("No rejection comment for " + step.trigger());
+    }
+    guard("comment", step.comment());
+    retry.run(() -> delivery.rejectApproval(next, step.comment()));
   }
 
   private static void writeFeedback(Ctx ctx, Step step) {
@@ -514,7 +573,8 @@ public final class Factory implements ItemDriver {
     var data = new LinkedHashMap<String, Object>();
     data.put("phase", phase);
     data.put("exception", cause.getClass().getSimpleName());
-    data.put("error", Objects.requireNonNullElse(cause.getMessage(), ""));
+    // Local only, and redacted: a sealer's message may quote examiner output.
+    data.put("error", Secrets.redact(Objects.requireNonNullElse(cause.getMessage(), ""), secrets));
     event(ctx.item().id(), "infra_failure", ctx.item().attempt(), data);
   }
 

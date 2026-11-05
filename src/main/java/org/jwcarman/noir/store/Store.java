@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 import org.jwcarman.noir.NoirHome;
 import org.jwcarman.noir.json.Json;
@@ -50,6 +51,31 @@ public final class Store {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  /**
+   * The id of the work item for issue {@code issue} of {@code repo}. Should several exist, the
+   * oldest; {@link #findItems} lists them all. Unreadable items are skipped.
+   */
+  public Optional<String> findItem(String repo, int issue) {
+    return findItems(repo, issue).stream().findFirst();
+  }
+
+  /** Ids of every work item for the issue, oldest first; unreadable items are skipped. */
+  public List<String> findItems(String repo, int issue) {
+    var found = new ArrayList<String>();
+    for (var id : itemIds()) {
+      WorkItem item;
+      try {
+        item = readWorkItem(id);
+      } catch (RuntimeException e) {
+        continue;
+      }
+      if (repo.equals(item.repo()) && item.issueNumber() != null && item.issueNumber() == issue) {
+        found.add(id);
+      }
+    }
+    return found;
   }
 
   public WorkItem readWorkItem(String id) {

@@ -193,12 +193,14 @@ class CancelResumeCommandTest {
             id -> {
               throw new IllegalStateException("boom");
             },
-            new Reconciler(store, gh, new GitHubDelivery(gh, new FakeBranchPublisher()), clock),
+            new Reconciler(
+                store, gh, new GitHubDelivery(gh, new FakeBranchPublisher()), clock, Set.of()),
             new org.jwcarman.noir.factory.Dispositions(
                 store, gh, new org.jwcarman.noir.factory.GitBundles(null, tmp), clock),
             NoirConfig.defaults(),
             d -> {},
             clock,
+            new java.util.SplittableRandom(1),
             Set.of(),
             new Daemon.Listener() {
               @Override
@@ -209,6 +211,9 @@ class CancelResumeCommandTest {
 
               @Override
               public void warning(String message) {}
+
+              @Override
+              public void created(String itemId, String repo, int issue) {}
             });
     daemon.runOnce();
     assertThat(store.readWorkItem(A).state()).isEqualTo(State.BLOCKED);

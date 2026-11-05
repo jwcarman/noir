@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
@@ -25,13 +26,16 @@ import org.jwcarman.noir.factory.GitHubDelivery;
 import org.jwcarman.noir.factory.Reconciler;
 import org.jwcarman.noir.factory.Retry;
 import org.jwcarman.noir.git.GitCli;
+import org.jwcarman.noir.git.RepoMirror;
 import org.jwcarman.noir.github.GhCli;
 import org.jwcarman.noir.github.GitHubPort;
 import org.jwcarman.noir.grade.ContainerGradeRunner;
 import org.jwcarman.noir.measure.ContainerMeasureRunner;
+import org.jwcarman.noir.seal.ApprovalSealer;
 import org.jwcarman.noir.seal.ContainerSealCheckRunner;
 import org.jwcarman.noir.seal.Examiner;
 import org.jwcarman.noir.seal.Sealer;
+import org.jwcarman.noir.seal.SuiteSealer;
 import org.jwcarman.noir.store.Store;
 
 /** Builds the real object graph. */
@@ -89,10 +93,27 @@ final class Wiring {
     var clock = Clock.systemUTC();
     Retry.Sleeper sleeper = Wiring::sleep;
     var delivery = new GitHubDelivery(gh, new GitBranchPublisher(runner, tmp));
+    var git = new GitCli(runner);
+    var approvalSealer =
+        new ApprovalSealer(
+            store,
+            gh,
+            new RepoMirror(git, home.repos()),
+            git,
+            new SuiteSealer(
+                store,
+                new Examiner(new ClaudeContainerAgent(docker, auth), config),
+                new ContainerSealCheckRunner(docker, config),
+                config,
+                clock),
+            config,
+            clock,
+            secrets);
     var factory =
         new Factory(
             store,
             delivery,
+            approvalSealer,
             new ContainerBuildRunner(docker, new ClaudeContainerAgent(docker, auth), config),
             new ContainerMeasureRunner(docker, config),
             new ContainerGradeRunner(docker, config),
@@ -102,7 +123,7 @@ final class Wiring {
             clock,
             Retry.forConfig(config, sleeper),
             secrets);
-    var reconciler = new Reconciler(store, gh, delivery, clock);
+    var reconciler = new Reconciler(store, gh, delivery, clock, secrets);
     return new Daemon(
         store,
         gh,
@@ -114,6 +135,7 @@ final class Wiring {
         config,
         sleeper,
         clock,
+        new SecureRandom(),
         secrets,
         listener);
   }

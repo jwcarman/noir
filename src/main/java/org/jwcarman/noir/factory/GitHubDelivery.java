@@ -2,6 +2,7 @@ package org.jwcarman.noir.factory;
 
 import org.jwcarman.noir.deliver.BranchPublisher;
 import org.jwcarman.noir.github.GitHubPort;
+import org.jwcarman.noir.github.NoirLabels;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.spec.Spec;
 import org.jwcarman.noir.store.WorkItem;
@@ -35,5 +36,11 @@ public final class GitHubDelivery implements Delivery {
   @Override
   public void label(WorkItem item, State state) {
     gh.setNoirLabel(item.repo(), item.issueNumber(), state.label());
+  }
+
+  @Override
+  public void rejectApproval(WorkItem item, String comment) {
+    gh.comment(item.repo(), item.issueNumber(), comment);
+    gh.removeLabel(item.repo(), item.issueNumber(), NoirLabels.READY);
   }
 }

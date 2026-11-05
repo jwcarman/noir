@@ -2,37 +2,43 @@ package org.jwcarman.noir.factory;
 
 import java.time.Clock;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.random.RandomGenerator;
 import java.util.stream.Collectors;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.ContainerPort;
 import org.jwcarman.noir.github.GitHubPort;
+import org.jwcarman.noir.github.NoirLabels;
 import org.jwcarman.noir.lifecycle.Lifecycle;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.lifecycle.Trigger;
+import org.jwcarman.noir.spec.ItemId;
 import org.jwcarman.noir.store.Event;
 import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 
 /**
  * The {@code noir run} loop (spec §6.1, §9.3). Each pass reconciles every item against GitHub,
- * records PR dispositions, then picks up work — {@code SEALED} items whose open issue in a
- * configured repo is labelled {@code noir:ready}, plus every {@code REWORK} and active item — and
- * drives each one, oldest id first and one at a time, until it is terminal or {@code BLOCKED}.
+ * records PR dispositions, then discovers approvals: every open issue labelled {@code noir:ready}
+ * in a configured repo without a work item gets a new {@code SEALING} item, and a {@code DRAFT}
+ * item whose issue was approved again moves to {@code SEALING}. It then picks up work — {@code
+ * SEALED} items in a configured repo, plus every {@code REWORK} and active item ({@code SEALING}
+ * included) — and drives each one, oldest id first and one at a time, until it is terminal, {@code
+ * BLOCKED} or back in {@code DRAFT}. {@code DRAFT} items are never driven.
  *
  * <p>The daemon drives items one {@link ItemDriver#advance} at a time so that it can report every
  * transition to its {@link Listener} without the factory knowing about output.
  *
  * <p>A failure in one item never stops the pass: any {@link RuntimeException} is recorded as a
  * {@code daemon_error} event (secret values removed) and reported. An item that failed while {@code
- * BUILDING}/{@code MEASURING}/{@code GRADING} is then blocked ({@code INFRASTRUCTURE}, resumable
- * with {@code noir resume}) so a persistent fault cannot re-run a paid phase every poll; its issue
- * is labelled {@code noir:blocked} after the state is persisted, best effort. A {@code
- * SEALED}/{@code REWORK} item is left as it is and retried next pass. Errors propagate.
+ * SEALING}/{@code BUILDING}/{@code MEASURING}/{@code GRADING} is then blocked ({@code
+ * INFRASTRUCTURE}, resumable with {@code noir resume}) so a persistent fault cannot re-run a paid
+ * phase every poll; its issue is labelled {@code noir:blocked} after the state is persisted, best
+ * effort. A {@code SEALED}/{@code REWORK} item is left as it is and retried next pass. Errors
+ * propagate.
  *
  * <p>A thread interrupt stops the daemon between transitions; the interrupt flag is kept.
  */
@@ -48,9 +54,10 @@ public final class Daemon {
 
     /** Something the operator should fix that is not an error, such as a skipped item. */
     void warning(String message);
-  }
 
-  private static final String READY = "noir:ready";
+    /** A work item was created for an approved issue; it starts in {@code SEALING}. */
+    void created(String itemId, String repo, int issue);
+  }
 
   private final Store store;
   private final GitHubPort gh;
@@ -61,6 +68,7 @@ public final class Daemon {
   private final NoirConfig config;
   private final Retry.Sleeper sleeper;
   private final Clock clock;
+  private final RandomGenerator rnd;
   private final Set<String> secrets;
   private final Listener listener;
 
@@ -86,6 +94,7 @@ public final class Daemon {
       NoirConfig config,
       Retry.Sleeper sleeper,
       Clock clock,
+      RandomGenerator rnd,
       Set<String> secrets,
       Listener listener) {
     this.store = store;
@@ -98,6 +107,7 @@ public final class Daemon {
     this.config = config;
     this.sleeper = sleeper;
     this.clock = clock;
+    this.rnd = rnd;
     this.secrets =
         secrets.stream()
             .filter(s -> s != null && !s.isBlank())
@@ -117,10 +127,11 @@ public final class Daemon {
   }
 
   /**
-   * One pass: reconcile, then drive every eligible item. Returns how many items moved. The first
-   * pass first removes every container left by an earlier noir that was killed outright (the caller
-   * holds the instance lock, so none of them belongs to a live run); a failure to do so propagates,
-   * since a leftover builder could still be writing into an attempt directory.
+   * One pass: reconcile, record dispositions, discover approvals, then drive every eligible item.
+   * Returns how many items moved. The first pass first removes every container left by an earlier
+   * noir that was killed outright (the caller holds the instance lock, so none of them belongs to a
+   * live run); a failure to do so propagates, since a leftover builder could still be writing into
+   * an attempt directory.
    */
   public int runOnce() {
     if (!swept) {
@@ -136,8 +147,9 @@ public final class Daemon {
       }
     }
     refreshDispositions();
+    discoverApprovals();
     int advanced = 0;
-    for (var item : eligible(ids)) {
+    for (var item : eligible(store.itemIds())) {
       if (interrupted()) {
         break;
       }
@@ -168,6 +180,80 @@ public final class Daemon {
     }
   }
 
+  /** Finds every approved issue in each configured repo; a failing repo never stops the pass. */
+  private void discoverApprovals() {
+    for (var repo : config.repos()) {
+      List<Integer> ready;
+      try {
+        ready = gh.openIssuesWithLabel(repo, NoirLabels.READY);
+      } catch (RuntimeException e) {
+        listener.error(null, repo + ": " + Secrets.describe(e, secrets));
+        continue;
+      }
+      for (int issue : ready) {
+        try {
+          approved(repo, issue);
+        } catch (RuntimeException e) {
+          listener.error(null, repo + "#" + issue + ": " + Secrets.describe(e, secrets));
+        }
+      }
+    }
+  }
+
+  /**
+   * Acts on one approved issue: a new item when it has none, {@code DRAFT} back to {@code SEALING},
+   * a warning (once) for an item that is already over.
+   */
+  private void approved(String repo, int issue) {
+    var ids = store.findItems(repo, issue);
+    if (ids.isEmpty()) {
+      create(repo, issue);
+      return;
+    }
+    var id = ids.getFirst();
+    if (ids.size() > 1 && warned.add("duplicate " + repo + "#" + issue)) {
+      listener.warning(
+          repo + "#" + issue + " has more than one work item " + ids + "; using " + id);
+    }
+    var item = store.readWorkItem(id);
+    if (item.state() == State.DRAFT) {
+      listener.transition(
+          Transitions.applyExternal(
+              store,
+              clock,
+              (i, s) -> gh.setNoirLabel(i.repo(), i.issueNumber(), s.label()),
+              item,
+              new Trigger.Approved()));
+    } else if (item.state().terminal() && warned.add("ready " + id)) {
+      listener.warning(
+          repo
+              + "#"
+              + issue
+              + " has noir:ready but its work item "
+              + id
+              + " is "
+              + item.state()
+              + "; open a new issue");
+    }
+  }
+
+  /**
+   * Creates a {@code SEALING} item for the issue (persisted first, then labelled {@code
+   * noir:sealing} best effort; reconciliation re-applies the label).
+   */
+  private void create(String repo, int issue) {
+    var id = ItemId.newId(clock, rnd);
+    var item = WorkItem.approved(id, repo, issue);
+    store.writeWorkItem(item);
+    store.appendEvent(Event.of(clock, id, "item_created", 0, Map.of("issue", issue)));
+    listener.created(id, repo, issue);
+    try {
+      gh.setNoirLabel(repo, issue, item.state().label());
+    } catch (RuntimeException ignored) {
+      // Best effort: the next pass's reconciliation labels it.
+    }
+  }
+
   private List<WorkItem> eligible(List<String> ids) {
     var items = new ArrayList<WorkItem>();
     for (var id : ids) {
@@ -185,32 +271,25 @@ public final class Daemon {
             item.id() + " skipped: repo " + item.repo() + " is not in ~/.noir/config.yaml repos");
       }
     }
-    var ready = new HashMap<String, Set<Integer>>();
-    for (var repo : config.repos()) {
-      if (items.stream().anyMatch(i -> i.state() == State.SEALED && repo.equals(i.repo()))) {
-        try {
-          ready.put(repo, new HashSet<>(gh.openIssuesWithLabel(repo, READY)));
-        } catch (RuntimeException e) {
-          listener.error(null, repo + ": " + Secrets.describe(e, secrets));
-        }
-      }
-    }
-    return items.stream().filter(i -> eligible(i, ready)).toList();
+    return items.stream().filter(this::eligible).toList();
   }
 
-  private static boolean eligible(WorkItem item, Map<String, Set<Integer>> ready) {
+  private boolean eligible(WorkItem item) {
     return switch (item.state()) {
-      case SEALED -> ready.getOrDefault(item.repo(), Set.of()).contains(item.issueNumber());
-      case REWORK, BUILDING, MEASURING, GRADING -> true;
+      case SEALED -> config.repos().contains(item.repo());
+      case REWORK, SEALING, BUILDING, MEASURING, GRADING -> true;
       default -> false;
     };
   }
 
-  /** Advances until terminal, {@code BLOCKED}, failure or interrupt; true if anything moved. */
+  /**
+   * Advances until terminal, {@code BLOCKED}, {@code DRAFT}, failure or interrupt; true if anything
+   * moved.
+   */
   private boolean drive(WorkItem item) {
     boolean moved = false;
     var current = item;
-    while (!current.state().terminal() && current.state() != State.BLOCKED && !interrupted()) {
+    while (Factory.runnable(current.state()) && !interrupted()) {
       WorkItem next;
       try {
         next = driver.advance(current.id());
@@ -244,8 +323,9 @@ public final class Daemon {
   }
 
   /**
-   * After a drive failure, blocks an item whose stored state is active (persist first, then label
-   * {@code noir:blocked}); a {@code SEALED}/{@code REWORK} item is left for the next pass.
+   * After a drive failure, blocks an item whose stored state is active, {@code SEALING} included
+   * (persist first, then label {@code noir:blocked}); a {@code SEALED}/{@code REWORK} item is left
+   * for the next pass.
    */
   private void driveFailed(String id, RuntimeException e) {
     itemError(id, "drive", e);
