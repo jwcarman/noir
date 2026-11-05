@@ -7,15 +7,19 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.jwcarman.noir.NoirHome;
 import org.jwcarman.noir.agent.ScriptedAgent;
 import org.jwcarman.noir.build.ContainerBuildRunner;
 import org.jwcarman.noir.config.NoirConfig;
@@ -23,12 +27,28 @@ import org.jwcarman.noir.deliver.LocalBranchPublishers;
 import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.docker.Images;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
+import org.jwcarman.noir.git.GitCli;
 import org.jwcarman.noir.git.GitFixtures;
+import org.jwcarman.noir.git.LocalOriginGit;
+import org.jwcarman.noir.git.RepoMirror;
 import org.jwcarman.noir.github.FakeGitHub;
+import org.jwcarman.noir.github.NoirLabels;
 import org.jwcarman.noir.grade.ContainerGradeRunner;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.measure.ContainerMeasureRunner;
+import org.jwcarman.noir.render.SpecRenderer;
+import org.jwcarman.noir.render.StubSource;
+import org.jwcarman.noir.seal.ApprovalComments;
+import org.jwcarman.noir.seal.ApprovalSealer;
+import org.jwcarman.noir.seal.ContainerSealCheckRunner;
+import org.jwcarman.noir.seal.Examiner;
+import org.jwcarman.noir.seal.SuiteSealer;
+import org.jwcarman.noir.spec.Example;
+import org.jwcarman.noir.spec.ItemId;
+import org.jwcarman.noir.spec.Requirement;
+import org.jwcarman.noir.spec.Specs;
 import org.jwcarman.noir.store.Event;
+import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 
 /**
@@ -84,17 +104,7 @@ class PipelineIT {
 
     /** {@code SEALED > BUILDING > ... > PR_OPEN}, with each failure category in parentheses. */
     String path() {
-      var steps = new ArrayList<String>();
-      for (var e : events()) {
-        if (e.type().equals("transition")) {
-          if (steps.isEmpty()) {
-            steps.add(String.valueOf(e.data().get("from")));
-          }
-          var failure = e.data().get("failure");
-          steps.add(e.data().get("to") + (failure == null ? "" : "(" + failure + ")"));
-        }
-      }
-      return String.join(" > ", steps);
+      return pathOf(events());
     }
 
     List<Event> ofType(String type) {
@@ -106,11 +116,29 @@ class PipelineIT {
     }
 
     String read(Path p) {
-      try {
-        return Files.readString(p, UTF_8);
-      } catch (IOException e) {
-        throw new UncheckedIOException(e);
+      return readFile(p);
+    }
+  }
+
+  static String pathOf(List<Event> events) {
+    var steps = new ArrayList<String>();
+    for (var e : events) {
+      if (e.type().equals("transition")) {
+        if (steps.isEmpty()) {
+          steps.add(String.valueOf(e.data().get("from")));
+        }
+        var failure = e.data().get("failure");
+        steps.add(e.data().get("to") + (failure == null ? "" : "(" + failure + ")"));
       }
+    }
+    return String.join(" > ", steps);
+  }
+
+  static String readFile(Path p) {
+    try {
+      return Files.readString(p, UTF_8);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
     }
   }
 
@@ -203,7 +231,7 @@ class PipelineIT {
               .contains("| Line coverage | 100.0% |")
               .doesNotContain(SECRET);
         });
-    assertThat(github.issue(1).labels()).containsExactly("noir:pr-open");
+    assertThat(github.issue(1).labels()).containsExactlyInAnyOrder("noir:ready", "noir:pr-open");
   }
 
   @Test
@@ -236,7 +264,7 @@ class PipelineIT {
           assertThat(pr.body()).contains("Closes #1").contains("R1: 1/3 passed");
         });
     assertThat(originFile(run.item().origin(), BRANCH, "ATTEMPT.txt")).isEqualTo("attempt 2\n");
-    assertThat(github.issue(1).labels()).containsExactly("noir:failed");
+    assertThat(github.issue(1).labels()).containsExactlyInAnyOrder("noir:ready", "noir:failed");
   }
 
   @Test
@@ -307,5 +335,216 @@ class PipelineIT {
     assertThat(run.item().github().pullRequests())
         .singleElement()
         .satisfies(pr -> assertThat(pr.draft()).isTrue());
+  }
+
+  /** The outcome of one daemon pass over an approved issue, starting from an empty store. */
+  record Approval(
+      Store store,
+      FakeGitHub github,
+      ScriptedAgent examiner,
+      String itemId,
+      int issue,
+      Path origin) {
+    String path() {
+      return pathOf(store.readEvents(itemId));
+    }
+  }
+
+  /**
+   * Approves the Counter issue (label added 2026-11-02; edited at {@code editedAt} if non-null),
+   * then lets the real daemon discover, seal, and build it with the real Examiner flow scripted.
+   */
+  Approval approve(Instant editedAt) {
+    var runner = new ProcessCommandRunner();
+    var home = new NoirHome(tmp.resolve("home"));
+    var store = new Store(home);
+    var github = new FakeGitHub();
+    var origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), SealedItemFixture.REPO);
+    var scratch = tmp.resolve("scratch").toAbsolutePath();
+    try {
+      Files.createDirectories(scratch);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+
+    var spec =
+        Specs.valid()
+            .withTitle("Counter")
+            .withApiStubs(List.of(SealedItemFixture.COUNTER_PATH))
+            .withRequirements(
+                List.of(
+                    new Requirement(
+                        "R1",
+                        "increment adds one; a new counter reads zero",
+                        List.of(new Example("a new counter", "increment()", "get() returns 1"))),
+                    new Requirement(
+                        "R2",
+                        "reset sets the count to zero",
+                        List.of(new Example("a counter at 1", "reset()", "get() returns 0")))));
+    var stubs =
+        List.of(
+            new StubSource(
+                SealedItemFixture.COUNTER_PATH,
+                readFile(
+                    SealedItemFixture.sealFixture("stubs")
+                        .resolve(SealedItemFixture.COUNTER_PATH))));
+    int issue =
+        github.createIssue(
+            SealedItemFixture.REPO, spec.title(), SpecRenderer.issueBody(spec, stubs), List.of());
+    github.createdAt(issue, Instant.parse("2026-11-01T00:00:00Z"));
+    github.addLabel(issue, NoirLabels.READY, "alice", Instant.parse("2026-11-02T00:00:00Z"));
+    if (editedAt != null) {
+      github.editIssue(
+          issue, spec.title(), SpecRenderer.issueBody(spec, stubs) + "\nedited\n", editedAt);
+    }
+
+    var cfg =
+        new NoirConfig(
+            List.of(SealedItemFixture.REPO),
+            config.qualityBar(),
+            config.sealDiscrimination(),
+            config.budgets(),
+            config.reworkRetries(),
+            config.pollInterval(),
+            config.infraRetries(),
+            config.limits(),
+            config.images(),
+            config.timeouts(),
+            config.examiner());
+    var clock = Clock.systemUTC();
+    var git = new LocalOriginGit(new GitCli(runner), origin);
+    var approvedId = new AtomicReference<String>();
+    var examinerAgent =
+        new ScriptedAgent((n, work) -> {
+          // The holdout package is named for the item; the daemon picks the id, so rename the
+          // fixture.
+          var holdout = work.resolve("out/holdout");
+          SealedItemFixture.copyTree(SealedItemFixture.sealFixture("holdout-good"), holdout);
+          var fixtureId = "nr_01jbx4zq8k3v0m7n2p5r6s9t1w";
+          var id = ItemId.holdoutPackage(approvedId.get()).substring("noir.holdout.".length());
+          var dir = holdout.resolve("noir/holdout");
+          try {
+            var test = dir.resolve(fixtureId).resolve("CounterTest.java");
+            Files.writeString(test, readFile(test).replace(fixtureId, id), UTF_8);
+            Files.move(dir.resolve(fixtureId), dir.resolve(id));
+          } catch (IOException e) {
+            throw new UncheckedIOException(e);
+          }
+          SealedItemFixture.copyTree(
+              SealedItemFixture.sealFixture("reference"), work.resolve("out/reference"));
+        });
+    var sealer =
+        new ApprovalSealer(
+            store,
+            github,
+            new RepoMirror(git, home.repos()),
+            git,
+            new SuiteSealer(
+                store,
+                new Examiner(examinerAgent, cfg),
+                new ContainerSealCheckRunner(docker, cfg),
+                cfg,
+                clock),
+            cfg,
+            clock,
+            Set.of(SECRET));
+    var files = SealedItemFixture.resource("/fixtures/builders/correct");
+    var builder =
+        new ScriptedAgent((n, work) -> {
+          var repo = work.resolve("repo");
+          SealedItemFixture.copyTree(files, repo);
+          try {
+            Files.writeString(repo.resolve("ATTEMPT.txt"), "attempt " + n + "\n");
+          } catch (IOException e) {
+            throw new UncheckedIOException(e);
+          }
+        });
+    var delivery =
+        new GitHubDelivery(github, LocalBranchPublishers.pushingTo(runner, scratch, origin));
+    var factory =
+        new Factory(
+            store,
+            delivery,
+            sealer,
+            new ContainerBuildRunner(docker, builder, cfg),
+            new ContainerMeasureRunner(docker, cfg),
+            new ContainerGradeRunner(docker, cfg),
+            new GitBundles(runner, scratch),
+            cfg,
+            graderImageId,
+            clock,
+            new Retry(1, Duration.ZERO, Duration.ZERO, d -> {}),
+            Set.of(SECRET));
+    var created = new ArrayList<String>();
+    var errors = new ArrayList<String>();
+    var daemon =
+        new Daemon(
+            store,
+            github,
+            docker,
+            "pipeline-it",
+            factory,
+            new Reconciler(store, github, delivery, clock, Set.of(SECRET)),
+            new Dispositions(store, github, new GitBundles(runner, scratch), clock),
+            cfg,
+            d -> {},
+            clock,
+            new SecureRandom(),
+            Set.of(SECRET),
+            new Daemon.Listener() {
+              @Override
+              public void transition(StateChange change) {}
+
+              @Override
+              public void error(String itemId, String message) {
+                errors.add(itemId + ": " + message);
+              }
+
+              @Override
+              public void warning(String message) {
+                errors.add("warning: " + message);
+              }
+
+              @Override
+              public void created(String itemId, String repo, int n) {
+                created.add(itemId);
+                approvedId.set(itemId);
+              }
+            });
+    daemon.runOnce();
+    assertThat(errors).isEmpty();
+    assertThat(created).hasSize(1);
+    var result = new Approval(store, github, examinerAgent, created.getFirst(), issue, origin);
+    System.out.printf("[PipelineIT] approval: %s%n", result.path());
+    return result;
+  }
+
+  @Test
+  void approvedIssue() {
+    var a = approve(null);
+
+    assertThat(a.path())
+        .as(String.valueOf(a.github().comments(a.issue())))
+        .isEqualTo("SEALING > SEALED > BUILDING > MEASURING > GRADING > PR_OPEN");
+    assertThat(a.github().comments(a.issue()))
+        .singleElement()
+        .satisfies(c -> assertThat(c).startsWith("noir commitment `"));
+    assertThat(a.github().labels(a.issue())).contains(NoirLabels.READY);
+    assertThat(a.github().pullRequests()).singleElement();
+    assertThat(originBranchSha(a.origin(), "noir/" + a.issue() + "-counter")).hasSize(40);
+  }
+
+  @Test
+  void approvedIssueEditedAfterApproval() {
+    var a = approve(Instant.parse("2026-11-03T00:00:00Z"));
+
+    assertThat(a.path()).isEqualTo("SEALING > DRAFT");
+    assertThat(a.github().comments(a.issue()))
+        .containsExactly(ApprovalComments.editedAfterApproval());
+    assertThat(a.github().labels(a.issue()))
+        .doesNotContain(NoirLabels.READY)
+        .contains("noir:draft");
+    assertThat(a.examiner().requests()).isEmpty();
+    assertThat(a.github().pullRequests()).isEmpty();
   }
 }

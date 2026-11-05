@@ -21,7 +21,7 @@ import org.jwcarman.noir.docker.Images;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.git.GitCli;
 import org.jwcarman.noir.git.GitFixtures;
-import org.jwcarman.noir.git.GitPort;
+import org.jwcarman.noir.git.LocalOriginGit;
 import org.jwcarman.noir.git.RepoMirror;
 import org.jwcarman.noir.github.FakeGitHub;
 import org.jwcarman.noir.github.NoirLabels;
@@ -79,7 +79,7 @@ class SealEndToEndIT {
     var item = WorkItem.approved(spec.id(), "jwcarman/demo", issue);
     store.writeWorkItem(item);
 
-    var git = new LocalGit(new GitCli(runner), origin);
+    var git = new LocalOriginGit(new GitCli(runner), origin);
     var examiner =
         new Examiner(
             new ScriptedAgent((n, work) -> {
@@ -108,39 +108,6 @@ class SealEndToEndIT {
         .extracting(Event::type)
         .contains("approved", "commitment_posted", "sealed");
     assertThat(store.itemDir(spec.id()).resolve("commitment.json")).exists();
-  }
-
-  /** GitCli, except clones come from the local origin instead of {@code gh}. */
-  record LocalGit(GitCli cli, Path origin) implements GitPort {
-    @Override
-    public void fetch(Path repoDir, String branch) {
-      cli.fetch(repoDir, branch);
-    }
-
-    @Override
-    public String revParse(Path repoDir, String ref) {
-      return cli.revParse(repoDir, ref);
-    }
-
-    @Override
-    public String originRepo(Path repoDir) {
-      return cli.originRepo(repoDir);
-    }
-
-    @Override
-    public void bundle(Path repoDir, String sha, Path out) {
-      cli.bundle(repoDir, sha, out);
-    }
-
-    @Override
-    public boolean exists(Path repoDir, String sha, String path) {
-      return cli.exists(repoDir, sha, path);
-    }
-
-    @Override
-    public void cloneRepo(String repo, Path dir) {
-      GitFixtures.cloneOf(origin, dir);
-    }
   }
 
   static Path fixture(String name) {
