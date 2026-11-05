@@ -88,21 +88,44 @@ class NoirSpecSkillTest {
 
   @Test
   void everyNoirCommandInTheSkillParses() throws IOException {
-    // TODO(Task 8): the skill still documents the removed `noir draft`/`noir seal` commands until
-    // it is rewritten; skip them here and assert the new `noir spec` commands instead.
-    var commands =
-        noirCommands(SkillCommandTest.skillResource()).stream()
-            .filter(c -> !c.startsWith("noir draft ") && !c.startsWith("noir seal "))
-            .toList();
+    var commands = noirCommands(SkillCommandTest.skillResource());
 
-    assertThat(commands).anyMatch(c -> c.startsWith("noir run --once"));
+    assertThat(commands).anyMatch(c -> c.startsWith("noir spec template"));
+    assertThat(commands).anyMatch(c -> c.startsWith("noir spec check"));
 
     for (var command : commands) {
-      var args = tokenize(PLACEHOLDER.matcher(command).replaceAll("sample"));
+      var withoutRedirect = command.replaceAll("\\s+>\\s*\\S+$", "");
+      var args = tokenize(PLACEHOLDER.matcher(withoutRedirect).replaceAll("sample"));
       assertThat(args.getFirst()).isEqualTo("noir");
       var rest = args.subList(1, args.size()).toArray(String[]::new);
       assertThatCode(() -> parser().parseArgs(rest)).as(command).doesNotThrowAnyException();
     }
+  }
+
+  @Test
+  void skillNeverAddsReadyLabel() throws IOException {
+    var skill = SkillCommandTest.skillResource();
+
+    assertThat(skill).doesNotContain("--add-label noir:ready").doesNotContain("--label noir:ready");
+  }
+
+  @Test
+  void skillMentionsNoCredential() throws IOException {
+    var skill = SkillCommandTest.skillResource();
+
+    assertThat(skill.lines())
+        .filteredOn(l -> l.contains("ANTHROPIC_API_KEY") || l.contains("CLAUDE_CODE_OAUTH_TOKEN"))
+        .allMatch(l -> l.toLowerCase().contains("never needs"));
+  }
+
+  @Test
+  void skillNeverReadsNoirHome() throws IOException {
+    var skill = SkillCommandTest.skillResource();
+
+    assertThat(skill.lines())
+        .filteredOn(l -> l.contains("~/.noir"))
+        .allMatch(l -> l.toLowerCase().contains("never"));
+    assertThat(skill).doesNotContain("noir draft").doesNotContain("noir seal");
   }
 
   @Test
