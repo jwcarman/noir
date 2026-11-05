@@ -73,7 +73,12 @@ public record ExperimentReport(
         medianApprovalTime == null
             ? "n/a"
             : duration(medianApprovalTime) + " (issue opened \u2192 noir:ready)");
-    line(sb, "Seal time (median)", duration(medianSealTime));
+    line(
+        sb,
+        "Seal time (median)",
+        medianSealTime == null
+            ? "n/a"
+            : duration(medianSealTime) + " (first approval \u2192 sealed)");
     line(
         sb,
         "PR disposition",

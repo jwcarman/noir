@@ -224,7 +224,7 @@ class ExperimentMetricsTest {
                     ev("a", 900, "sealed", 0, Map.of("issue", 1))),
                 item("b", State.SEALED, 0, approved("b", 0, 0, 0))));
     assertThat(r.medianSealTime()).isEqualTo(Duration.ofSeconds(90));
-    assertThat(r.render()).contains("Seal time (median)     1m 30s");
+    assertThat(r.render()).contains("Seal time (median)     1m 30s (first approval \u2192 sealed)");
   }
 
   @Test
