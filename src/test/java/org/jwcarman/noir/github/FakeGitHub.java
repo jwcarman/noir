@@ -3,6 +3,7 @@ package org.jwcarman.noir.github;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -42,6 +43,9 @@ public final class FakeGitHub implements GitHubPort {
   private RuntimeException issueFailure;
   private int issueFailures;
   private int removeLabelFailures;
+  private final Map<String, Set<String>> definedLabels = new HashMap<>();
+  private int ensureLabelsFailures;
+  private RuntimeException ensureLabelsFailure;
 
   public FakeGitHub withDefaultBranch(String branch) {
     this.defaultBranch = branch;
@@ -113,6 +117,7 @@ public final class FakeGitHub implements GitHubPort {
 
   /** Adds a label as {@code actor} at {@code at}; adding {@code noir:ready} records an approval. */
   public void addLabel(int n, String label, String actor, Instant at) {
+    requireLabel(issue(n).repo(), label);
     var labels = issue(n).labels();
     if (!labels.contains(label)) {
       labels.add(label);
@@ -128,6 +133,7 @@ public final class FakeGitHub implements GitHubPort {
       removeLabelFailures--;
       throw new GitHubException("simulated removeLabel failure");
     }
+    requireLabel(repo, label);
     issue(number).labels().remove(label);
   }
 
@@ -169,6 +175,33 @@ public final class FakeGitHub implements GitHubPort {
     return issues.stream().filter(i -> i.number() == number).findFirst().orElseThrow();
   }
 
+  /** Defines labels in {@code repo} without recording an {@link #ensureLabels} call. */
+  public FakeGitHub defineLabels(String repo, String... names) {
+    definedLabels.computeIfAbsent(repo, r -> new HashSet<>()).addAll(List.of(names));
+    return this;
+  }
+
+  /** Defines every {@link NoirLabels#ALL} label in each repo (as an earlier noir run would). */
+  public FakeGitHub withNoirLabels(String... repos) {
+    for (var repo : repos) {
+      defineLabels(repo, NoirLabels.ALL.stream().map(NoirLabel::name).toArray(String[]::new));
+    }
+    return this;
+  }
+
+  /** The next {@code times} {@link #ensureLabels} calls throw {@code failure}. */
+  public void failEnsureLabels(int times, RuntimeException failure) {
+    ensureLabelsFailures = times;
+    ensureLabelsFailure = failure;
+  }
+
+  /** GitHub refuses to apply or remove a label the repo does not define. */
+  private void requireLabel(String repo, String label) {
+    if (!definedLabels.getOrDefault(repo, Set.of()).contains(label)) {
+      throw new GitHubException("label not found: " + label);
+    }
+  }
+
   public List<String> ensuredRepos() {
     return ensuredRepos;
   }
@@ -184,6 +217,7 @@ public final class FakeGitHub implements GitHubPort {
       failNextCreateIssue = false;
       throw new GitHubException("simulated createIssue failure");
     }
+    labels.forEach(l -> requireLabel(repo, l));
     var issue =
         new Issue(
             issues.size() + 1, repo, title, body, new ArrayList<>(labels), new ArrayList<>(), true);
@@ -202,6 +236,11 @@ public final class FakeGitHub implements GitHubPort {
 
   @Override
   public void ensureLabels(String repo) {
+    if (ensureLabelsFailures > 0) {
+      ensureLabelsFailures--;
+      throw ensureLabelsFailure;
+    }
+    withNoirLabels(repo);
     ensuredRepos.add(repo);
   }
 
@@ -224,6 +263,9 @@ public final class FakeGitHub implements GitHubPort {
       failNextSetNoirLabel = false;
       throw new GitHubException("simulated setNoirLabel failure");
     }
+    // Like GhCli: adds the label and removes every other state label, all of which must exist.
+    label.ifPresent(l -> requireLabel(repo, l));
+    NoirLabels.STATE.forEach(l -> requireLabel(repo, l.name()));
     var labels = issue(issue).labels();
     NoirLabels.STATE.forEach(l -> labels.remove(l.name()));
     label.filter(l -> !labels.contains(l)).ifPresent(labels::add);

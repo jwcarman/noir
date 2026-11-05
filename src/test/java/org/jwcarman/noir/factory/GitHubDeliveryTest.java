@@ -13,7 +13,7 @@ import org.jwcarman.noir.spec.Specs;
 import org.jwcarman.noir.store.WorkItem;
 
 class GitHubDeliveryTest {
-  final FakeGitHub gh = new FakeGitHub().withDefaultBranch("trunk");
+  final FakeGitHub gh = new FakeGitHub().withDefaultBranch("trunk").withNoirLabels("jwcarman/demo");
   final FakeBranchPublisher publisher = new FakeBranchPublisher();
   final GitHubDelivery delivery = new GitHubDelivery(gh, publisher);
   final AttemptPaths attempt = new AttemptPaths(Path.of("/store/item"), 2);

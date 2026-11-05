@@ -32,7 +32,7 @@ class DispositionsTest {
   @TempDir Path home;
   Store store;
   final Clock clock = Clock.fixed(Instant.parse("2026-11-04T00:00:00Z"), ZoneOffset.UTC);
-  final FakeGitHub gh = new FakeGitHub();
+  final FakeGitHub gh = new FakeGitHub().withNoirLabels("jwcarman/demo");
   final List<Integer> lookups = new ArrayList<>();
   final List<String> warnings = new ArrayList<>();
   Dispositions dispositions;

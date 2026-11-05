@@ -76,7 +76,7 @@ class ApprovalSealerTest {
   void setUp() {
     home = new NoirHome(tmp.resolve("home"));
     store = new Store(home);
-    github = new FakeGitHub();
+    github = new FakeGitHub().withNoirLabels("jwcarman/demo");
     gitCli = new GitCli(new ProcessCommandRunner());
     origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), REPO);
     clones = new ArrayList<>();

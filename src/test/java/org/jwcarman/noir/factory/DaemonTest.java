@@ -41,7 +41,7 @@ class DaemonTest {
 
   @TempDir Path home;
   Store store;
-  final FakeGitHub gh = new FakeGitHub();
+  final FakeGitHub gh = new FakeGitHub().withNoirLabels(REPO, OTHER_REPO);
   final Clock clock = Clock.fixed(Instant.parse("2026-11-04T00:00:00Z"), ZoneOffset.UTC);
   final FakeDriver driver = new FakeDriver();
   final List<Duration> sleeps = new ArrayList<>();
@@ -243,6 +243,46 @@ class DaemonTest {
     assertThat(store.readWorkItem(A).state()).isEqualTo(State.PR_OPEN);
     assertThat(store.readWorkItem(B).state()).isEqualTo(State.PR_OPEN);
     assertThat(store.readWorkItem(C).state()).isEqualTo(State.SEALED);
+  }
+
+  // ---- labels ------------------------------------------------------------------------------
+
+  @Test
+  void ensuresLabelsOncePerRepoOnFirstPass() {
+    // Checked inside the drive: labels exist before any item is reconciled or driven.
+    item(A, REPO, issue(REPO), State.GRADING);
+    driver.failures.put(A, id -> assertThat(gh.ensuredRepos()).containsExactly(REPO));
+    var daemon = daemon();
+
+    daemon.runOnce();
+    daemon.runOnce();
+
+    assertThat(gh.ensuredRepos()).containsExactly(REPO);
+    assertThat(driver.driven).containsExactly(A);
+  }
+
+  @Test
+  void ensureLabelsFailureSkipsRepoAndRetriesNextPass() {
+    int n = issue(REPO, "noir:ready");
+    gh.failEnsureLabels(1, new IllegalStateException("gh down for token " + SECRET));
+    var daemon = daemon();
+
+    daemon.runOnce();
+
+    assertThat(store.itemIds()).isEmpty();
+    assertThat(gh.ensuredRepos()).isEmpty();
+    assertThat(reported)
+        .singleElement()
+        .asString()
+        .startsWith("error null: " + REPO + ": ")
+        .contains("gh down")
+        .doesNotContain(SECRET);
+
+    daemon.runOnce();
+    daemon.runOnce();
+
+    assertThat(gh.ensuredRepos()).containsExactly(REPO);
+    assertThat(store.findItems(REPO, n)).hasSize(1);
   }
 
   // ---- approval discovery ------------------------------------------------------------------

@@ -43,7 +43,7 @@ record SealedItemFixture(
   static SealedItemFixture create(Path root) {
     var home = new NoirHome(root.resolve("home"));
     var store = new Store(home);
-    var github = new FakeGitHub();
+    var github = new FakeGitHub().withNoirLabels("jwcarman/demo");
     var origin = GitFixtures.originWithCommit(root.resolve("remotes"), REPO);
     var clone = GitFixtures.cloneOf(origin, root.resolve("clone"));
     var git = new GitCli(new ProcessCommandRunner());

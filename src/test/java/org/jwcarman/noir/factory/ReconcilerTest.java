@@ -33,7 +33,10 @@ class ReconcilerTest {
 
   @TempDir Path home;
   Store store;
-  final FakeGitHub gh = new FakeGitHub();
+  final FakeGitHub gh =
+      new FakeGitHub()
+          .withNoirLabels("jwcarman/demo")
+          .defineLabels("jwcarman/demo", "bug", "custom");
   final Clock clock = Clock.fixed(Instant.parse("2026-11-04T00:00:00Z"), ZoneOffset.UTC);
   Reconciler reconciler;
 

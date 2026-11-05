@@ -21,14 +21,15 @@ import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 
 /**
- * The {@code noir run} loop (spec §6.1, §9.3). Each pass reconciles every item against GitHub,
- * records PR dispositions, then discovers approvals: every open issue labelled {@code noir:ready}
- * in a configured repo without a work item gets a new {@code SEALING} item (none while any item is
- * unreadable), and a {@code DRAFT} item whose issue was approved again moves to {@code SEALING}. It
- * then picks up work — {@code SEALED} items in a configured repo, plus every {@code REWORK} and
- * active item ({@code SEALING} included) — and drives each one, oldest id first and one at a time,
- * until it is terminal, {@code BLOCKED} or back in {@code DRAFT}. {@code DRAFT} items are never
- * driven.
+ * The {@code noir run} loop (spec §6.1, §9.3). The first pass creates the {@code noir:*} labels in
+ * every configured repo (a repo that fails is retried each pass). Each pass reconciles every item
+ * against GitHub, records PR dispositions, then discovers approvals: every open issue labelled
+ * {@code noir:ready} in a configured repo without a work item gets a new {@code SEALING} item (none
+ * while any item is unreadable), and a {@code DRAFT} item whose issue was approved again moves to
+ * {@code SEALING}. It then picks up work — {@code SEALED} items in a configured repo, plus every
+ * {@code REWORK} and active item ({@code SEALING} included) — and drives each one, oldest id first
+ * and one at a time, until it is terminal, {@code BLOCKED} or back in {@code DRAFT}. {@code DRAFT}
+ * items are never driven.
  *
  * <p>The daemon drives items one {@link ItemDriver#advance} at a time so that it can report every
  * transition to its {@link Listener} without the factory knowing about output.
@@ -83,6 +84,9 @@ public final class Daemon {
   private final String sweepLabel;
 
   private boolean swept;
+
+  /** Configured repos whose {@code noir:*} labels this run has created (or updated). */
+  private final Set<String> labelled = new HashSet<>();
 
   public Daemon(
       Store store,
@@ -139,6 +143,7 @@ public final class Daemon {
       docker.removeLabelled(sweepLabel);
       swept = true;
     }
+    var unlabelled = ensureLabels();
     var ids = store.itemIds();
     for (var id : ids) {
       try {
@@ -148,7 +153,7 @@ public final class Daemon {
       }
     }
     refreshDispositions();
-    discoverApprovals();
+    discoverApprovals(unlabelled);
     int advanced = 0;
     for (var item : eligible(store.itemIds())) {
       if (interrupted()) {
@@ -159,6 +164,28 @@ public final class Daemon {
       }
     }
     return advanced;
+  }
+
+  /**
+   * Creates the {@code noir:*} labels once per configured repo per run, before reconciliation
+   * applies any of them. A repo that fails is reported, skipped by this pass's discovery and
+   * retried next pass. Returns the repos still without labels.
+   */
+  private Set<String> ensureLabels() {
+    var failed = new HashSet<String>();
+    for (var repo : config.repos()) {
+      if (labelled.contains(repo)) {
+        continue;
+      }
+      try {
+        gh.ensureLabels(repo);
+        labelled.add(repo);
+      } catch (RuntimeException e) {
+        listener.error(null, repo + ": " + Secrets.describe(e, secrets));
+        failed.add(repo);
+      }
+    }
+    return failed;
   }
 
   /**
@@ -182,11 +209,12 @@ public final class Daemon {
   }
 
   /**
-   * Finds every approved issue in each configured repo; a failing repo never stops the pass. While
-   * any work item is unreadable no item is created (its issue cannot be told apart from a new one,
-   * and an issue gets one item, ever); existing {@code DRAFT} items are still re-approved.
+   * Finds every approved issue in each configured repo except {@code skipped} (repos whose labels
+   * could not be created); a failing repo never stops the pass. While any work item is unreadable
+   * no item is created (its issue cannot be told apart from a new one, and an issue gets one item,
+   * ever); existing {@code DRAFT} items are still re-approved.
    */
-  private void discoverApprovals() {
+  private void discoverApprovals(Set<String> skipped) {
     var unreadable = unreadableItems();
     boolean canCreate = unreadable.isEmpty();
     if (!canCreate && warned.add("unreadable " + unreadable)) {
@@ -196,6 +224,9 @@ public final class Daemon {
               + "; fix or remove them");
     }
     for (var repo : config.repos()) {
+      if (skipped.contains(repo)) {
+        continue;
+      }
       List<Integer> ready;
       try {
         ready = gh.openIssuesWithLabel(repo, NoirLabels.READY);

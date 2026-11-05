@@ -65,7 +65,7 @@ class FactoryTest {
   Store store;
   Path itemDir;
   Spec spec;
-  final FakeGitHub gh = new FakeGitHub();
+  final FakeGitHub gh = new FakeGitHub().withNoirLabels("jwcarman/demo");
   final FakeBranchPublisher publisher = new FakeBranchPublisher();
   final RecordingDelivery delivery = new RecordingDelivery(new GitHubDelivery(gh, publisher));
   final FakeBuild build = new FakeBuild();

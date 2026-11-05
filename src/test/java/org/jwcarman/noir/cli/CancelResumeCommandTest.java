@@ -30,7 +30,8 @@ class CancelResumeCommandTest {
   @TempDir Path tmp;
   final StringWriter out = new StringWriter();
   final StringWriter err = new StringWriter();
-  final FakeGitHub gh = new FakeGitHub();
+  final FakeGitHub gh =
+      new FakeGitHub().withNoirLabels("jwcarman/demo").defineLabels("jwcarman/demo", "bug");
   Store store;
   int issue;
 

@@ -21,7 +21,7 @@ class SpecCommandTest {
   @TempDir Path tmp;
   final StringWriter out = new StringWriter();
   final StringWriter err = new StringWriter();
-  final FakeGitHub github = new FakeGitHub();
+  final FakeGitHub github = new FakeGitHub().withNoirLabels("o/r");
 
   int run(String... args) {
     var ops =

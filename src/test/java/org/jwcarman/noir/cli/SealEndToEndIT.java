@@ -51,7 +51,7 @@ class SealEndToEndIT {
     Images.ensureBuilder(docker, config.images().builder());
     var home = new NoirHome(tmp.resolve("home"));
     var store = new Store(home);
-    var github = new FakeGitHub();
+    var github = new FakeGitHub().withNoirLabels("jwcarman/demo");
     var origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), "jwcarman/demo");
 
     var spec =

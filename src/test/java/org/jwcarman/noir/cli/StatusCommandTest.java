@@ -29,7 +29,7 @@ class StatusCommandTest {
   static final String SECRET = "sk-ant-secret-value";
   @TempDir Path tmp;
   Store store;
-  final FakeGitHub gh = new FakeGitHub();
+  final FakeGitHub gh = new FakeGitHub().withNoirLabels("jwcarman/demo");
   final StringWriter stderr = new StringWriter();
   final List<NoirHome> refreshed = new ArrayList<>();
 
