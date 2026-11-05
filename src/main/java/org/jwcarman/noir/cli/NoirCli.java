@@ -25,7 +25,8 @@ import picocli.CommandLine.Option;
       CancelCommand.class,
       ResumeCommand.class,
       AuditCommand.class,
-      SkillCommand.class
+      SkillCommand.class,
+      SpecCommand.class
     })
 public final class NoirCli implements Runnable {
 
