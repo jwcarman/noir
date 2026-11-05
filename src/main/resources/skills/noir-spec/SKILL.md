@@ -117,10 +117,9 @@ become the **API stubs**. Design them so the hidden tests can exercise the behav
   the API surface.
 - **The Examiner never sees the repository.** If a signature mentions an existing type, the
   Examiner knows only what the spec says about it. Prefer new types plus JDK types.
-- **Prefer new files.** A stub is copied over the repository at its path, so a stub for an
-  existing file replaces that whole file. If the work truly must extend an existing class, the
-  stub has to be that file's complete current content plus the new members, and only the new
-  members' bodies throw. Discuss this with the user before choosing it.
+- **Stubs are new files only.** noir rejects the spec if any stub path already exists on the
+  default branch. To extend existing behavior, design the new API as new classes (for example a
+  new class that wraps or uses an existing one) rather than adding members to an existing type.
 - **Behavior lives in methods that throw in the stub.** Every holdout test must fail against the
   stubs, so behavior cannot hide in code the stub already implements (record accessors, enum
   constants, constants, default methods with real bodies). Constructors that validate their
@@ -177,6 +176,17 @@ repeating until it prints `OK`:
 noir spec check <tmpdir>/body.md --title "<title>"
 ```
 
+Then confirm every stub is a new file. Find the default branch with
+`gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`, run
+`git fetch origin <default-branch>` once, and for each `### <path>` in `## API contract` run:
+
+```
+git cat-file -e origin/<default-branch>:<path>
+```
+
+It succeeds when the file exists. If any stub path exists, noir would reject the spec: revise the
+API with the user so that path becomes a new class, and check again.
+
 Show the user the exact title and the full body and ask them to approve **that exact text**.
 Make any changes they ask for, re-check, and show it again. Do not publish without explicit
 approval of the current text. Then publish it as a draft:
@@ -204,7 +214,8 @@ section 7.
    comment on the issue (`gh issue view N --repo <repo> --comments`): read it and address its
    problems.
 3. Revise with the user, one question at a time, using the guidance in section 4. Check with
-   `noir spec check <tmpdir>/body.md --title "<title>"` until `OK`.
+   `noir spec check <tmpdir>/body.md --title "<title>"` until `OK`, then confirm every stub
+   path is a new file with the `git cat-file -e` check from section 5.
 4. Show the user a diff of `original.md` against `body.md`, and on explicit approval run
    `gh issue edit N --repo <repo> --body-file <tmpdir>/body.md` (add `--title "<title>"` if the
    title changed). Delete the scratch directory (`rm -rf <tmpdir>`).

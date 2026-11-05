@@ -174,4 +174,22 @@ class NoirSpecSkillTest {
         .filteredOn(l -> WRITE_INTO_SRC.matcher(l).find())
         .allMatch(l -> l.contains("stubs/"));
   }
+
+  @Test
+  void skillOnlyOffersNewStubFilesAndChecksThemBeforePublishing() throws IOException {
+    var skill = SkillCommandTest.skillResource();
+
+    // The server rejects any stub whose path exists on the default branch (STUB_EXISTS).
+    assertThat(skill)
+        .doesNotContainIgnoringCase("complete current content")
+        .doesNotContainIgnoringCase("replaces that whole file")
+        .doesNotContainIgnoringCase("stub for an existing file")
+        .doesNotContainIgnoringCase("extend an existing class, the stub")
+        .doesNotContainIgnoringCase("prefer new files")
+        .contains("git fetch origin <default-branch>")
+        .contains("git cat-file -e origin/<default-branch>:<path>");
+    assertThat(skill.indexOf("git cat-file -e"))
+        .as("checked before the issue is created")
+        .isLessThan(skill.indexOf("gh issue create"));
+  }
 }
