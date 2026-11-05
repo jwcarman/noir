@@ -193,9 +193,9 @@ class StatusCommandTest {
     assertThat(out)
         .contains("\n\nExperiment (1 item)\n")
         .contains("Approval time (median) n/a")
-        .contains("Seal time (median)   n/a")
-        .contains("Seal rejections      none")
-        .contains("Auto-merge           not eligible: 0/20");
+        .contains("Seal time (median)     n/a")
+        .contains("Seal rejections        none")
+        .contains("Auto-merge             not eligible: 0/20");
     assertThat(run("status")).startsWith("ID");
   }
 

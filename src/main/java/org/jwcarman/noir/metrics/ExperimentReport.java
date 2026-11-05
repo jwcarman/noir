@@ -121,7 +121,7 @@ public record ExperimentReport(
   }
 
   private static void line(StringBuilder sb, String label, String value) {
-    sb.append(String.format("  %-20s %s%n", label, value));
+    sb.append(String.format("  %-22s %s%n", label, value));
   }
 
   /**

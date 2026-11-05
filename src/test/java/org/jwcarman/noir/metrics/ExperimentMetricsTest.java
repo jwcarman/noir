@@ -224,7 +224,7 @@ class ExperimentMetricsTest {
                     ev("a", 900, "sealed", 0, Map.of("issue", 1))),
                 item("b", State.SEALED, 0, approved("b", 0, 0, 0))));
     assertThat(r.medianSealTime()).isEqualTo(Duration.ofSeconds(90));
-    assertThat(r.render()).contains("Seal time (median)   1m 30s");
+    assertThat(r.render()).contains("Seal time (median)     1m 30s");
   }
 
   @Test
@@ -257,7 +257,7 @@ class ExperimentMetricsTest {
     assertThat(r.sealRejections())
         .containsExactly(Map.entry("edited_after_approval", 1), Map.entry("suite_too_weak", 2));
     assertThat(r.render())
-        .contains("Seal rejections      edited_after_approval 1, suite_too_weak 2");
+        .contains("Seal rejections        edited_after_approval 1, suite_too_weak 2");
     assertThat(r.toMap()).containsKeys("medianApprovalTime", "medianSealTime", "sealRejections");
   }
 
@@ -276,8 +276,8 @@ class ExperimentMetricsTest {
     assertThat(r.medianSealTime()).isNull();
     assertThat(r.render())
         .contains("Approval time (median) n/a")
-        .contains("Seal time (median)   n/a")
-        .contains("Seal rejections      none");
+        .contains("Seal time (median)     n/a")
+        .contains("Seal rejections        none");
     assertThat(r.toMap().get("medianApprovalTime")).isNull();
   }
 
@@ -332,7 +332,7 @@ class ExperimentMetricsTest {
     assertThat(r.autoMerge().completed()).isEqualTo(20);
     assertThat(r.autoMerge().required()).isEqualTo(20);
     assertThat(r.autoMerge().requiredRate()).isEqualTo(0.90);
-    assertThat(r.render()).contains("Auto-merge           eligible");
+    assertThat(r.render()).contains("Auto-merge             eligible");
   }
 
   @Test
@@ -370,7 +370,18 @@ class ExperimentMetricsTest {
     assertThat(r.medianWallTime()).isNull();
     assertThat(r.totalCostUsd()).isNull();
     assertThat(r.completed()).isZero();
-    assertThat(r.render()).contains("Cost                 n/a");
+    assertThat(r.render()).contains("Cost                   n/a");
+  }
+
+  @Test
+  void valuesLineUpInOneColumn() {
+    var lines = ExperimentMetrics.compute(List.of()).render().lines().skip(1).toList();
+    assertThat(lines).isNotEmpty();
+    for (var line : lines) {
+      // "  " + label padded to the widest label (22) + " " + value
+      assertThat(line.charAt(24)).as(line).isEqualTo(' ');
+      assertThat(line.charAt(25)).as(line).isNotEqualTo(' ');
+    }
   }
 
   @Test
@@ -390,17 +401,17 @@ class ExperimentMetricsTest {
         .isEqualTo(
             """
             Experiment (1 item)
-              First-pass rate      100% (1/1)
-              Rework cycles        0.0 per item
-              Failure categories   none
-              Seal rejections      none
-              Cost                 $0.24 total, $0.24 per item
-              Wall time (median)   1m 13s
+              First-pass rate        100% (1/1)
+              Rework cycles          0.0 per item
+              Failure categories     none
+              Seal rejections        none
+              Cost                   $0.24 total, $0.24 per item
+              Wall time (median)     1m 13s
               Approval time (median) n/a
-              Seal time (median)   n/a
-              PR disposition       0 accepted, 0 modified, 0 rejected
-              Holdout defects      0
-              Auto-merge           not eligible: 0/20 completed items
+              Seal time (median)     n/a
+              PR disposition         0 accepted, 0 modified, 0 rejected
+              Holdout defects        0
+              Auto-merge             not eligible: 0/20 completed items
             """);
   }
 }
