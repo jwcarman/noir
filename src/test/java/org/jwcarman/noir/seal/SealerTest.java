@@ -41,11 +41,6 @@ class SealerTest {
           + ItemId.holdoutPackage(ID)
           + ";\nimport org.junit.jupiter.api.*;\nclass T {\n"
           + "  @Test @Tag(\"R1\") void a() {}\n  @Test @Tag(\"R2\") void b() {}\n}\n";
-  static final String UNTAGGED_TEST =
-      "package "
-          + ItemId.holdoutPackage(ID)
-          + ";\nimport org.junit.jupiter.api.*;\n"
-          + "class T { @Test void a() {} }\n";
 
   @TempDir Path tmp;
   Store store;
@@ -158,44 +153,6 @@ class SealerTest {
   }
 
   @Test
-  void retriesFeedProblemsToNextAttempt() {
-    checkResults.add((in, out) -> SealArtifactsFixture.vacuous(out));
-    var r = sealer.seal(ID, clone);
-    assertThat(r).isInstanceOf(SealResult.Sealed.class);
-    assertThat(agent.requests()).hasSize(2);
-    assertThat(agent.requests().get(1).prompt())
-        .contains("holdout test passes against the stubs (vacuous)");
-    assertThat(store.readEvents(ID))
-        .extracting(Event::type)
-        .containsExactly("seal_requested", "examiner_attempt", "examiner_attempt", "sealed");
-  }
-
-  @Test
-  void threeFailuresReject() {
-    for (int i = 0; i < 3; i++) {
-      checkResults.add((in, out) -> SealArtifactsFixture.vacuous(out));
-    }
-    var r = (SealResult.Rejected) sealer.seal(ID, clone);
-    assertThat(r.problems())
-        .singleElement()
-        .asString()
-        .startsWith("holdout test passes against the stubs");
-    assertThat(agent.requests()).hasSize(3);
-    assertThat(Files.exists(store.draftDir(ID))).isTrue();
-    assertThat(github.issues()).isEmpty();
-  }
-
-  @Test
-  void staticAnalysisProblemsSkipContainerChecks() {
-    holdoutSources.add(UNTAGGED_TEST);
-    var r = sealer.seal(ID, clone);
-    assertThat(r).isInstanceOf(SealResult.Sealed.class);
-    assertThat(agent.requests()).hasSize(2);
-    assertThat(checkCalls).hasSize(1);
-    assertThat(agent.requests().get(1).prompt()).contains("test has no requirement tag");
-  }
-
-  @Test
   void resumeAfterCrashDoesNotDuplicateIssue() {
     github.failNextComment();
     assertThatThrownBy(() -> sealer.seal(ID, clone)).isInstanceOf(GitHubException.class);
@@ -232,53 +189,6 @@ class SealerTest {
     assertThat(SpecJson.read(store.itemDir(ID).resolve("spec.json")).baseSha())
         .isEqualTo(remoteSha);
     assertThat(checkCalls.getFirst().spec().baseSha()).isEqualTo(remoteSha);
-  }
-
-  @Test
-  void agentFailureIsInfrastructureNotTestProblems() {
-    var failing =
-        new org.jwcarman.noir.agent.AgentPort() {
-          int calls;
-
-          @Override
-          public org.jwcarman.noir.agent.AgentResult run(org.jwcarman.noir.agent.AgentRequest r) {
-            calls++;
-            return new org.jwcarman.noir.agent.AgentResult(
-                0,
-                true,
-                false,
-                java.math.BigDecimal.ZERO,
-                1,
-                "default",
-                "Invalid API key · Fix external API key",
-                "sha256:img");
-          }
-        };
-    var s =
-        new Sealer(
-            store,
-            gitCli,
-            github,
-            new Examiner(failing, NoirConfig.defaults()),
-            (in, out) -> SealArtifactsFixture.good(out),
-            NoirConfig.defaults(),
-            Clock.systemUTC());
-    assertThatThrownBy(() -> s.seal(ID, clone))
-        .isInstanceOf(ExaminerFailedException.class)
-        .hasMessage("Examiner agent failed: Invalid API key · Fix external API key");
-    assertThat(failing.calls).isEqualTo(1);
-    assertThat(store.draftDir(ID).resolve("examiner/attempt-1/agent.log"))
-        .content()
-        .contains("Invalid API key");
-    assertThat(github.issues()).isEmpty();
-  }
-
-  @Test
-  void attemptEventRecordsModelAndImage() {
-    sealer.seal(ID, clone);
-    assertThat(store.readEvents(ID).get(1).data())
-        .containsEntry("model", "scripted")
-        .containsEntry("imageId", "scripted");
   }
 
   @Test

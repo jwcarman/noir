@@ -17,6 +17,11 @@ public record NoirHome(Path root) {
     return store().resolve("drafts");
   }
 
+  /** Server-side clones of target repositories, at {@code repos/<owner>/<name>}. */
+  public Path repos() {
+    return root.resolve("repos");
+  }
+
   public Path config() {
     return root.resolve("config.yaml");
   }

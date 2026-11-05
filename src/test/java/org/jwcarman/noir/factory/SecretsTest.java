@@ -34,4 +34,12 @@ class SecretsTest {
   void blankSecretsAreIgnored() {
     assertThat(Secrets.redact("a  b", Set.of(" ", ""))).isEqualTo("a b");
   }
+
+  @Test
+  void maskKeepsFormatting() {
+    var text = "line one sk-ant-1\n\n- two  spaces\n" + "x".repeat(600);
+    assertThat(Secrets.mask(text, SECRETS))
+        .isEqualTo("line one [redacted]\n\n- two  spaces\n" + "x".repeat(600));
+    assertThat(Secrets.mask(null, SECRETS)).isEmpty();
+  }
 }

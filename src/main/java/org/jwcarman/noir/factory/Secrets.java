@@ -15,14 +15,22 @@ public final class Secrets {
 
   /** {@code text} with every non-blank secret value masked, collapsed to one bounded line. */
   public static String redact(String text, Set<String> secrets) {
+    var s = mask(text, secrets).replaceAll("\\s+", " ").strip();
+    return s.length() > MAX_LENGTH ? s.substring(0, MAX_LENGTH) + "…" : s;
+  }
+
+  /**
+   * {@code text} with every non-blank secret value masked, formatting kept. For outbound text such
+   * as issue comments, where newlines and length matter.
+   */
+  public static String mask(String text, Set<String> secrets) {
     var s = text == null ? "" : text;
     for (var secret : secrets) {
       if (secret != null && !secret.isBlank()) {
         s = s.replace(secret, MASK);
       }
     }
-    s = s.replaceAll("\\s+", " ").strip();
-    return s.length() > MAX_LENGTH ? s.substring(0, MAX_LENGTH) + "…" : s;
+    return s;
   }
 
   /**

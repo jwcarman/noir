@@ -7,18 +7,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Clock;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 import org.jwcarman.noir.commit.Commitments;
-import org.jwcarman.noir.commit.SealedFileException;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.git.GitPort;
 import org.jwcarman.noir.github.GitHubPort;
-import org.jwcarman.noir.holdout.HoldoutAnalyzer;
 import org.jwcarman.noir.json.Json;
 import org.jwcarman.noir.render.SpecRenderer;
 import org.jwcarman.noir.render.StubSource;
@@ -32,14 +27,10 @@ import org.jwcarman.noir.store.WorkItem;
 
 /** Turns a draft into a sealed work item (spec §5). */
 public final class Sealer {
-  private static final Pattern PACKAGE = Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
-
   private final Store store;
   private final GitPort git;
   private final GitHubPort github;
-  private final Examiner examiner;
-  private final SealCheckRunner checks;
-  private final NoirConfig config;
+  private final SuiteSealer suiteSealer;
   private final Clock clock;
 
   public Sealer(
@@ -53,9 +44,7 @@ public final class Sealer {
     this.store = store;
     this.git = git;
     this.github = github;
-    this.examiner = examiner;
-    this.checks = checks;
-    this.config = config;
+    this.suiteSealer = new SuiteSealer(store, examiner, checks, config, clock);
     this.clock = clock;
   }
 
@@ -101,14 +90,14 @@ public final class Sealer {
     git.bundle(repoDir, spec.baseSha(), bundle);
 
     var stubs = SpecRenderer.loadStubs(spec, draft);
-    var model = examine(spec, stubs, draft, bundle);
+    var model = suiteSealer.examine(spec, stubs, draft, bundle);
     if (model.problems() != null) {
       return new SealResult.Rejected(model.problems());
     }
 
     var issueBody = SpecRenderer.issueBody(spec, stubs);
     var commitment =
-        Commitments.create(spec, draft, model.name(), Commitments.sha256Hex(issueBody));
+        Commitments.create(spec, draft, model.model(), Commitments.sha256Hex(issueBody));
     Commitments.write(commitment, draft.resolve("commitment.json"));
 
     github.ensureLabels(spec.repo());
@@ -141,68 +130,8 @@ public final class Sealer {
     return new SealResult.Sealed(spec.id(), spec.repo(), issue, hash);
   }
 
-  /** Examiner outcome: the model that produced the sealed suite, or the last problems. */
-  private record Examination(String name, List<String> problems) {}
-
-  private Examination examine(Spec spec, List<StubSource> stubs, Path draft, Path bundle) {
-    var stubPackages = stubPackages(stubs);
-    List<String> problems = List.of();
-    for (int attempt = 1; attempt <= config.examiner().attempts(); attempt++) {
-      var attemptDir = draft.resolve("examiner/attempt-" + attempt);
-      ExaminerOutput out;
-      try {
-        out = examiner.attempt(spec, stubs, problems, attemptDir, draft);
-        problems = checkSuite(spec, draft, bundle, stubPackages, out, attemptDir);
-      } catch (SealedFileException e) {
-        out = null;
-        problems = List.of(e.getMessage());
-      }
-      var data = new java.util.LinkedHashMap<String, Object>();
-      data.put("attempt", attempt);
-      data.put("ok", problems.isEmpty());
-      data.put("problems", problems.size());
-      if (out != null) {
-        data.put("model", out.agent().model());
-        data.put("imageId", out.agent().imageId());
-        data.put("costUsd", out.agent().costUsd());
-        data.put("turns", out.agent().turns());
-        data.put("agentError", out.agent().error());
-      }
-      store.appendEvent(draft, Event.of(clock, spec.id(), "examiner_attempt", attempt, data));
-      if (problems.isEmpty()) {
-        return new Examination(out.agent().model(), null);
-      }
-    }
-    return new Examination(null, problems);
-  }
-
-  private List<String> checkSuite(
-      Spec spec,
-      Path draft,
-      Path bundle,
-      Set<String> stubPackages,
-      ExaminerOutput out,
-      Path attemptDir) {
-    var problems =
-        new ArrayList<>(HoldoutAnalyzer.analyze(spec, out.holdoutDir(), stubPackages).problems());
-    if (!problems.isEmpty()) {
-      return problems;
-    }
-    var inputs =
-        SealInputs.of(spec, bundle, draft.resolve("stubs"), out.holdoutDir(), out.referenceDir());
-    var artifacts = checks.run(inputs, attemptDir.resolve("checks"));
-    return SealJudge.judge(artifacts, config.sealDiscrimination());
-  }
-
   public static Set<String> stubPackages(List<StubSource> stubs) {
-    var packages = new LinkedHashSet<String>();
-    for (var stub : stubs) {
-      var m = PACKAGE.matcher(stub.content());
-      if (m.find()) {
-        packages.add(m.group(1));
-      }
-    }
-    return packages;
+    return SuiteSealer.stubPackages(stubs);
   }
 
   static String commitmentComment(String hash) {

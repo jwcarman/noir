@@ -37,8 +37,23 @@ final class SealArtifactsFixture {
     return new SealArtifacts(out);
   }
 
+  /** Like {@link #vacuous(Path)} but the passing test is {@code classname#name}. */
+  static SealArtifacts vacuous(Path out, String classname, String name) {
+    good(out);
+    write(out, "stub-run/TEST-junit-jupiter.xml", suite(true, classname, name));
+    return new SealArtifacts(out);
+  }
+
   private static String suite(boolean pass) {
-    return "<testsuite><testcase classname=\"noir.holdout.x.T\" name=\"a()\">"
+    return suite(pass, "noir.holdout.x.T", "a()");
+  }
+
+  private static String suite(boolean pass, String classname, String name) {
+    return "<testsuite><testcase classname=\""
+        + classname
+        + "\" name=\""
+        + name
+        + "\">"
         + (pass ? "" : "<failure message=\"x\"/>")
         + "</testcase></testsuite>";
   }
