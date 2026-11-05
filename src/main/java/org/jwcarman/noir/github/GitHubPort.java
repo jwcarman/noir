@@ -20,7 +20,16 @@ public interface GitHubPort {
 
   boolean issueOpen(String repo, int issue);
 
-  /** Adds {@code label} (if present) and removes every other {@code noir:*} label. */
+  /** Reads title, body, open state, edit time and current approval of an issue. */
+  IssueSnapshot issue(String repo, int number);
+
+  /** Removes {@code label} from the issue; GitHub does not error when it is absent. */
+  void removeLabel(String repo, int number, String label);
+
+  /**
+   * Adds {@code label} (if present) and removes every other {@link NoirLabels#STATE} label; {@code
+   * noir:ready} is never removed.
+   */
   void setNoirLabel(String repo, int issue, Optional<String> label);
 
   /** Finds a pull request (any state) whose head is {@code headBranch}. */

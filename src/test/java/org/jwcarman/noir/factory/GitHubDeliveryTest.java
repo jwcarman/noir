@@ -52,9 +52,9 @@ class GitHubDeliveryTest {
   @Test
   void labelMirrorsTheState() {
     delivery.label(item, State.BUILDING);
-    assertThat(gh.issue(1).labels()).containsExactly("noir:building");
+    assertThat(gh.issue(1).labels()).containsExactlyInAnyOrder("noir:ready", "noir:building");
     delivery.label(item, State.CANCELLED);
-    assertThat(gh.issue(1).labels()).isEmpty();
+    assertThat(gh.issue(1).labels()).containsExactly("noir:ready");
   }
 
   @Test

@@ -18,6 +18,12 @@ public final class GhCli implements GitHubPort {
 
   private static final Pattern PULL_URL = Pattern.compile("/pull/(\\d+)\\s*$");
 
+  private static final String ISSUE_QUERY =
+      "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){"
+          + " number title body state createdAt lastEditedAt labels(first:100){nodes{name}}"
+          + " timelineItems(last:100,itemTypes:[LABELED_EVENT,RENAMED_TITLE_EVENT]){nodes{"
+          + " __typename ... on LabeledEvent{createdAt actor{login} label{name}} ... on RenamedTitleEvent{createdAt}}}}}}";
+
   private final CommandRunner runner;
 
   public GhCli(CommandRunner runner) {
@@ -118,11 +124,82 @@ public final class GhCli implements GitHubPort {
     });
     args.add("--remove-label");
     args.add(
-        NoirLabels.ALL.stream()
+        NoirLabels.STATE.stream()
             .map(NoirLabel::name)
             .filter(n -> label.map(l -> !l.equals(n)).orElse(true))
             .collect(Collectors.joining(",")));
     gh(null, args.toArray(String[]::new));
+  }
+
+  @Override
+  public void removeLabel(String repo, int number, String label) {
+    gh(null, "issue", "edit", String.valueOf(number), "--repo", repo, "--remove-label", label);
+  }
+
+  @Override
+  public IssueSnapshot issue(String repo, int number) {
+    var slash = repo.indexOf('/');
+    var out =
+        gh(
+                null,
+                "api",
+                "graphql",
+                "-f",
+                "query=" + ISSUE_QUERY,
+                "-F",
+                "owner=" + repo.substring(0, slash),
+                "-F",
+                "name=" + repo.substring(slash + 1),
+                "-F",
+                "number=" + number)
+            .stdout();
+    try {
+      var issue = Json.mapper().readTree(out).path("data").path("repository").path("issue");
+      if (!issue.isObject()) {
+        throw new GitHubException("issue " + repo + "#" + number + " not found");
+      }
+      var createdAt = Instant.parse(issue.required("createdAt").asText());
+      var editedAt = createdAt;
+      var lastEdited = issue.path("lastEditedAt");
+      if (lastEdited.isTextual()) {
+        editedAt = later(editedAt, Instant.parse(lastEdited.asText()));
+      }
+      boolean readyPresent = false;
+      for (var l : issue.path("labels").path("nodes")) {
+        readyPresent |= NoirLabels.READY.equals(l.path("name").asText());
+      }
+      IssueSnapshot.Approval approval = null;
+      for (var e : issue.path("timelineItems").path("nodes")) {
+        var at = Instant.parse(e.required("createdAt").asText());
+        var type = e.path("__typename").asText();
+        if (type.equals("RenamedTitleEvent")) {
+          editedAt = later(editedAt, at);
+        } else if (type.equals("LabeledEvent")
+            && NoirLabels.READY.equals(e.path("label").path("name").asText())
+            && (approval == null || !at.isBefore(approval.at()))) {
+          var login = e.path("actor").path("login");
+          approval = new IssueSnapshot.Approval(login.isTextual() ? login.asText() : "ghost", at);
+        }
+      }
+      var body = issue.path("body");
+      return new IssueSnapshot(
+          issue.required("number").intValue(),
+          issue.required("title").asText(),
+          body.isTextual() ? body.asText() : "",
+          issue.required("state").asText().equals("OPEN"),
+          createdAt,
+          editedAt,
+          readyPresent ? Optional.ofNullable(approval) : Optional.empty());
+    } catch (IOException | RuntimeException e) {
+      if (e instanceof GitHubException g) {
+        throw g;
+      }
+      throw new GitHubException("gh api graphql returned unexpected output: " + out.trim());
+    }
+  }
+
+  private static Instant later(Instant a, Instant b) {
+    return b.isAfter(a) ? b : a;
   }
 
   @Override

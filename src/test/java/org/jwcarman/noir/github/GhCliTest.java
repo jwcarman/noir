@@ -68,7 +68,7 @@ class GhCliTest {
   }
 
   @Test
-  void ensureLabelsCreatesAllFive() {
+  void ensureLabelsCreatesAll() {
     runner.whenArgvStartsWith(List.of("gh", "label", "create"), ok(""));
     gh.ensureLabels("jwcarman/demo");
     assertThat(runner.commands())
@@ -84,7 +84,7 @@ class GhCliTest {
                 "--color",
                 "0e8a16",
                 "--description",
-                "Sealed; waiting for the factory",
+                "Approved by a human; noir will seal and build",
                 "--force"),
             List.of(
                 "gh",
@@ -133,6 +133,30 @@ class GhCliTest {
                 "b60205",
                 "--description",
                 "Needs human attention",
+                "--force"),
+            List.of(
+                "gh",
+                "label",
+                "create",
+                "noir:draft",
+                "--repo",
+                "jwcarman/demo",
+                "--color",
+                "c5def5",
+                "--description",
+                "Spec draft; add noir:ready to approve",
+                "--force"),
+            List.of(
+                "gh",
+                "label",
+                "create",
+                "noir:sealing",
+                "--repo",
+                "jwcarman/demo",
+                "--color",
+                "fbca04",
+                "--description",
+                "noir is writing the hidden test suite",
                 "--force"));
   }
 
@@ -214,7 +238,7 @@ class GhCliTest {
             "--add-label",
             "noir:building",
             "--remove-label",
-            "noir:ready,noir:pr-open,noir:failed,noir:blocked");
+            "noir:pr-open,noir:failed,noir:blocked,noir:draft,noir:sealing");
   }
 
   @Test
@@ -230,7 +254,7 @@ class GhCliTest {
             "--repo",
             "r/d",
             "--remove-label",
-            "noir:ready,noir:building,noir:pr-open,noir:failed,noir:blocked");
+            "noir:building,noir:pr-open,noir:failed,noir:blocked,noir:draft,noir:sealing");
   }
 
   @Test
@@ -347,5 +371,142 @@ class GhCliTest {
         List.of("gh", "pr", "view"),
         ok("{\"number\":7,\"state\":\"MERGED\",\"headRefOid\":\" \",\"mergedAt\":null}"));
     assertThatThrownBy(() -> blank.pullRequest("r/d", 7)).isInstanceOf(GitHubException.class);
+  }
+
+  private static String issueJson(String lastEditedAt, String labels, String events) {
+    return "{\"data\":{\"repository\":{\"issue\":{\"number\":5,\"title\":\"T\","
+        + "\"body\":\"B\",\"state\":\"OPEN\",\"createdAt\":\"2026-11-01T00:00:00Z\","
+        + "\"lastEditedAt\":"
+        + lastEditedAt
+        + ",\"labels\":{\"nodes\":["
+        + labels
+        + "]},\"timelineItems\":{\"nodes\":["
+        + events
+        + "]}}}}}";
+  }
+
+  private static String labeled(String at, String actor, String label) {
+    return "{\"__typename\":\"LabeledEvent\",\"createdAt\":\""
+        + at
+        + "\",\"actor\":"
+        + (actor == null ? "null" : "{\"login\":\"" + actor + "\"}")
+        + ",\"label\":{\"name\":\""
+        + label
+        + "\"}}";
+  }
+
+  private static final String READY_LABEL = "{\"name\":\"noir:ready\"}";
+
+  @Test
+  void issueParsesSnapshot() {
+    runner.whenArgvStartsWith(
+        List.of("gh", "api"),
+        ok(issueJson("null", READY_LABEL, labeled("2026-11-02T00:00:00Z", "alice", "noir:ready"))));
+    var s = gh.issue("r/d", 5);
+    assertThat(s.number()).isEqualTo(5);
+    assertThat(s.title()).isEqualTo("T");
+    assertThat(s.body()).isEqualTo("B");
+    assertThat(s.open()).isTrue();
+    assertThat(s.createdAt()).isEqualTo(java.time.Instant.parse("2026-11-01T00:00:00Z"));
+    assertThat(s.editedAt()).isEqualTo(s.createdAt());
+    assertThat(s.approval())
+        .contains(
+            new IssueSnapshot.Approval("alice", java.time.Instant.parse("2026-11-02T00:00:00Z")));
+  }
+
+  @Test
+  void editedAtIncludesTitleRename() {
+    runner.whenArgvStartsWith(
+        List.of("gh", "api"),
+        ok(
+            issueJson(
+                "\"2026-11-02T00:00:00Z\"",
+                "",
+                "{\"__typename\":\"RenamedTitleEvent\",\"createdAt\":\"2026-11-03T00:00:00Z\"}")));
+    assertThat(gh.issue("r/d", 5).editedAt())
+        .isEqualTo(java.time.Instant.parse("2026-11-03T00:00:00Z"));
+    assertThat(gh.issue("r/d", 5).approval()).isEmpty();
+  }
+
+  @Test
+  void latestReadyLabelWins() {
+    runner.whenArgvStartsWith(
+        List.of("gh", "api"),
+        ok(
+            issueJson(
+                "null",
+                READY_LABEL,
+                labeled("2026-11-02T00:00:00Z", "alice", "noir:ready")
+                    + ","
+                    + labeled("2026-11-04T00:00:00Z", null, "noir:ready")
+                    + ","
+                    + labeled("2026-11-05T00:00:00Z", "bob", "noir:draft"))));
+    assertThat(gh.issue("r/d", 5).approval())
+        .contains(
+            new IssueSnapshot.Approval("ghost", java.time.Instant.parse("2026-11-04T00:00:00Z")));
+  }
+
+  @Test
+  void approvalEmptyWhenReadyLabelNotPresent() {
+    runner.whenArgvStartsWith(
+        List.of("gh", "api"),
+        ok(
+            issueJson(
+                "null",
+                "{\"name\":\"noir:draft\"}",
+                labeled("2026-11-02T00:00:00Z", "alice", "noir:ready"))));
+    assertThat(gh.issue("r/d", 5).approval()).isEmpty();
+  }
+
+  @Test
+  void issueArgvUsesGraphqlWithVariables() {
+    runner.whenArgvStartsWith(List.of("gh", "api"), ok(issueJson("null", "", "")));
+    gh.issue("jwcarman/demo", 5);
+    assertThat(runner.commands().getFirst().argv())
+        .containsExactly(
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            "query=query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){"
+                + " number title body state createdAt lastEditedAt labels(first:100){nodes{name}}"
+                + " timelineItems(last:100,itemTypes:[LABELED_EVENT,RENAMED_TITLE_EVENT]){nodes{"
+                + " __typename ... on LabeledEvent{createdAt actor{login} label{name}} ... on RenamedTitleEvent{createdAt}}}}}}",
+            "-F",
+            "owner=jwcarman",
+            "-F",
+            "name=demo",
+            "-F",
+            "number=5");
+  }
+
+  @Test
+  void issueMissingOrGarbageIsGitHubException() {
+    runner.whenArgvStartsWith(
+        List.of("gh", "api"), ok("{\"data\":{\"repository\":{\"issue\":null}}}"));
+    assertThatThrownBy(() -> gh.issue("r/d", 5)).isInstanceOf(GitHubException.class);
+    var r2 = new FakeCommandRunner();
+    r2.whenArgvStartsWith(List.of("gh", "api"), ok("nope"));
+    assertThatThrownBy(() -> new GhCli(r2).issue("r/d", 5)).isInstanceOf(GitHubException.class);
+  }
+
+  @Test
+  void setNoirLabelNeverRemovesReady() {
+    runner.whenArgvStartsWith(List.of("gh", "issue", "edit"), ok(""));
+    gh.setNoirLabel("r/d", 1, Optional.empty());
+    gh.setNoirLabel("r/d", 1, Optional.of("noir:sealing"));
+    for (var c : runner.commands()) {
+      var removed = c.argv().get(c.argv().indexOf("--remove-label") + 1);
+      assertThat(List.of(removed.split(","))).doesNotContain("noir:ready");
+    }
+  }
+
+  @Test
+  void removeLabelArgv() {
+    runner.whenArgvStartsWith(List.of("gh", "issue", "edit"), ok(""));
+    gh.removeLabel("r/d", 3, "noir:ready");
+    assertThat(runner.commands().getFirst().argv())
+        .containsExactly(
+            "gh", "issue", "edit", "3", "--repo", "r/d", "--remove-label", "noir:ready");
   }
 }

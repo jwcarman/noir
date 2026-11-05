@@ -1,10 +1,13 @@
 package org.jwcarman.noir.github;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 
 /** In-memory {@link GitHubPort} for tests. */
 public final class FakeGitHub implements GitHubPort {
@@ -24,6 +27,12 @@ public final class FakeGitHub implements GitHubPort {
   private final List<String> ensuredRepos = new ArrayList<>();
   private final List<Pr> pullRequests = new ArrayList<>();
   private final Map<Integer, PullRequestState> prStates = new HashMap<>();
+
+  private record ReadyEvent(String actor, Instant at) {}
+
+  private final Map<Integer, Instant> editedAt = new HashMap<>();
+  private final Map<Integer, Instant> createdAt = new HashMap<>();
+  private final Map<Integer, List<ReadyEvent>> readyEvents = new HashMap<>();
   private boolean failNextCreatePullRequest;
   private String defaultBranch = "main";
   private boolean failNextCreateIssue;
@@ -73,6 +82,61 @@ public final class FakeGitHub implements GitHubPort {
 
   private void replace(Issue old, java.util.function.UnaryOperator<Issue> f) {
     issues.set(issues.indexOf(old), f.apply(old));
+  }
+
+  /** Sets the time the issue was created (default {@link Instant#EPOCH}). */
+  public void createdAt(int n, Instant at) {
+    createdAt.put(n, at);
+  }
+
+  /** Edits title and body, recording {@code at} as the edit time. */
+  public void editIssue(int n, String title, String body, Instant at) {
+    replace(
+        issue(n),
+        i -> new Issue(i.number(), i.repo(), title, body, i.labels(), i.comments(), i.open()));
+    editedAt.put(n, at);
+  }
+
+  /** Adds a label as {@code actor} at {@code at}; adding {@code noir:ready} records an approval. */
+  public void addLabel(int n, String label, String actor, Instant at) {
+    var labels = issue(n).labels();
+    if (!labels.contains(label)) {
+      labels.add(label);
+    }
+    if (label.equals(NoirLabels.READY)) {
+      readyEvents.computeIfAbsent(n, k -> new ArrayList<>()).add(new ReadyEvent(actor, at));
+    }
+  }
+
+  @Override
+  public void removeLabel(String repo, int number, String label) {
+    issue(number).labels().remove(label);
+  }
+
+  public Set<String> labels(int n) {
+    return new TreeSet<>(issue(n).labels());
+  }
+
+  public List<String> comments(int n) {
+    return issue(n).comments();
+  }
+
+  @Override
+  public IssueSnapshot issue(String repo, int number) {
+    var i = issue(number);
+    var created = createdAt.getOrDefault(number, Instant.EPOCH);
+    var edited = editedAt.getOrDefault(number, created);
+    if (edited.isBefore(created)) {
+      edited = created;
+    }
+    var approval =
+        i.labels().contains(NoirLabels.READY)
+            ? readyEvents.getOrDefault(number, List.of()).stream()
+                .reduce((a, b) -> b.at().isBefore(a.at()) ? a : b)
+                .map(e -> new IssueSnapshot.Approval(e.actor(), e.at()))
+            : Optional.<IssueSnapshot.Approval>empty();
+    return new IssueSnapshot(
+        number, i.title(), i.body() == null ? "" : i.body(), i.open(), created, edited, approval);
   }
 
   public List<Issue> issues() {
@@ -139,8 +203,8 @@ public final class FakeGitHub implements GitHubPort {
       throw new GitHubException("simulated setNoirLabel failure");
     }
     var labels = issue(issue).labels();
-    NoirLabels.ALL.forEach(l -> labels.remove(l.name()));
-    label.ifPresent(labels::add);
+    NoirLabels.STATE.forEach(l -> labels.remove(l.name()));
+    label.filter(l -> !labels.contains(l)).ifPresent(labels::add);
   }
 
   @Override

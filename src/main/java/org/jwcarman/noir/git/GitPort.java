@@ -14,4 +14,10 @@ public interface GitPort {
 
   /** Writes a git bundle containing {@code sha} and its history to {@code out}. */
   void bundle(Path repoDir, String sha, Path out);
+
+  /** Clones {@code repo} ({@code owner/name}) into {@code dir} using the {@code gh} credentials. */
+  void cloneRepo(String repo, Path dir);
+
+  /** Whether {@code path} exists in the tree of commit {@code sha}. */
+  boolean exists(Path repoDir, String sha, String path);
 }

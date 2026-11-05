@@ -112,4 +112,35 @@ class GitCliTest {
         .isInstanceOf(GitException.class)
         .hasMessageStartingWith("git rev-parse failed");
   }
+
+  @Test
+  void cloneRepoUsesGh() {
+    var runner =
+        new org.jwcarman.noir.exec.FakeCommandRunner()
+            .whenArgvStartsWith(
+                java.util.List.of("gh"),
+                new org.jwcarman.noir.exec.CommandResult(0, "", "", false, false));
+    new GitCli(runner).cloneRepo("o/r", Path.of("/work/r"));
+    assertThat(runner.commands().getFirst().argv())
+        .containsExactly("gh", "repo", "clone", "o/r", "/work/r", "--", "--quiet");
+  }
+
+  @Test
+  void existsTrueFalseAndError() {
+    var runner = new org.jwcarman.noir.exec.FakeCommandRunner();
+    var p = Path.of("/repo");
+    runner.whenArgvStartsWith(
+        java.util.List.of("git", "-C", "/repo", "cat-file", "-e", "abc:yes"),
+        new org.jwcarman.noir.exec.CommandResult(0, "", "", false, false));
+    runner.whenArgvStartsWith(
+        java.util.List.of("git", "-C", "/repo", "cat-file", "-e", "abc:no"),
+        new org.jwcarman.noir.exec.CommandResult(128, "", "fatal: path", false, false));
+    runner.whenArgvStartsWith(
+        java.util.List.of("git", "-C", "/repo", "cat-file", "-e", "abc:err"),
+        new org.jwcarman.noir.exec.CommandResult(1, "", "boom", false, false));
+    var g = new GitCli(runner);
+    assertThat(g.exists(p, "abc", "yes")).isTrue();
+    assertThat(g.exists(p, "abc", "no")).isFalse();
+    assertThatThrownBy(() -> g.exists(p, "abc", "err")).isInstanceOf(GitException.class);
+  }
 }

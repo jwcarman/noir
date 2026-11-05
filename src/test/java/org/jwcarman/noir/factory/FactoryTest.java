@@ -128,7 +128,7 @@ class FactoryTest {
 
     assertThat(item.state()).isEqualTo(State.PR_OPEN);
     assertThat(delivery.labels).containsExactly("noir:building", "noir:pr-open");
-    assertThat(gh.issue(1).labels()).containsExactly("noir:pr-open");
+    assertThat(gh.issue(1).labels()).containsExactlyInAnyOrder("noir:ready", "noir:pr-open");
     assertThat(gh.pullRequests()).hasSize(1);
     var pr = gh.pullRequests().get(0);
     assertThat(pr.draft()).isFalse();

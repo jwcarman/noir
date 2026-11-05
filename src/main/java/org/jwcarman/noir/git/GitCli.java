@@ -47,6 +47,31 @@ public final class GitCli implements GitPort {
     }
   }
 
+  @Override
+  public void cloneRepo(String repo, Path dir) {
+    var result =
+        runner.run(
+            Command.of(List.of("gh", "repo", "clone", repo, dir.toString(), "--", "--quiet")));
+    if (!result.ok()) {
+      throw new GitException("gh repo clone failed: " + result.tail(20));
+    }
+  }
+
+  @Override
+  public boolean exists(Path repoDir, String sha, String path) {
+    var result =
+        runner.run(
+            Command.of(List.of("git", "-C", repoDir.toString(), "cat-file", "-e", sha + ":" + path))
+                .withEnv(java.util.Map.of("GIT_TERMINAL_PROMPT", "0")));
+    if (result.ok()) {
+      return true;
+    }
+    if (result.exitCode() == 128 && !result.timedOut()) {
+      return false;
+    }
+    throw new GitException("git cat-file failed: " + result.tail(20));
+  }
+
   /** Parses {@code owner/name} from an https, scp-style, or filesystem remote URL. */
   public static String ownerRepo(String url) {
     var s = url.trim();
