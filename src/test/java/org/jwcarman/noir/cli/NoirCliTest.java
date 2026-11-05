@@ -28,10 +28,22 @@ class NoirCliTest {
   }
 
   @Test
+  void noirCliHasNoSealOrDraftCommands() {
+    var names =
+        new picocli.CommandLine(
+                new NoirCli(
+                    new NoirHome(tmp),
+                    new NoirCli.Operations(
+                        home -> (once, listener) -> {}, () -> null, Set::of, home -> null)))
+            .getSubcommands()
+            .keySet();
+    assertThat(names).doesNotContain("seal", "draft").contains("run", "status");
+  }
+
+  @Test
   void homeDerivesPaths() {
     var home = new NoirHome(tmp);
     assertThat(home.store()).isEqualTo(tmp.resolve("store"));
-    assertThat(home.drafts()).isEqualTo(tmp.resolve("store/drafts"));
     assertThat(home.config()).isEqualTo(tmp.resolve("config.yaml"));
     assertThat(home.lock()).isEqualTo(tmp.resolve("noir.lock"));
   }
@@ -40,7 +52,6 @@ class NoirCliTest {
   void convenienceOperationsHaveNoRealDispositions() {
     var ops =
         new NoirCli.Operations(
-            home -> (id, dir) -> null,
             home -> (once, listener) -> {},
             () -> {
               throw new AssertionError("github must not be invoked");

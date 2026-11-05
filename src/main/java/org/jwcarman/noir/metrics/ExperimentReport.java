@@ -21,7 +21,9 @@ public record ExperimentReport(
     BigDecimal totalCostUsd,
     BigDecimal meanCostUsdPerItem,
     Duration medianWallTime,
-    Duration medianHumanTime,
+    Duration medianApprovalTime,
+    Duration medianSealTime,
+    Map<String, Integer> sealRejections,
     int accepted,
     int modified,
     int rejected,
@@ -57,6 +59,7 @@ public record ExperimentReport(
         "Rework cycles",
         meanReworkCycles == null ? "n/a" : String.format("%.1f per item", meanReworkCycles));
     line(sb, "Failure categories", failureCategories.isEmpty() ? "none" : categoriesText());
+    line(sb, "Seal rejections", sealRejections.isEmpty() ? "none" : rejectionsText());
     line(
         sb,
         "Cost",
@@ -64,7 +67,13 @@ public record ExperimentReport(
             ? "n/a"
             : money(totalCostUsd) + " total, " + money(meanCostUsdPerItem) + " per item");
     line(sb, "Wall time (median)", duration(medianWallTime));
-    line(sb, "Human time (median)", duration(medianHumanTime));
+    line(
+        sb,
+        "Approval time (median)",
+        medianApprovalTime == null
+            ? "n/a"
+            : duration(medianApprovalTime) + " (issue opened \u2192 noir:ready)");
+    line(sb, "Seal time (median)", duration(medianSealTime));
     line(
         sb,
         "PR disposition",
@@ -77,6 +86,12 @@ public record ExperimentReport(
   private String categoriesText() {
     var parts = new ArrayList<String>();
     failureCategories.forEach((c, n) -> parts.add(c + " " + n));
+    return String.join(", ", parts);
+  }
+
+  private String rejectionsText() {
+    var parts = new ArrayList<String>();
+    sealRejections.forEach((r, n) -> parts.add(r + " " + n));
     return String.join(", ", parts);
   }
 
@@ -146,7 +161,9 @@ public record ExperimentReport(
     m.put("totalCostUsd", totalCostUsd);
     m.put("meanCostUsdPerItem", meanCostUsdPerItem);
     m.put("medianWallTime", medianWallTime == null ? null : medianWallTime.toString());
-    m.put("medianHumanTime", medianHumanTime == null ? null : medianHumanTime.toString());
+    m.put("medianApprovalTime", medianApprovalTime == null ? null : medianApprovalTime.toString());
+    m.put("medianSealTime", medianSealTime == null ? null : medianSealTime.toString());
+    m.put("sealRejections", sealRejections);
     m.put("accepted", accepted);
     m.put("modified", modified);
     m.put("rejected", rejected);

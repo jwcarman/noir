@@ -57,7 +57,8 @@ class ExperimentMetricsTest {
     assertThat(r.totalCostUsd()).isNull();
     assertThat(r.meanCostUsdPerItem()).isNull();
     assertThat(r.medianWallTime()).isNull();
-    assertThat(r.medianHumanTime()).isNull();
+    assertThat(r.medianApprovalTime()).isNull();
+    assertThat(r.medianSealTime()).isNull();
     assertThat(r.completed()).isZero();
     assertThat(r.autoMerge().acceptedRate()).isNull();
     assertThat(r.autoMerge().eligible()).isFalse();
@@ -180,8 +181,36 @@ class ExperimentMetricsTest {
     assertThat(r.medianWallTime()).isEqualTo(Duration.ofSeconds(100));
   }
 
+  static Event approved(String id, long sec, long approvedAtSec, long issueCreatedAtSec) {
+    return ev(
+        id,
+        sec,
+        "approved",
+        0,
+        Map.of(
+            "approver", "alice",
+            "approvedAt", T0.plusSeconds(approvedAtSec).toString(),
+            "issueCreatedAt", T0.plusSeconds(issueCreatedAtSec).toString(),
+            "bodySha256", "x",
+            "title", "t"));
+  }
+
   @Test
-  void humanTimeUsesDraftCreatedToSealRequested() {
+  void approvalTimeFromApprovedEvent() {
+    var r =
+        ExperimentMetrics.compute(
+            List.of(
+                item("a", State.SEALED, 0, approved("a", 500, 300, 0)),
+                item("b", State.SEALED, 0, approved("b", 500, 100, 0)),
+                item("c", State.SEALED, 0)));
+    // medians of 300s and 100s
+    assertThat(r.medianApprovalTime()).isEqualTo(Duration.ofSeconds(200));
+    assertThat(r.render())
+        .contains("Approval time (median) 3m 20s (issue opened \u2192 noir:ready)");
+  }
+
+  @Test
+  void sealTimeFromApprovedToSealed() {
     var r =
         ExperimentMetrics.compute(
             List.of(
@@ -189,10 +218,67 @@ class ExperimentMetricsTest {
                     "a",
                     State.SEALED,
                     0,
-                    ev("a", 0, "draft_created", 0, Map.of()),
-                    ev("a", 120, "seal_requested", 0, Map.of())),
-                item("b", State.SEALED, 0, ev("b", 0, "draft_created", 0, Map.of()))));
-    assertThat(r.medianHumanTime()).isEqualTo(Duration.ofSeconds(120));
+                    approved("a", 10, 5, 0),
+                    approved("a", 400, 390, 0),
+                    ev("a", 100, "sealed", 0, Map.of("issue", 1)),
+                    ev("a", 900, "sealed", 0, Map.of("issue", 1))),
+                item("b", State.SEALED, 0, approved("b", 0, 0, 0))));
+    assertThat(r.medianSealTime()).isEqualTo(Duration.ofSeconds(90));
+    assertThat(r.render()).contains("Seal time (median)   1m 30s");
+  }
+
+  @Test
+  void sealRejectionsByReason() {
+    var r =
+        ExperimentMetrics.compute(
+            List.of(
+                item(
+                    "a",
+                    State.DRAFT,
+                    0,
+                    ev(
+                        "a",
+                        1,
+                        "seal_rejected",
+                        0,
+                        Map.of("reason", "suite_too_weak", "problems", 2)),
+                    ev(
+                        "a",
+                        2,
+                        "seal_rejected",
+                        0,
+                        Map.of("reason", "edited_after_approval", "problems", 1)),
+                    ev(
+                        "a",
+                        3,
+                        "seal_rejected",
+                        0,
+                        Map.of("reason", "suite_too_weak", "problems", 1)))));
+    assertThat(r.sealRejections())
+        .containsExactly(Map.entry("edited_after_approval", 1), Map.entry("suite_too_weak", 2));
+    assertThat(r.render())
+        .contains("Seal rejections      edited_after_approval 1, suite_too_weak 2");
+    assertThat(r.toMap()).containsKeys("medianApprovalTime", "medianSealTime", "sealRejections");
+  }
+
+  @Test
+  void oldItemsWithoutApprovedEventShowNa() {
+    var r =
+        ExperimentMetrics.compute(
+            List.of(
+                item(
+                    "old",
+                    State.SEALED,
+                    0,
+                    ev("old", 0, "draft_created", 0, Map.of()),
+                    ev("old", 120, "seal_requested", 0, Map.of()))));
+    assertThat(r.medianApprovalTime()).isNull();
+    assertThat(r.medianSealTime()).isNull();
+    assertThat(r.render())
+        .contains("Approval time (median) n/a")
+        .contains("Seal time (median)   n/a")
+        .contains("Seal rejections      none");
+    assertThat(r.toMap().get("medianApprovalTime")).isNull();
   }
 
   @Test
@@ -278,13 +364,13 @@ class ExperimentMetricsTest {
     var r = ExperimentMetrics.compute(List.of(item("old", State.PR_OPEN, 0)));
     assertThat(r.items()).isEqualTo(1);
     assertThat(r.byState()).containsEntry(State.PR_OPEN, 1);
-    assertThat(r.medianHumanTime()).isNull();
+    assertThat(r.medianApprovalTime()).isNull();
+    assertThat(r.medianSealTime()).isNull();
+    assertThat(r.sealRejections()).isEmpty();
     assertThat(r.medianWallTime()).isNull();
     assertThat(r.totalCostUsd()).isNull();
     assertThat(r.completed()).isZero();
-    assertThat(r.render())
-        .contains("Human time (median)  n/a")
-        .contains("Cost                 n/a");
+    assertThat(r.render()).contains("Cost                 n/a");
   }
 
   @Test
@@ -307,9 +393,11 @@ class ExperimentMetricsTest {
               First-pass rate      100% (1/1)
               Rework cycles        0.0 per item
               Failure categories   none
+              Seal rejections      none
               Cost                 $0.24 total, $0.24 per item
               Wall time (median)   1m 13s
-              Human time (median)  n/a
+              Approval time (median) n/a
+              Seal time (median)   n/a
               PR disposition       0 accepted, 0 modified, 0 rejected
               Holdout defects      0
               Auto-merge           not eligible: 0/20 completed items

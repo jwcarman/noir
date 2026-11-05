@@ -29,9 +29,6 @@ class SkillCommandTest {
     var ops =
         new NoirCli.Operations(
             home -> {
-              throw new AssertionError("seal must not be invoked");
-            },
-            home -> {
               throw new AssertionError("run must not be invoked");
             },
             () -> {

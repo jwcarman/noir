@@ -34,34 +34,12 @@ import org.jwcarman.noir.measure.ContainerMeasureRunner;
 import org.jwcarman.noir.seal.ApprovalSealer;
 import org.jwcarman.noir.seal.ContainerSealCheckRunner;
 import org.jwcarman.noir.seal.Examiner;
-import org.jwcarman.noir.seal.Sealer;
 import org.jwcarman.noir.seal.SuiteSealer;
 import org.jwcarman.noir.store.Store;
 
 /** Builds the real object graph. */
 final class Wiring {
   private Wiring() {}
-
-  /** A seal operation that, when invoked, checks credentials and builds the image first. */
-  static SealOperation sealOperation(NoirHome home) {
-    return (draftId, repoDir) -> {
-      var auth = AgentAuth.fromEnvironment(System.getenv());
-      var config = ConfigLoader.load(home.config());
-      var runner = new ProcessCommandRunner();
-      var docker = new DockerCli(runner, DockerCli.sealLabel(home));
-      Images.ensureBuilder(docker, config.images().builder());
-      var sealer =
-          new Sealer(
-              new Store(home),
-              new GitCli(runner),
-              new GhCli(runner),
-              new Examiner(new ClaudeContainerAgent(docker, auth), config),
-              new ContainerSealCheckRunner(docker, config),
-              config,
-              Clock.systemUTC());
-      return sealer.seal(draftId, repoDir);
-    };
-  }
 
   /**
    * The daemon. When invoked it checks credentials, ensures the builder and grader images, then

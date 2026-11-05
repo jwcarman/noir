@@ -13,10 +13,6 @@ public record NoirHome(Path root) {
     return root.resolve("store");
   }
 
-  public Path drafts() {
-    return store().resolve("drafts");
-  }
-
   /** Server-side clones of target repositories, at {@code repos/<owner>/<name>}. */
   public Path repos() {
     return root.resolve("repos");

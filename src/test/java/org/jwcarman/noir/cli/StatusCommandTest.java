@@ -192,6 +192,9 @@ class StatusCommandTest {
     var out = run("status");
     assertThat(out)
         .contains("\n\nExperiment (1 item)\n")
+        .contains("Approval time (median) n/a")
+        .contains("Seal time (median)   n/a")
+        .contains("Seal rejections      none")
         .contains("Auto-merge           not eligible: 0/20");
     assertThat(run("status")).startsWith("ID");
   }
@@ -238,7 +241,6 @@ class StatusCommandTest {
     var out = new StringWriter();
     var ops =
         new NoirCli.Operations(
-            home -> (id, dir) -> null,
             home ->
                 (once, listener) -> {
                   throw new AssertionError("run must not be invoked");

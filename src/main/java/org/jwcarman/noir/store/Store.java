@@ -33,10 +33,6 @@ public final class Store {
     return home.store().resolve(id);
   }
 
-  public Path draftDir(String id) {
-    return home.drafts().resolve(id);
-  }
-
   /** Ids of sealed work items, sorted (ids sort by creation time). */
   public List<String> itemIds() {
     if (!Files.isDirectory(home.store())) {

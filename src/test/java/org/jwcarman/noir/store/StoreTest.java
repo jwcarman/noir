@@ -68,13 +68,6 @@ class StoreTest {
   }
 
   @Test
-  void draftsAreNotItems() throws IOException {
-    Files.createDirectories(store.draftDir(ID));
-    assertThat(store.itemIds()).isEmpty();
-    assertThat(store.draftDir(ID)).isEqualTo(tmp.resolve("store/drafts").resolve(ID));
-  }
-
-  @Test
   void eventsAppendInOrder() {
     var clock = Clock.fixed(Instant.parse("2026-11-03T12:00:00Z"), ZoneOffset.UTC);
     store.appendEvent(Event.of(clock, ID, "transition", 1, Map.of("to", "BUILDING")));

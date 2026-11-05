@@ -43,7 +43,6 @@ class CancelResumeCommandTest {
   int run(String... args) {
     var ops =
         new NoirCli.Operations(
-            home -> (id, dir) -> null,
             home ->
                 (once, listener) -> {
                   throw new AssertionError("run must not be invoked");

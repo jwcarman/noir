@@ -27,9 +27,7 @@ class RunCommandTest {
   final List<Boolean> runs = new ArrayList<>();
 
   int run(RunOperation op, String... args) {
-    var ops =
-        new NoirCli.Operations(
-            home -> (id, dir) -> null, home -> op, FakeGitHub::new, () -> Set.of(SECRET));
+    var ops = new NoirCli.Operations(home -> op, FakeGitHub::new, () -> Set.of(SECRET));
     return NoirCli.execute(
         new NoirHome(tmp), new PrintWriter(out), new PrintWriter(err), ops, args);
   }

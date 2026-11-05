@@ -4,12 +4,16 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.jwcarman.noir.lifecycle.Category;
+import org.jwcarman.noir.lifecycle.SealRejection;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.metrics.ExperimentReport.AutoMerge;
 import org.jwcarman.noir.store.Event;
@@ -31,7 +35,9 @@ public final class ExperimentMetrics {
     BigDecimal totalCost = null;
     int itemsWithCost = 0;
     var wall = new ArrayList<Duration>();
-    var human = new ArrayList<Duration>();
+    var approval = new ArrayList<Duration>();
+    var sealTime = new ArrayList<Duration>();
+    var rejections = new HashMap<String, Integer>();
     int accepted = 0;
     int modified = 0;
     int rejected = 0;
@@ -85,7 +91,13 @@ public final class ExperimentMetrics {
       }
 
       wallTime(events).ifPresent(wall::add);
-      humanTime(events).ifPresent(human::add);
+      approvalTime(events).ifPresent(approval::add);
+      sealTime(events).ifPresent(sealTime::add);
+      for (var e : events) {
+        if (e.type().equals("seal_rejected") && e.data().get("reason") != null) {
+          rejections.merge(String.valueOf(e.data().get("reason")), 1, Integer::sum);
+        }
+      }
 
       var latestByPr = new HashMap<String, Event>();
       for (var e : events) {
@@ -139,7 +151,9 @@ public final class ExperimentMetrics {
             ? null
             : totalCost.divide(BigDecimal.valueOf(itemsWithCost), 6, RoundingMode.HALF_UP),
         median(wall),
-        median(human),
+        median(approval),
+        median(sealTime),
+        sealRejections(rejections),
         accepted,
         modified,
         rejected,
@@ -198,13 +212,47 @@ public final class ExperimentMetrics {
     return Optional.empty();
   }
 
-  private static Optional<Duration> humanTime(List<Event> events) {
-    var draft = events.stream().filter(e -> e.type().equals("draft_created")).findFirst();
-    var seal = events.stream().filter(e -> e.type().equals("seal_requested")).findFirst();
-    if (draft.isEmpty() || seal.isEmpty()) {
+  /** Issue creation to the first approval ({@code noir:ready}), from the first approved event. */
+  private static Optional<Duration> approvalTime(List<Event> events) {
+    var approved = firstOfType(events, "approved");
+    if (approved.isEmpty()) {
       return Optional.empty();
     }
-    return Optional.of(Duration.between(draft.get().ts(), seal.get().ts()));
+    try {
+      var data = approved.get().data();
+      return Optional.of(
+          Duration.between(
+              Instant.parse(String.valueOf(data.get("issueCreatedAt"))),
+              Instant.parse(String.valueOf(data.get("approvedAt")))));
+    } catch (DateTimeParseException e) {
+      return Optional.empty();
+    }
+  }
+
+  /** First approved event to the first sealed event. */
+  private static Optional<Duration> sealTime(List<Event> events) {
+    var approved = firstOfType(events, "approved");
+    var sealed = firstOfType(events, "sealed");
+    if (approved.isEmpty() || sealed.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(Duration.between(approved.get().ts(), sealed.get().ts()));
+  }
+
+  private static Optional<Event> firstOfType(List<Event> events, String type) {
+    return events.stream().filter(e -> e.type().equals(type)).findFirst();
+  }
+
+  /** Rejection counts keyed by reason, in {@link SealRejection} order, zero counts omitted. */
+  private static Map<String, Integer> sealRejections(Map<String, Integer> counts) {
+    var ordered = new LinkedHashMap<String, Integer>();
+    for (var r : SealRejection.values()) {
+      var n = counts.get(r.eventValue());
+      if (n != null && n > 0) {
+        ordered.put(r.eventValue(), n);
+      }
+    }
+    return ordered;
   }
 
   private static Duration median(List<Duration> values) {

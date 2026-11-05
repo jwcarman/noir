@@ -29,7 +29,7 @@ public final class Examiner {
       List<StubSource> stubs,
       List<String> previousProblems,
       Path attemptDir,
-      Path draftDir) {
+      Path outDir) {
     try {
       deleteRecursively(attemptDir);
       Files.createDirectories(attemptDir.resolve("out/holdout"));
@@ -70,8 +70,8 @@ public final class Examiner {
             "Examiner agent failed: "
                 + (result.timedOut() ? "timed out" : result.resultText().strip()));
       }
-      var holdout = draftDir.resolve("holdout");
-      var reference = draftDir.resolve("reference");
+      var holdout = outDir.resolve("holdout");
+      var reference = outDir.resolve("reference");
       replace(attemptDir.resolve("out/holdout"), holdout, "holdout");
       replace(attemptDir.resolve("out/reference"), reference, "reference");
       return new ExaminerOutput(result, holdout, reference);

@@ -26,8 +26,8 @@ import org.jwcarman.noir.store.WorkItem;
 
 /**
  * A sealed work item in a temporary store, built directly from the Plan 2 seal fixtures (stubs,
- * reference, holdout-good) the way {@code Sealer} leaves one: {@code spec.json} with the base SHA
- * of a {@link GitFixtures} origin, {@code base.bundle}, {@code stubs/}, {@code holdout/}, {@code
+ * reference, holdout-good) the way the sealer leaves one: {@code spec.json} with the base SHA of a
+ * {@link GitFixtures} origin, {@code base.bundle}, {@code stubs/}, {@code holdout/}, {@code
  * reference/}, {@code commitment.json}, {@code workitem.json} SEALED, a {@code sealed} event, and
  * issue #1 in a {@link FakeGitHub} labelled {@code noir:ready}.
  */

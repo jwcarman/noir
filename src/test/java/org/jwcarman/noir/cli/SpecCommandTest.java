@@ -26,7 +26,6 @@ class SpecCommandTest {
   int run(String... args) {
     var ops =
         new NoirCli.Operations(
-            home -> (id, d) -> null,
             home ->
                 (once, listener) -> {
                   throw new AssertionError("run must not be invoked");

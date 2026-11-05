@@ -19,8 +19,6 @@ import picocli.CommandLine.Option;
     description = "A dark software factory.",
     subcommands = {
       StatusCommand.class,
-      DraftCommand.class,
-      SealCommand.class,
       RunCommand.class,
       CancelCommand.class,
       ResumeCommand.class,
@@ -32,18 +30,15 @@ public final class NoirCli implements Runnable {
 
   /** The effectful operations behind the commands; tests replace them. */
   record Operations(
-      Function<NoirHome, SealOperation> sealers,
       Function<NoirHome, RunOperation> runners,
       Supplier<GitHubPort> github,
       Supplier<Set<String>> secrets,
       Function<NoirHome, Dispositions> dispositions) {
     Operations(
-        Function<NoirHome, SealOperation> sealers,
         Function<NoirHome, RunOperation> runners,
         Supplier<GitHubPort> github,
         Supplier<Set<String>> secrets) {
       this(
-          sealers,
           runners,
           github,
           secrets,
@@ -54,11 +49,7 @@ public final class NoirCli implements Runnable {
 
     static Operations real() {
       return new Operations(
-          Wiring::sealOperation,
-          Wiring::runOperation,
-          Wiring::github,
-          Wiring::secrets,
-          Wiring::dispositions);
+          Wiring::runOperation, Wiring::github, Wiring::secrets, Wiring::dispositions);
     }
   }
 
@@ -74,11 +65,6 @@ public final class NoirCli implements Runnable {
   NoirCli(NoirHome defaultHome, Operations ops) {
     this.defaultHome = defaultHome;
     this.ops = ops;
-  }
-
-  /** The sealing operation for the effective home (real wiring unless a test injects one). */
-  SealOperation sealer() {
-    return ops.sealers().apply(home());
   }
 
   /** The daemon for the effective home. */
@@ -112,21 +98,6 @@ public final class NoirCli implements Runnable {
 
   public static int execute(NoirHome home, PrintWriter out, PrintWriter err, String... args) {
     return execute(home, out, err, Operations.real(), args);
-  }
-
-  static int execute(
-      NoirHome home,
-      PrintWriter out,
-      PrintWriter err,
-      Function<NoirHome, SealOperation> sealers,
-      String... args) {
-    var real = Operations.real();
-    return execute(
-        home,
-        out,
-        err,
-        new Operations(sealers, real.runners(), real.github(), real.secrets(), real.dispositions()),
-        args);
   }
 
   static int execute(

@@ -44,7 +44,7 @@ import org.jwcarman.noir.measure.MeasureRunner;
 import org.jwcarman.noir.render.SpecRenderer;
 import org.jwcarman.noir.seal.ApprovalSealing;
 import org.jwcarman.noir.seal.SealOutcome;
-import org.jwcarman.noir.seal.Sealer;
+import org.jwcarman.noir.seal.SuiteSealer;
 import org.jwcarman.noir.spec.ItemId;
 import org.jwcarman.noir.spec.QualityBar;
 import org.jwcarman.noir.spec.Requirement;
@@ -397,7 +397,7 @@ public final class Factory implements ItemDriver {
     var paths = ctx.attempt();
     var measured = new MeasureArtifacts(paths.measure());
     var holdout = ctx.itemDir().resolve("holdout");
-    var stubPackages = Sealer.stubPackages(SpecRenderer.loadStubs(spec, ctx.itemDir()));
+    var stubPackages = SuiteSealer.stubPackages(SpecRenderer.loadStubs(spec, ctx.itemDir()));
     var tags = TagIndex.of(HoldoutAnalyzer.analyze(spec, holdout, stubPackages));
     var requirementIds = spec.requirements().stream().map(Requirement::id).toList();
     var artifacts =
