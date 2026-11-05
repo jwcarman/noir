@@ -472,9 +472,9 @@ class GhCliTest {
                 + " number title body state createdAt lastEditedAt labels(first:100){nodes{name}}"
                 + " timelineItems(last:100,itemTypes:[LABELED_EVENT,RENAMED_TITLE_EVENT]){nodes{"
                 + " __typename ... on LabeledEvent{createdAt actor{login} label{name}} ... on RenamedTitleEvent{createdAt}}}}}}",
-            "-F",
+            "-f",
             "owner=jwcarman",
-            "-F",
+            "-f",
             "name=demo",
             "-F",
             "number=5");

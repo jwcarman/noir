@@ -146,9 +146,10 @@ public final class GhCli implements GitHubPort {
                 "graphql",
                 "-f",
                 "query=" + ISSUE_QUERY,
-                "-F",
+                // -f sends strings as-is; -F would coerce an all-digit owner or name to a number.
+                "-f",
                 "owner=" + repo.substring(0, slash),
-                "-F",
+                "-f",
                 "name=" + repo.substring(slash + 1),
                 "-F",
                 "number=" + number)
