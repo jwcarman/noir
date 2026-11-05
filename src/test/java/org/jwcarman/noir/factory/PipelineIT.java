@@ -144,7 +144,9 @@ class PipelineIT {
             item.store(),
             new GitHubDelivery(
                 item.github(), LocalBranchPublishers.pushingTo(runner, scratch, item.origin())),
-            null, // the fixture item is already SEALED: no sealing phase runs
+            sealedItem -> {
+              throw new AssertionError("sealing not expected");
+            },
             new ContainerBuildRunner(docker, agent, config),
             new ContainerMeasureRunner(docker, config),
             new ContainerGradeRunner(docker, config),

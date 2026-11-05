@@ -39,8 +39,7 @@ public final class GitHubDelivery implements Delivery {
   }
 
   @Override
-  public void rejectApproval(WorkItem item, String comment) {
-    gh.comment(item.repo(), item.issueNumber(), comment);
+  public void removeReady(WorkItem item) {
     gh.removeLabel(item.repo(), item.issueNumber(), NoirLabels.READY);
   }
 }

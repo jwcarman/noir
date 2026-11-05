@@ -14,9 +14,6 @@ public interface Delivery {
   /** Mirrors {@code state} as the issue's {@code noir:*} label. */
   void label(WorkItem item, State state);
 
-  /**
-   * Tells the approver why the issue was not sealed: posts {@code comment}, then removes {@code
-   * noir:ready} so a human can approve the issue again.
-   */
-  void rejectApproval(WorkItem item, String comment);
+  /** Removes {@code noir:ready}, withdrawing the approval so a human can approve again. */
+  void removeReady(WorkItem item);
 }

@@ -33,7 +33,7 @@ import org.jwcarman.noir.store.WorkItem;
  * approval still covers the current text, parses the issue as a spec, pins the base commit,
  * examines a holdout suite and posts the commitment. Infrastructure exceptions propagate.
  */
-public final class ApprovalSealer {
+public final class ApprovalSealer implements ApprovalSealing {
   static final List<String> SEAL_FILES =
       List.of("spec.json", "stubs", "base.bundle", "holdout", "reference", "commitment.json");
 
@@ -65,6 +65,7 @@ public final class ApprovalSealer {
     this.secrets = Set.copyOf(secrets);
   }
 
+  @Override
   public SealOutcome seal(WorkItem item) {
     var itemDir = store.itemDir(item.id());
     var commitmentFile = itemDir.resolve("commitment.json");

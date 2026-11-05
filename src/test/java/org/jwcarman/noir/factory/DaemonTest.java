@@ -215,7 +215,7 @@ class DaemonTest {
           public void label(WorkItem item, State state) {}
 
           @Override
-          public void rejectApproval(WorkItem item, String comment) {
+          public void removeReady(WorkItem item) {
             throw new UnsupportedOperationException();
           }
         };
@@ -318,6 +318,44 @@ class DaemonTest {
                 + " has noir:ready but its work item "
                 + A
                 + " is FAILED; open a new issue");
+  }
+
+  @Test
+  void prOpenItemWithReadyIssueIsLeftAlone() {
+    int n = issue(REPO, "noir:ready", "noir:pr-open");
+    item(A, REPO, n, State.PR_OPEN);
+    var daemon = daemon();
+
+    daemon.runOnce();
+    daemon.runOnce();
+
+    assertThat(store.itemIds()).containsExactly(A);
+    assertThat(driver.driven).isEmpty();
+    assertThat(reported).isEmpty();
+  }
+
+  @Test
+  void unreadableItemStopsItemCreation() throws java.io.IOException {
+    var broken = store.itemDir(B);
+    java.nio.file.Files.createDirectories(broken);
+    java.nio.file.Files.writeString(broken.resolve("workitem.json"), "{not json");
+    int ready = issue(REPO, "noir:ready");
+    int draft = issue(REPO, "noir:ready", "noir:draft");
+    item(A, REPO, draft, State.DRAFT);
+    var daemon = daemon();
+
+    daemon.runOnce();
+    daemon.runOnce();
+
+    assertThat(store.itemIds()).containsExactly(A, B);
+    assertThat(store.findItem(REPO, ready)).isEmpty();
+    assertThat(reported)
+        .filteredOn(r -> r.startsWith("warning"))
+        .containsExactly(
+            "warning not creating work items: unreadable work item(s) ["
+                + B
+                + "]; fix or remove them");
+    assertThat(reported).contains(A + " DRAFT -> SEALING");
   }
 
   @Test

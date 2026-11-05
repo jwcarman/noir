@@ -41,6 +41,7 @@ public final class FakeGitHub implements GitHubPort {
   private String pullRequestFailure;
   private RuntimeException issueFailure;
   private int issueFailures;
+  private int removeLabelFailures;
 
   public FakeGitHub withDefaultBranch(String branch) {
     this.defaultBranch = branch;
@@ -74,6 +75,11 @@ public final class FakeGitHub implements GitHubPort {
   public void failIssueReads(int times, RuntimeException failure) {
     issueFailures = times;
     issueFailure = failure;
+  }
+
+  /** The next {@code times} {@link #removeLabel} calls throw a {@link GitHubException}. */
+  public void failRemoveLabel(int times) {
+    removeLabelFailures = times;
   }
 
   public List<Pr> pullRequests() {
@@ -118,6 +124,10 @@ public final class FakeGitHub implements GitHubPort {
 
   @Override
   public void removeLabel(String repo, int number, String label) {
+    if (removeLabelFailures > 0) {
+      removeLabelFailures--;
+      throw new GitHubException("simulated removeLabel failure");
+    }
     issue(number).labels().remove(label);
   }
 

@@ -38,6 +38,7 @@ import org.jwcarman.noir.grade.GradeArtifacts;
 import org.jwcarman.noir.grade.GradeRunner;
 import org.jwcarman.noir.holdout.HoldoutAnalyzer;
 import org.jwcarman.noir.lifecycle.BlockReason;
+import org.jwcarman.noir.lifecycle.SealRejection;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.lifecycle.Trigger;
 import org.jwcarman.noir.measure.MeasureArtifacts;
@@ -45,8 +46,8 @@ import org.jwcarman.noir.measure.MeasureJudge;
 import org.jwcarman.noir.measure.MeasureOutcome;
 import org.jwcarman.noir.measure.MeasureRunner;
 import org.jwcarman.noir.render.StubSource;
-import org.jwcarman.noir.seal.ApprovalComments;
-import org.jwcarman.noir.seal.ApprovalSealer;
+import org.jwcarman.noir.seal.ApprovalSealing;
+import org.jwcarman.noir.seal.SealOutcome;
 import org.jwcarman.noir.spec.Spec;
 import org.jwcarman.noir.spec.SpecJson;
 import org.jwcarman.noir.spec.Specs;
@@ -72,6 +73,7 @@ class FactoryTest {
   final FakeGrade grade = new FakeGrade();
   final FakeBundles bundles = new FakeBundles();
   final List<Duration> sleeps = new ArrayList<>();
+  final FakeSealing sealing = new FakeSealing();
   final Clock clock = Clock.fixed(Instant.parse("2026-11-04T00:00:00Z"), ZoneOffset.UTC);
 
   @BeforeEach
@@ -95,14 +97,10 @@ class FactoryTest {
   }
 
   Factory factory(Set<String> secrets) {
-    // Only the GitHub-side paths of sealing run here: the commitment already exists (publish) or
-    // the issue carries no recorded approval (rejected before any git or examiner work).
-    var sealer =
-        new ApprovalSealer(store, gh, null, null, null, NoirConfig.defaults(), clock, secrets);
     return new Factory(
         store,
         delivery,
-        sealer,
+        sealing,
         build,
         measure,
         grade,
@@ -567,61 +565,83 @@ class FactoryTest {
 
   // ---- sealing -----------------------------------------------------------------------------
 
+  static final String REJECTION = "noir did not seal this issue: test rejection.";
+
   void sealingItem() {
     store.writeWorkItem(WorkItem.approved(Specs.ID, REPO, 1));
   }
 
   @Test
   void sealingPassedMovesToSealed() {
-    sealingItem(); // commitment.json already exists: the sealer publishes it
+    sealingItem();
 
     var item = factory().advance(Specs.ID);
 
     assertThat(item.state()).isEqualTo(State.SEALED);
+    assertThat(sealing.calls).isEqualTo(1);
     assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:building");
-    var sha = Commitments.sha256(Commitments.read(itemDir.resolve("commitment.json")));
-    assertThat(gh.comments(1)).singleElement().asString().contains(sha);
-    assertThat(eventTypes()).containsExactly("commitment_posted", "sealed", "transition");
+    assertThat(eventTypes()).containsExactly("transition");
     assertThat(transitionsTo("SEALED").getFirst())
         .containsEntry("from", "SEALING")
         .containsEntry("trigger", "SealPassed");
     assertThat(build.calls).isEmpty();
   }
 
+  void rejecting() {
+    sealing.outcome = n -> new SealOutcome.Rejected(SealRejection.EDITED_AFTER_APPROVAL, REJECTION);
+  }
+
   @Test
   void sealingRejectedCommentsRemovesReadyAndDrafts() throws IOException {
     sealingItem();
-    // SEALING runs before spec.json exists; the issue carries noir:ready but no approval event.
-    Files.delete(itemDir.resolve("commitment.json"));
-    Files.delete(itemDir.resolve("spec.json"));
+    rejecting();
+    Files.delete(itemDir.resolve("spec.json")); // SEALING runs before spec.json exists
 
     var item = factory().advance(Specs.ID);
 
     assertThat(item.state()).isEqualTo(State.DRAFT);
     assertThat(gh.labels(1)).containsExactly("noir:draft");
-    assertThat(gh.comments(1)).containsExactly(ApprovalComments.editedAfterApproval());
-    assertThat(delivery.calls).containsExactly("rejectApproval", "label noir:draft");
+    assertThat(gh.comments(1)).containsExactly(REJECTION);
+    assertThat(delivery.calls).containsExactly("comment", "removeReady", "label noir:draft");
     assertThat(transitionsTo("DRAFT").getFirst())
         .containsEntry("from", "SEALING")
         .containsEntry("trigger", "SealRejected")
         .containsEntry("reason", "edited_after_approval");
-    assertThat(eventTypes()).containsExactly("seal_rejected", "transition");
 
     factory().drive(Specs.ID); // DRAFT waits for a human: nothing runs
     assertThat(store.readWorkItem(Specs.ID).state()).isEqualTo(State.DRAFT);
+    assertThat(sealing.calls).isEqualTo(1);
     assertThat(build.calls).isEmpty();
+  }
+
+  @Test
+  void rejectionCommentIsPostedOnceWhenRemovingReadyIsRetried() {
+    sealingItem();
+    rejecting();
+    gh.failRemoveLabel(2);
+
+    var item = factory().advance(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.DRAFT);
+    assertThat(gh.comments(1)).containsExactly(REJECTION);
+    assertThat(gh.labels(1)).containsExactly("noir:draft");
+    assertThat(sleeps).hasSize(2);
   }
 
   @Test
   void sealingInfraFailureBlocks() {
     sealingItem();
-    gh.failIssueReads(Integer.MAX_VALUE, new GitHubException("GitHub is down"));
+    sealing.outcome =
+        n -> {
+          throw new GitHubException("GitHub is down");
+        };
 
     var item = factory().advance(Specs.ID);
 
     assertThat(item.state()).isEqualTo(State.BLOCKED);
     assertThat(item.blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
     assertThat(item.blockedPhase()).isEqualTo(State.SEALING);
+    assertThat(sealing.calls).isEqualTo(6);
     assertThat(sleeps).hasSize(5);
     assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:blocked");
     assertThat(gh.comments(1)).isEmpty();
@@ -635,13 +655,17 @@ class FactoryTest {
   void sealerErrorBlocksAndItsMessageStaysLocal() {
     sealingItem();
     var hidden = "examiner output naming HiddenHoldoutTest.secretCase with " + SECRET;
-    gh.failIssueReads(1, new IllegalStateException(hidden));
+    sealing.outcome =
+        n -> {
+          throw new IllegalStateException(hidden);
+        };
 
     var item = factory().advance(Specs.ID);
 
     assertThat(item.state()).isEqualTo(State.BLOCKED);
     assertThat(item.blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
     assertThat(item.blockedPhase()).isEqualTo(State.SEALING);
+    assertThat(sealing.calls).isEqualTo(1);
     assertThat(sleeps).isEmpty();
     assertThat(gh.comments(1)).isEmpty();
     assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:blocked");
@@ -659,9 +683,12 @@ class FactoryTest {
   @Test
   void resumeBlockedSealingReseals() {
     sealingItem();
-    gh.failIssueReads(Integer.MAX_VALUE, new GitHubException("GitHub is down"));
+    sealing.outcome =
+        n -> {
+          throw new GitHubException("GitHub is down");
+        };
     var blocked = factory().advance(Specs.ID);
-    gh.failIssueReads(0, null);
+    sealing.outcome = n -> new SealOutcome.Passed("sha");
 
     var resumed =
         Transitions.applyExternal(
@@ -670,7 +697,20 @@ class FactoryTest {
     var item = factory().advance(Specs.ID);
 
     assertThat(item.state()).isEqualTo(State.SEALED);
+    assertThat(sealing.calls).isEqualTo(7);
     assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:building");
+  }
+
+  /** Scripted sealing: {@code outcome} gets the 1-based call number. */
+  static final class FakeSealing implements ApprovalSealing {
+    int calls;
+    IntFunction<SealOutcome> outcome = n -> new SealOutcome.Passed("sha");
+
+    @Override
+    public SealOutcome seal(WorkItem item) {
+      calls++;
+      return outcome.apply(calls);
+    }
   }
 
   // ---- fakes -------------------------------------------------------------------------------
@@ -698,6 +738,7 @@ class FactoryTest {
     @Override
     public void comment(WorkItem item, String body) {
       delegate.comment(item, body);
+      calls.add("comment");
     }
 
     @Override
@@ -708,9 +749,9 @@ class FactoryTest {
     }
 
     @Override
-    public void rejectApproval(WorkItem item, String comment) {
-      delegate.rejectApproval(item, comment);
-      calls.add("rejectApproval");
+    public void removeReady(WorkItem item) {
+      delegate.removeReady(item);
+      calls.add("removeReady");
     }
   }
 

@@ -42,7 +42,7 @@ import org.jwcarman.noir.measure.MeasureJudge;
 import org.jwcarman.noir.measure.MeasureOutcome;
 import org.jwcarman.noir.measure.MeasureRunner;
 import org.jwcarman.noir.render.SpecRenderer;
-import org.jwcarman.noir.seal.ApprovalSealer;
+import org.jwcarman.noir.seal.ApprovalSealing;
 import org.jwcarman.noir.seal.SealOutcome;
 import org.jwcarman.noir.seal.Sealer;
 import org.jwcarman.noir.spec.ItemId;
@@ -66,7 +66,7 @@ import org.jwcarman.noir.store.WorkItem;
  * directory mounted into the builder, and only ever from {@link FeedbackRenderer}: holdout test
  * names, sources, and compiler output over the holdout suite never reach it.
  *
- * <p>{@code SEALING} runs {@link ApprovalSealer} before any {@code spec.json} exists. A rejection
+ * <p>{@code SEALING} runs {@link ApprovalSealing} before any {@code spec.json} exists. A rejection
  * posts the sealer's comment, removes {@code noir:ready} and returns the item to {@code DRAFT}. Any
  * other failure of the sealer blocks the item ({@code INFRASTRUCTURE}); its message may name hidden
  * tests, so it is kept in the local event log only.
@@ -74,7 +74,7 @@ import org.jwcarman.noir.store.WorkItem;
 public final class Factory implements ItemDriver {
   private final Store store;
   private final Delivery delivery;
-  private final ApprovalSealer approvalSealer;
+  private final ApprovalSealing approvalSealer;
   private final BuildRunner builder;
   private final MeasureRunner measurer;
   private final GradeRunner grader;
@@ -94,7 +94,7 @@ public final class Factory implements ItemDriver {
   public Factory(
       Store store,
       Delivery delivery,
-      ApprovalSealer approvalSealer,
+      ApprovalSealing approvalSealer,
       BuildRunner builder,
       MeasureRunner measurer,
       GradeRunner grader,
@@ -463,7 +463,9 @@ public final class Factory implements ItemDriver {
       throw new IllegalStateException("No rejection comment for " + step.trigger());
     }
     guard("comment", step.comment());
-    retry.run(() -> delivery.rejectApproval(next, step.comment()));
+    // Separate retries: a failing label removal must not post the comment again.
+    retry.run(() -> delivery.comment(next, step.comment()));
+    retry.run(() -> delivery.removeReady(next));
   }
 
   private static void writeFeedback(Ctx ctx, Step step) {
