@@ -132,4 +132,14 @@ class CommitmentsTest {
     assertThat(c.commitmentVersion()).isEqualTo(1);
     assertThat(c.issueBodySha256()).isNull();
   }
+
+  @Test
+  void v1CommitmentKeepsItsOriginalHash() throws IOException {
+    var v1 =
+        "{\"baseSha\":\"b\",\"commitmentVersion\":1,\"examinerModel\":\"m\",\"files\":[],"
+            + "\"specSha256\":\"s\"}";
+    var file = dir.resolve("v1.json");
+    Files.writeString(file, v1);
+    assertThat(Commitments.sha256(Commitments.read(file))).isEqualTo(Commitments.sha256Hex(v1));
+  }
 }

@@ -1,5 +1,7 @@
 package org.jwcarman.noir.lifecycle;
 
+import java.util.Locale;
+
 /** Why a seal attempt was rejected and the item returned to {@code DRAFT}. */
 public enum SealRejection {
   EDITED_AFTER_APPROVAL,
@@ -9,6 +11,6 @@ public enum SealRejection {
 
   /** The value recorded on the {@code transition} event. */
   public String eventValue() {
-    return name().toLowerCase(java.util.Locale.ROOT);
+    return name().toLowerCase(Locale.ROOT);
   }
 }

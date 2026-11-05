@@ -263,6 +263,12 @@ class LifecycleTest {
   }
 
   @Test
+  void pickupInDraftIsIllegal() {
+    assertThatThrownBy(() -> apply(atState(State.DRAFT), new Trigger.Pickup()))
+        .isInstanceOf(IllegalTransitionException.class);
+  }
+
+  @Test
   void approvedFactoryStartsInSealing() {
     var w = WorkItem.approved(ID, "o/r", 7);
     assertThat(w.state()).isEqualTo(State.SEALING);
