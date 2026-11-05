@@ -644,7 +644,7 @@ class FactoryTest {
     assertThat(sealing.calls).isEqualTo(6);
     assertThat(sleeps).hasSize(5);
     assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:blocked");
-    assertThat(gh.comments(1)).isEmpty();
+    assertThat(gh.comments(1)).containsExactly(BLOCKED_NOTICE);
     assertThat(store.readEvents(Specs.ID))
         .filteredOn(e -> e.type().equals("infra_failure"))
         .singleElement()
@@ -667,7 +667,7 @@ class FactoryTest {
     assertThat(item.blockedPhase()).isEqualTo(State.SEALING);
     assertThat(sealing.calls).isEqualTo(1);
     assertThat(sleeps).isEmpty();
-    assertThat(gh.comments(1)).isEmpty();
+    assertThat(gh.comments(1)).containsExactly(BLOCKED_NOTICE);
     assertThat(gh.labels(1)).containsExactlyInAnyOrder("noir:ready", "noir:blocked");
     var error =
         (String)
@@ -678,6 +678,80 @@ class FactoryTest {
                 .data()
                 .get("error");
     assertThat(error).contains("HiddenHoldoutTest").doesNotContain(SECRET);
+  }
+
+  static final String BLOCKED_NOTICE =
+      "noir hit an infrastructure problem while sealing this issue. Nothing about the spec is"
+          + " wrong. The operator can retry with `noir resume "
+          + Specs.ID
+          + "` on the noir server.";
+
+  @Test
+  void blockedWhileSealingPostsOneNoticePerBlock() {
+    sealingItem();
+    sealing.outcome =
+        n -> {
+          throw new IllegalStateException("examiner failed: " + SECRET);
+        };
+
+    var blocked = factory().advance(Specs.ID);
+    factory().drive(Specs.ID); // BLOCKED: nothing runs, nothing is posted again
+
+    assertThat(gh.comments(1)).containsExactly(BLOCKED_NOTICE);
+    assertThat(eventTypes()).containsSubsequence("infra_failure", "transition", "blocked_notice");
+    assertThat(String.join("\n", gh.comments(1))).doesNotContain("examiner", SECRET);
+
+    Transitions.applyExternal(
+        store, clock, delivery::label, blocked, new Trigger.ResumeRequested());
+    factory().advance(Specs.ID);
+
+    assertThat(gh.comments(1)).containsExactly(BLOCKED_NOTICE, BLOCKED_NOTICE);
+    assertThat(eventTypes()).filteredOn(t -> t.equals("blocked_notice")).hasSize(2);
+  }
+
+  @Test
+  void blockedNoticeIsGuardedAgainstSecrets() {
+    sealingItem();
+    sealing.outcome =
+        n -> {
+          throw new IllegalStateException("examiner failed");
+        };
+
+    var item = factory(Set.of(SECRET, "resume")).advance(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(gh.comments(1)).isEmpty();
+    assertThat(eventTypes()).doesNotContain("blocked_notice");
+  }
+
+  @Test
+  void blockedNoticeFailureStillBlocks() {
+    sealingItem();
+    sealing.outcome =
+        n -> {
+          throw new IllegalStateException("examiner failed");
+        };
+    gh.failNextComment();
+
+    var item = factory().advance(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(gh.comments(1)).hasSizeLessThanOrEqualTo(1);
+  }
+
+  @Test
+  void blockedOutsideSealingPostsNoNotice() {
+    // An agent that never reached the model is infrastructure: retried, then blocked.
+    build.produces = n -> false;
+    build.agent = n -> new AgentResult(1, true, false, null, 0, "m", "auth failed", "img");
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
+    assertThat(item.blockedPhase()).isEqualTo(State.BUILDING);
+    assertThat(gh.comments(1)).isEmpty();
+    assertThat(eventTypes()).doesNotContain("blocked_notice");
   }
 
   @Test

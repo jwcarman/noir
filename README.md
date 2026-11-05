@@ -83,6 +83,14 @@ bin/noir status
 Credentials are passed to containers through a private env file, never on the
 command line, and every outbound GitHub text is checked for them.
 
+`bin/noir status` lists every work item with its id (`nr-…`). A `BLOCKED`
+item needs the operator: once the cause is fixed (Docker stopped, GitHub or
+the API unreachable, …), `bin/noir resume <id>` re-runs the phase it blocked
+in. An item that blocked while sealing says so in a comment on its issue,
+naming that command. `bin/noir cancel <id>` stops an item for good. It refuses
+while `noir run` is active; close the issue instead and the next pass cancels
+the item.
+
 ### Desktop
 
 ```bash
@@ -125,7 +133,11 @@ Formatting is enforced with Spotless (google-java-format).
 
 ## Design
 
-See [`docs/superpowers/specs/2026-11-03-noir-v1-design.md`](docs/superpowers/specs/2026-11-03-noir-v1-design.md).
+- [`docs/superpowers/specs/2026-11-03-noir-v1-design.md`](docs/superpowers/specs/2026-11-03-noir-v1-design.md):
+  the v1 design.
+- [`docs/superpowers/specs/2026-11-05-noir-approval-flow-design.md`](docs/superpowers/specs/2026-11-05-noir-approval-flow-design.md):
+  approval with `noir:ready` and sealing on the server, which replace the
+  v1 desktop seal flow.
 
 ## License
 

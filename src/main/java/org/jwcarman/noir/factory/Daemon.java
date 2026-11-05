@@ -39,8 +39,8 @@ import org.jwcarman.noir.store.WorkItem;
  * SEALING}/{@code BUILDING}/{@code MEASURING}/{@code GRADING} is then blocked ({@code
  * INFRASTRUCTURE}, resumable with {@code noir resume}) so a persistent fault cannot re-run a paid
  * phase every poll; its issue is labelled {@code noir:blocked} after the state is persisted, best
- * effort. A {@code SEALED}/{@code REWORK} item is left as it is and retried next pass. Errors
- * propagate.
+ * effort (one that was {@code SEALING} also gets a fixed {@link BlockedNotice} comment). A {@code
+ * SEALED}/{@code REWORK} item is left as it is and retried next pass. Errors propagate.
  *
  * <p>A thread interrupt stops the daemon between transitions; the interrupt flag is kept.
  */
@@ -391,6 +391,7 @@ public final class Daemon {
   private void driveFailed(String id, RuntimeException e) {
     itemError(id, "drive", e);
     WorkItem stored;
+    WorkItem next;
     StateChange change;
     try {
       stored = store.readWorkItem(id);
@@ -398,7 +399,7 @@ public final class Daemon {
         return;
       }
       var trigger = new Trigger.InfraBlocked();
-      var next = Lifecycle.apply(stored, trigger, config.reworkRetries()).next();
+      next = Lifecycle.apply(stored, trigger, config.reworkRetries()).next();
       change = Transitions.persist(store, clock, stored, next, trigger);
     } catch (RuntimeException failed) {
       listener.error(id, Secrets.describe(failed, secrets));
@@ -410,6 +411,18 @@ public final class Daemon {
         gh.setNoirLabel(stored.repo(), stored.issueNumber(), State.BLOCKED.label());
       } catch (RuntimeException ignored) {
         // Best effort: reconciliation re-applies noir:blocked on the next pass.
+      }
+      if (stored.state() == State.SEALING) {
+        BlockedNotice.post(
+            store,
+            clock,
+            next,
+            text -> {
+              if (secrets.stream().anyMatch(text::contains)) {
+                throw new IllegalStateException("secret in outbound comment");
+              }
+              gh.comment(stored.repo(), stored.issueNumber(), text);
+            });
       }
     }
   }

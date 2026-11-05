@@ -615,6 +615,30 @@ class DaemonTest {
   }
 
   @Test
+  void sealingItemThatFailsIsBlockedWithOneNotice() {
+    int n = issue(REPO, "noir:ready", "noir:sealing");
+    store.writeWorkItem(WorkItem.approved(A, REPO, n));
+    driver.failures.put(
+        A,
+        id -> {
+          throw new IllegalStateException("HiddenTest.secretCase failed with " + SECRET);
+        });
+    var daemon = daemon();
+
+    daemon.runOnce();
+    daemon.runOnce();
+
+    assertThat(store.readWorkItem(A).state()).isEqualTo(State.BLOCKED);
+    assertThat(gh.comments(n))
+        .containsExactly(
+            "noir hit an infrastructure problem while sealing this issue. Nothing about the spec"
+                + " is wrong. The operator can retry with `noir resume "
+                + A
+                + "` on the noir server.");
+    assertThat(store.readEvents(A)).filteredOn(e -> e.type().equals("blocked_notice")).hasSize(1);
+  }
+
+  @Test
   void reconcileFailureForOneItemDoesNotStopThePass() {
     item(A, REPO, 99, State.BUILDING);
     item(B, REPO, issue(REPO), State.BUILDING);

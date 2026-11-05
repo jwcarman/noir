@@ -69,7 +69,8 @@ import org.jwcarman.noir.store.WorkItem;
  * <p>{@code SEALING} runs {@link ApprovalSealing} before any {@code spec.json} exists. A rejection
  * posts the sealer's comment, removes {@code noir:ready} and returns the item to {@code DRAFT}. Any
  * other failure of the sealer blocks the item ({@code INFRASTRUCTURE}); its message may name hidden
- * tests, so it is kept in the local event log only.
+ * tests, so it is kept in the local event log only, and the issue gets one fixed {@link
+ * BlockedNotice} per block.
  */
 public final class Factory implements ItemDriver {
   private final Store store;
@@ -221,6 +222,18 @@ public final class Factory implements ItemDriver {
           data.put("category", c.name());
         });
     event(itemId, "transition", next.attempt(), data);
+    if (from == State.SEALING
+        && next.state() == State.BLOCKED
+        && step.trigger() instanceof Trigger.InfraBlocked) {
+      BlockedNotice.post(
+          store,
+          clock,
+          next,
+          text -> {
+            guard("comment", text);
+            retry.run(() -> delivery.comment(next, text));
+          });
+    }
     return next;
   }
 
