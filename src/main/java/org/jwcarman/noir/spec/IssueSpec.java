@@ -45,9 +45,46 @@ public record IssueSpec(
     stubs = stubs == null ? List.of() : List.copyOf(stubs);
   }
 
-  /** CRLF to LF, and trailing whitespace on the whole body trimmed to one final newline. */
+  /**
+   * The one normalizer, for parsing and hashing: CRLF to LF, trailing spaces and tabs stripped from
+   * every line outside the {@code ## API contract} code fences (lines inside a fence are kept
+   * verbatim; its closing fence line is stripped too), and trailing whitespace on the whole body
+   * trimmed to one final newline.
+   */
   public static String normalize(String body) {
-    return body.replace("\r\n", "\n").stripTrailing() + "\n";
+    var lines = body.replace("\r\n", "\n").split("\n", -1);
+    var out = new StringBuilder();
+    String fence = null;
+    boolean inContract = false;
+    for (var raw : lines) {
+      var line = raw;
+      if (fence != null) {
+        if (stripLine(raw).equals(fence)) {
+          line = fence;
+          fence = null;
+        }
+      } else {
+        line = stripLine(raw);
+        if (line.startsWith("## ")) {
+          inContract = line.substring(3).strip().equals("API contract");
+        } else if (inContract) {
+          var m = FENCE_OPEN.matcher(line);
+          if (m.matches()) {
+            fence = m.group(1);
+          }
+        }
+      }
+      out.append(line).append('\n');
+    }
+    return out.toString().stripTrailing() + "\n";
+  }
+
+  private static String stripLine(String line) {
+    int end = line.length();
+    while (end > 0 && (line.charAt(end - 1) == ' ' || line.charAt(end - 1) == '\t')) {
+      end--;
+    }
+    return line.substring(0, end);
   }
 
   /** Builds the full {@link Spec} (schemaVersion 1, apiStubs = stub paths in order). */
@@ -65,11 +102,20 @@ public record IssueSpec(
         stubs.stream().map(StubSource::path).toList());
   }
 
-  /** Content problems: the spec lint rules (minus identity) plus stub and TODO checks. */
+  /**
+   * Content problems: the spec lint rules (minus identity) plus stub and TODO checks, worded as the
+   * issue body is (these messages are posted publicly): never {@code spec.json} field names.
+   */
   public static List<String> lint(IssueSpec spec) {
-    var problems =
-        new ArrayList<>(
-            SpecLint.lintContent(spec.toSpec(PLACEHOLDER_ID, PLACEHOLDER_REPO, PLACEHOLDER_SHA)));
+    var problems = new ArrayList<String>();
+    for (var p :
+        SpecLint.lintContent(spec.toSpec(PLACEHOLDER_ID, PLACEHOLDER_REPO, PLACEHOLDER_SHA))) {
+      if (p.startsWith("qualityBar")) {
+        continue; // checked below in the body's wording
+      }
+      problems.add(p.startsWith("apiStubs entry ") ? "API stub path " + p.substring(15) : p);
+    }
+    lintQualityBar(spec.qualityBar(), problems);
     problems.addAll(
         StubLint.lint(spec.stubs().stream().filter(s -> StubLint.isWellFormed(s.path())).toList()));
     todo(spec.title(), "title", problems);
@@ -92,6 +138,22 @@ public record IssueSpec(
       todo(s.content(), "stub " + s.path(), problems);
     }
     return problems;
+  }
+
+  private static void lintQualityBar(QualityBar bar, List<String> problems) {
+    if (bar == null) {
+      problems.add("## Quality bar is required");
+      return;
+    }
+    if (!(bar.lineCoverage() > 0 && bar.lineCoverage() <= 1)) {
+      problems.add("Line coverage must be between 1% and 100%");
+    }
+    if (!(bar.mutationScore() > 0 && bar.mutationScore() <= 1)) {
+      problems.add("Mutation score must be between 1% and 100%");
+    }
+    if (bar.maxCrap() < 1) {
+      problems.add("Max CRAP score per method must be at least 1");
+    }
   }
 
   private static void todo(String value, String field, List<String> problems) {
@@ -267,7 +329,8 @@ public record IssueSpec(
           while (close < to && !lines.get(close).equals(m.group(1))) {
             close++;
           }
-          stubs.add(new StubSource(path, String.join("\n", lines.subList(i + 1, close))));
+          var content = String.join("\n", lines.subList(i + 1, close));
+          stubs.add(new StubSource(path, content.endsWith("\n") ? content : content + "\n"));
           path = null;
           i = close;
         } else {

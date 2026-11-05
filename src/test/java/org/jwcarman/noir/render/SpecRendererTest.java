@@ -55,6 +55,18 @@ class SpecRendererTest {
   }
 
   @Test
+  void stubHasNoBlankLineBeforeClosingFence() {
+    var withNewline =
+        new StubSource("src/main/java/com/example/api/Foo.java", "interface Foo {}\n");
+    var without = new StubSource("src/main/java/com/example/api/Foo.java", "interface Foo {}");
+
+    for (var stub : List.of(withNewline, without)) {
+      assertThat(SpecRenderer.issueBody(Specs.valid(), List.of(stub)))
+          .contains("```java\ninterface Foo {}\n```\n");
+    }
+  }
+
+  @Test
   void specBodyStillStartsWithTitle() {
     assertThat(SpecRenderer.specBody(Specs.valid(), List.of()))
         .startsWith("# Add a bounded cache\n\n## Intent\n");

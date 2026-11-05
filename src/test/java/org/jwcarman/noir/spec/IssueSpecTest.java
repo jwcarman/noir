@@ -128,6 +128,95 @@ class IssueSpecTest {
   }
 
   @Test
+  void handWrittenStubEndsWithNewline() {
+    var b = body().replace("{}\n\n````\n", "{}\n````\n");
+    assertThat(b).doesNotContain("{}\n\n````");
+
+    var stubs = IssueSpec.parse("t", b).stubs();
+
+    assertThat(stubs).isNotEmpty().allSatisfy(s -> assertThat(s.content()).endsWith("}\n"));
+    assertThat(stubs).isEqualTo(Specs.stubsFor(Specs.counter()));
+  }
+
+  @Test
+  void stubNewlineIsNeverDoubled() {
+    // A blank line before the closing fence (as bodies rendered before this change have).
+    var b = body().replace("{}\n````\n", "{}\n\n````\n");
+    assertThat(b).contains("{}\n\n````");
+
+    assertThat(IssueSpec.parse("t", b).stubs()).isEqualTo(Specs.stubsFor(Specs.counter()));
+  }
+
+  @Test
+  void trailingWhitespaceOnLinesIsIgnored() {
+    var b =
+        body()
+            .replace("### R1\n", "### R1 \n")
+            .replace("- Line coverage ≥ 80%\n", "- Line coverage ≥ 80% \t\n")
+            .replace("{}\n````\n", "{}\n````  \n");
+    assertThat(b).contains("### R1 \n", "80% \t\n", "````  \n");
+
+    assertThat(IssueSpec.parse("t", b)).isEqualTo(IssueSpec.parse("t", body()));
+  }
+
+  @Test
+  void normalizeKeepsLinesInsideStubFencesVerbatim() {
+    var b = "## API contract\n\n### X.java\n\n```java\nint a;  \n```  \n\n## Requirements \n";
+
+    assertThat(IssueSpec.normalize(b))
+        .isEqualTo("## API contract\n\n### X.java\n\n```java\nint a;  \n```\n\n## Requirements\n");
+  }
+
+  @Test
+  void lintQualityBarUsesBodyWording() {
+    var b =
+        body()
+            .replace("Line coverage ≥ 80%", "Line coverage ≥ 0%")
+            .replace("Mutation score ≥ 70%", "Mutation score ≥ 150%")
+            .replaceFirst("Max CRAP score per method ≤ \\d+", "Max CRAP score per method ≤ 0");
+
+    var problems = IssueSpec.lint(IssueSpec.parse("t", b));
+
+    assertThat(problems)
+        .containsExactly(
+            "Line coverage must be between 1% and 100%",
+            "Mutation score must be between 1% and 100%",
+            "Max CRAP score per method must be at least 1");
+  }
+
+  @Test
+  void lintNeverUsesInternalFieldNames() {
+    var parsed = IssueSpec.parse("t", body());
+    var broken =
+        new IssueSpec(
+            "t",
+            parsed.intent(),
+            parsed.requirements(),
+            parsed.constraints(),
+            null,
+            java.util.List.of(new org.jwcarman.noir.render.StubSource("lib/Foo.txt", "x\n")));
+    var bad =
+        new IssueSpec(
+            "t",
+            parsed.intent(),
+            parsed.requirements(),
+            parsed.constraints(),
+            new QualityBar(0, 2, 0),
+            parsed.stubs());
+
+    var problems = new java.util.ArrayList<>(IssueSpec.lint(broken));
+    problems.addAll(IssueSpec.lint(bad));
+
+    assertThat(problems).hasSizeGreaterThanOrEqualTo(4);
+    assertThat(problems)
+        .noneMatch(p ->
+            p.contains("qualityBar")
+                || p.contains("apiStubs")
+                || p.contains("schemaVersion")
+                || p.contains("requirements["));
+  }
+
+  @Test
   void lintNeverMentionsPlaceholders() {
     var spec = Specs.withRequirementIds(Specs.valid(), "R2", "R1");
     var parsed = IssueSpec.parse(spec.title(), SpecRenderer.issueBody(spec, Specs.stubsFor(spec)));

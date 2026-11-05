@@ -37,7 +37,7 @@ public final class SpecRenderer {
           .append("\n\n")
           .append(fence)
           .append("java\n")
-          .append(stub.content())
+          .append(withoutFinalNewline(stub.content()))
           .append('\n')
           .append(fence)
           .append("\n\n");
@@ -115,6 +115,11 @@ public final class SpecRenderer {
           }
         })
         .toList();
+  }
+
+  /** Stub content ends with a newline; the closing fence follows it directly (no blank line). */
+  private static String withoutFinalNewline(String content) {
+    return content.endsWith("\n") ? content.substring(0, content.length() - 1) : content;
   }
 
   /** A backtick fence one longer than the longest backtick run in the content, minimum three. */
