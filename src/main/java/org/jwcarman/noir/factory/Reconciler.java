@@ -72,6 +72,17 @@ public final class Reconciler {
     return Optional.empty();
   }
 
+  /**
+   * The GitHub edit time of the body that was sealed ({@code sealedEditedAt}), so an edit made
+   * while the seal ran counts; items sealed before that key existed fall back to the server time of
+   * the {@code sealed} event.
+   */
+  private static java.time.Instant sealedAt(Event sealed) {
+    return sealed.data().get("sealedEditedAt") instanceof String s
+        ? java.time.Instant.parse(s)
+        : sealed.ts();
+  }
+
   /** Posts {@link #EDIT_NOTICE} once, for an item past sealing whose issue changed since. */
   private void noticeEditAfterSeal(WorkItem item, java.time.Instant editedAt) {
     if (item.state() == State.DRAFT || item.state() == State.SEALING) {
@@ -82,7 +93,7 @@ public final class Reconciler {
       return;
     }
     var sealed = events.stream().filter(e -> e.type().equals("sealed")).findFirst();
-    if (sealed.isEmpty() || !editedAt.isAfter(sealed.get().ts())) {
+    if (sealed.isEmpty() || !editedAt.isAfter(sealedAt(sealed.get()))) {
       return;
     }
     delivery.comment(item, Secrets.mask(EDIT_NOTICE, secrets));

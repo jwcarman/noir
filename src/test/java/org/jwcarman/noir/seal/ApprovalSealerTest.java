@@ -230,14 +230,17 @@ class ApprovalSealerTest {
                 "bodySha256",
                 bodySha,
                 "title",
-                "Add a bounded cache"));
+                "Add a bounded cache",
+                "sealedEditedAt",
+                CREATED.toString()));
     assertThat(event("sealed").data())
         .isEqualTo(
             Map.of(
                 "issue", issue,
                 "commitmentSha256", sha,
                 "baseSha", originHead(),
-                "bodySha256", bodySha));
+                "bodySha256", bodySha,
+                "sealedEditedAt", CREATED.toString()));
 
     var spec = SpecJson.read(itemDir().resolve("spec.json"));
     assertThat(spec.baseSha()).isEqualTo(originHead());
@@ -433,7 +436,10 @@ class ApprovalSealerTest {
     assertThat(github.comments(issue)).singleElement().asString().contains(sha);
     assertThat(eventTypes())
         .containsExactly("approved", "examiner_attempt", "commitment_posted", "sealed");
-    assertThat(event("sealed").data()).containsEntry("baseSha", originHead());
+    assertThat(event("sealed").data())
+        .containsEntry("baseSha", originHead())
+        .as("the edit time of the body that was sealed, not of the later edit")
+        .containsEntry("sealedEditedAt", CREATED.toString());
   }
 
   @Test

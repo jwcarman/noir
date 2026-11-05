@@ -180,6 +180,46 @@ class ReconcilerTest {
     assertThat(store.readWorkItem(A).state()).isEqualTo(State.BUILDING);
   }
 
+  /** A sealed event recording the GitHub edit time of the body the sealer read. */
+  void sealedEvent(String id, Instant sealedEditedAt) {
+    store.appendEvent(
+        Event.of(
+            clock,
+            id,
+            "sealed",
+            0,
+            Map.of("issue", 1, "sealedEditedAt", sealedEditedAt.toString())));
+  }
+
+  @Test
+  void editDuringSealingPostsNotice() {
+    int n = issue("noir:ready", "noir:building");
+    item(A, n, State.BUILDING);
+    var snapshotEditedAt = clock.instant().minus(Duration.ofHours(2));
+    // Edited while the seal ran: after the body was read, before the sealed event's server time.
+    gh.editIssue(n, "t", "changed", clock.instant().minus(Duration.ofHours(1)));
+    sealedEvent(A, snapshotEditedAt);
+
+    reconciler.reconcile();
+    reconciler.reconcile();
+
+    assertThat(gh.comments(n)).containsExactly(EDIT_NOTICE);
+    assertThat(store.readEvents(A)).filteredOn(e -> e.type().equals("edit_notice")).hasSize(1);
+  }
+
+  @Test
+  void noEditSinceTheSealedSnapshotPostsNoNotice() {
+    int n = issue("noir:ready", "noir:building");
+    item(A, n, State.BUILDING);
+    var snapshotEditedAt = clock.instant().minus(Duration.ofHours(2));
+    gh.editIssue(n, "t", "b", snapshotEditedAt);
+    sealedEvent(A, snapshotEditedAt);
+
+    reconciler.reconcile();
+
+    assertThat(gh.comments(n)).isEmpty();
+  }
+
   @Test
   void editBeforeSealPostsNoNotice() {
     int n = issue("noir:ready", "noir:building");

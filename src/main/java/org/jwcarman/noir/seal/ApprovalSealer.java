@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.jwcarman.noir.commit.Commitments;
 import org.jwcarman.noir.config.NoirConfig;
@@ -34,6 +35,12 @@ import org.jwcarman.noir.store.WorkItem;
  * examines a holdout suite and posts the commitment. Infrastructure exceptions propagate.
  */
 public final class ApprovalSealer implements ApprovalSealing {
+  /**
+   * The GitHub edit time of the body being sealed, in {@code approved} and {@code sealed}: the
+   * reconciler compares later edits against it (GitHub time against GitHub time).
+   */
+  static final String SEALED_EDITED_AT = "sealedEditedAt";
+
   static final List<String> SEAL_FILES =
       List.of("spec.json", "stubs", "base.bundle", "holdout", "reference", "commitment.json");
 
@@ -154,6 +161,7 @@ public final class ApprovalSealer implements ApprovalSealing {
     data.put("issueCreatedAt", snapshot.createdAt().toString());
     data.put("bodySha256", bodySha);
     putIfPresent(data, "title", snapshot.title());
+    data.put(SEALED_EDITED_AT, snapshot.editedAt().toString());
     append(item, "approved", data);
   }
 
@@ -174,16 +182,32 @@ public final class ApprovalSealer implements ApprovalSealing {
       append(item, "commitment_posted", Map.of("commitmentSha256", sha));
     }
     if (!types.contains("sealed")) {
-      append(
-          item,
-          "sealed",
-          Map.of(
-              "issue", item.issueNumber(),
-              "commitmentSha256", sha,
-              "baseSha", commitment.baseSha(),
-              "bodySha256", commitment.issueBodySha256()));
+      var data = new LinkedHashMap<String, Object>();
+      data.put("issue", item.issueNumber());
+      data.put("commitmentSha256", sha);
+      data.put("baseSha", commitment.baseSha());
+      data.put("bodySha256", commitment.issueBodySha256());
+      sealedEditedAt(item, commitment.issueBodySha256())
+          .ifPresent(at -> data.put(SEALED_EDITED_AT, at));
+      append(item, "sealed", data);
     }
     return new SealOutcome.Passed(sha);
+  }
+
+  /**
+   * The {@code sealedEditedAt} of the latest {@code approved} event for the committed body; empty
+   * for an approval recorded before the key existed.
+   */
+  private Optional<String> sealedEditedAt(WorkItem item, String bodySha) {
+    String found = null;
+    for (var e : store.readEvents(item.id())) {
+      if (e.type().equals("approved")
+          && bodySha.equals(e.data().get("bodySha256"))
+          && e.data().get(SEALED_EDITED_AT) instanceof String at) {
+        found = at;
+      }
+    }
+    return Optional.ofNullable(found);
   }
 
   private SealOutcome reject(
