@@ -1,9 +1,5 @@
 package org.jwcarman.noir.spec;
 
-import com.github.javaparser.JavaParser;
-import com.github.javaparser.ParserConfiguration;
-import com.github.javaparser.ast.CompilationUnit;
-import com.github.javaparser.ast.nodeTypes.NodeWithName;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -14,10 +10,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
+import org.jwcarman.noir.render.StubSource;
 
 /** Pre-seal checks on a draft directory: spec lint, stub files, and leftover placeholders. */
 public final class DraftCheck {
-  private static final String SRC = "src/main/java/";
   private static final String NO_BASE_SHA = "baseSha must be a 40-character hex commit SHA";
 
   private DraftCheck() {}
@@ -44,7 +40,7 @@ public final class DraftCheck {
     var listed = new HashSet<String>(spec.apiStubs());
     for (var path : spec.apiStubs()) {
       // Malformed entries are already reported by SpecLint; never touch the disk for them.
-      if (isWellFormed(path)) {
+      if (StubLint.isWellFormed(path)) {
         checkStub(stubs, path, problems);
       }
     }
@@ -52,18 +48,6 @@ public final class DraftCheck {
       unlisted(stubs, listed)
           .forEach(p -> problems.add("stub " + p + " is not listed in apiStubs"));
     }
-  }
-
-  private static boolean isWellFormed(String path) {
-    if (path == null || !path.startsWith(SRC) || !path.endsWith(".java") || path.contains("\\")) {
-      return false;
-    }
-    for (var segment : path.split("/")) {
-      if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) {
-        return false;
-      }
-    }
-    return true;
   }
 
   private static void checkStub(Path stubs, String path, List<String> problems) {
@@ -87,31 +71,7 @@ public final class DraftCheck {
       problems.add("stub " + path + " cannot be read: " + e.getMessage());
       return;
     }
-    var parser =
-        new JavaParser(
-            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
-    var result = parser.parse(source);
-    if (!result.isSuccessful() || result.getResult().isEmpty()) {
-      problems.add("stub " + path + " does not parse as Java");
-      return;
-    }
-    var declared = packageOf(result.getResult().get());
-    var dir = path.substring(SRC.length(), path.lastIndexOf('/') + 1);
-    var expected = dir.isEmpty() ? "" : dir.substring(0, dir.length() - 1).replace('/', '.');
-    if (!declared.equals(expected)) {
-      problems.add(
-          "stub "
-              + path
-              + " declares package '"
-              + declared
-              + "' but its directory implies '"
-              + expected
-              + "'");
-    }
-  }
-
-  private static String packageOf(CompilationUnit unit) {
-    return unit.getPackageDeclaration().map(NodeWithName::getNameAsString).orElse("");
+    problems.addAll(StubLint.lint(List.of(new StubSource(path, source))));
   }
 
   private static boolean hasSymlinkParent(Path stubs, Path file) {

@@ -35,6 +35,41 @@ public final class Specs {
         List.of("src/main/java/com/example/api/Foo.java"));
   }
 
+  public static Spec counter() {
+    return valid()
+        .withTitle("Add a Counter")
+        .withIntent("A thread-safe counter.\n\nIt counts up from zero.")
+        .withApiStubs(List.of("src/main/java/com/example/Counter.java"))
+        .withConstraints(List.of());
+  }
+
+  public static List<Spec> all() {
+    return List.of(
+        valid(),
+        counter(),
+        valid().withQualityBar(new QualityBar(0.95, 0.5, 10)),
+        valid()
+            .withApiStubs(
+                List.of(
+                    "src/main/java/com/example/api/Foo.java", "src/main/java/com/example/B.java")));
+  }
+
+  public static List<org.jwcarman.noir.render.StubSource> stubsFor(Spec spec) {
+    return spec.apiStubs().stream()
+        .map(path -> {
+          var name = path.substring(path.lastIndexOf('/') + 1, path.length() - 5);
+          var dir = path.substring("src/main/java/".length(), path.lastIndexOf('/'));
+          var content =
+              "package "
+                  + dir.replace('/', '.')
+                  + ";\n\n/** Has ``` backticks. */\npublic interface "
+                  + name
+                  + " {}\n";
+          return new org.jwcarman.noir.render.StubSource(path, content);
+        })
+        .toList();
+  }
+
   public static Spec withRequirementIds(Spec spec, String... ids) {
     var reqs = new ArrayList<Requirement>();
     for (int i = 0; i < ids.length; i++) {

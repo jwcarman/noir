@@ -44,13 +44,27 @@ class SpecRendererTest {
   }
 
   @Test
-  void issueFooterNamesItem() {
-    assertThat(SpecRenderer.issueBody(Specs.valid(), List.of()))
-        .contains("\n---\n")
-        .endsWith(
-            "_This issue is a rendering of sealed noir work item "
-                + Specs.valid().id()
-                + ". Edits to this issue do not affect the build._");
+  void issueBodyHasNoTitleHeadingAndEndsWithFooter() {
+    var body = SpecRenderer.issueBody(Specs.valid(), List.of());
+    assertThat(body)
+        .startsWith("## Intent\n")
+        .doesNotContain("# Add a bounded cache")
+        .endsWith("\n---\n\n" + SpecRenderer.FOOTER);
+    assertThat(SpecRenderer.FOOTER)
+        .isEqualTo("_noir spec · add `noir:ready` to approve · edits after sealing are ignored_");
+  }
+
+  @Test
+  void specBodyStillStartsWithTitle() {
+    assertThat(SpecRenderer.specBody(Specs.valid(), List.of()))
+        .startsWith("# Add a bounded cache\n\n## Intent\n");
+  }
+
+  @Test
+  void templateIsASkeleton() {
+    assertThat(SpecRenderer.template("Add X"))
+        .startsWith("## Intent\n")
+        .contains("### src/main/java/TODO.java", "### R1", "TODO");
   }
 
   @Test

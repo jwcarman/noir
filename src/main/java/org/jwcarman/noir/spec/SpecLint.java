@@ -28,6 +28,13 @@ public final class SpecLint {
     if (spec.baseSha() == null || !SHA.matcher(spec.baseSha()).matches()) {
       problems.add("baseSha must be a 40-character hex commit SHA");
     }
+    problems.addAll(lintContent(spec));
+    return problems;
+  }
+
+  /** Every rule except the identity fields (schemaVersion, id, repo, baseSha). */
+  public static List<String> lintContent(Spec spec) {
+    var problems = new ArrayList<String>();
     notBlank(spec.title(), "title", problems);
     notBlank(spec.intent(), "intent", problems);
     lintRequirements(spec.requirements(), problems);
@@ -83,28 +90,13 @@ public final class SpecLint {
       problems.add("at least one API stub is required");
     }
     for (var s : stubs) {
-      if (!isMainJavaSource(s)) {
+      if (!StubLint.isWellFormed(s)) {
         problems.add(
             "apiStubs entry "
                 + s
                 + " must be a relative path under src/main/java/ ending in .java");
       }
     }
-  }
-
-  private static boolean isMainJavaSource(String path) {
-    if (path == null
-        || !path.startsWith("src/main/java/")
-        || !path.endsWith(".java")
-        || path.contains("\\")) {
-      return false;
-    }
-    for (var segment : path.split("/")) {
-      if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) {
-        return false;
-      }
-    }
-    return true;
   }
 
   private static void notBlank(String value, String field, List<String> problems) {

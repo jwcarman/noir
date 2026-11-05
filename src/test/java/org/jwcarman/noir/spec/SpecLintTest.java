@@ -88,4 +88,10 @@ class SpecLintTest {
         .containsExactlyInAnyOrder(
             "title must not be blank", "R1 example 1 'then' must not be blank");
   }
+
+  @Test
+  void lintContentSkipsIdentityRules() {
+    var spec = Specs.valid().withId(null).withRepo(null).withBaseSha(null);
+    assertThat(SpecLint.lintContent(spec)).isEmpty();
+  }
 }

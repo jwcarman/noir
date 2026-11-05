@@ -124,7 +124,7 @@ class SealerTest {
     assertThat(issue.repo()).isEqualTo("jwcarman/demo");
     assertThat(issue.title()).isEqualTo("Add a bounded cache");
     assertThat(issue.labels()).containsExactly("noir:ready");
-    assertThat(issue.body()).endsWith("Edits to this issue do not affect the build._");
+    assertThat(issue.body()).endsWith(org.jwcarman.noir.render.SpecRenderer.FOOTER);
     assertThat(issue.comments()).singleElement().asString().contains(r.commitmentSha256());
     assertThat(github.ensuredRepos()).containsExactly("jwcarman/demo");
     var item = store.itemDir(ID);
