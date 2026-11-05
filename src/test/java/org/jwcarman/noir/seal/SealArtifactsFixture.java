@@ -6,11 +6,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /** Writes seal-check artifacts as {@code seal-check.sh} would, for tests. */
-final class SealArtifactsFixture {
+public final class SealArtifactsFixture {
   private SealArtifactsFixture() {}
 
   /** A fully passing run. */
-  static SealArtifacts good(Path out) {
+  public static SealArtifacts good(Path out) {
     write(out, "clone.exit", "0");
     write(out, "assumptions.exit", "0");
     write(out, "pom.txt", "yes");
