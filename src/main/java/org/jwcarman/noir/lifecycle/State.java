@@ -4,7 +4,9 @@ import java.util.Optional;
 
 /** Persisted work-item states (spec §4.5). */
 public enum State {
-  SEALED("noir:ready"),
+  DRAFT("noir:draft"),
+  SEALING("noir:sealing"),
+  SEALED("noir:building"),
   BUILDING("noir:building"),
   MEASURING("noir:building"),
   GRADING("noir:building"),
@@ -27,7 +29,7 @@ public enum State {
 
   /** A phase with work in flight (containers may be running). */
   public boolean active() {
-    return this == BUILDING || this == MEASURING || this == GRADING;
+    return this == SEALING || this == BUILDING || this == MEASURING || this == GRADING;
   }
 
   public boolean terminal() {

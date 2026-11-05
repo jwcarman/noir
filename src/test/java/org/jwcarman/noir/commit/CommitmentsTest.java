@@ -70,7 +70,7 @@ class CommitmentsTest {
     write("stubs/src/main/java/a/Foo.java", "class Foo {}");
     write("holdout/T.java", "t");
     write("reference/R.java", "r");
-    var c = Commitments.create(Specs.valid(), dir, "claude-opus-5-5");
+    var c = Commitments.create(Specs.valid(), dir, "claude-opus-5-5", "abc123");
     assertThat(c.files())
         .extracting(FileHash::path)
         .containsExactly("holdout/T.java", "reference/R.java");
@@ -102,5 +102,34 @@ class CommitmentsTest {
     var p = dir.resolve(rel);
     Files.createDirectories(p.getParent());
     Files.writeString(p, content);
+  }
+
+  @Test
+  void commitmentV2IncludesBodyHash() throws IOException {
+    write("holdout/T.java", "t");
+    var c = Commitments.create(Specs.valid(), dir, "m", "deadbeef");
+    assertThat(Commitments.VERSION).isEqualTo(2);
+    assertThat(c.commitmentVersion()).isEqualTo(2);
+    assertThat(c.issueBodySha256()).isEqualTo("deadbeef");
+    assertThat(new String(Commitments.canonicalBytes(c), UTF_8))
+        .contains("\"issueBodySha256\":\"deadbeef\"");
+    assertThat(Commitments.create(Specs.valid(), dir, "m", "other")).isNotEqualTo(c);
+  }
+
+  @Test
+  void v2RejectsNullBodyHash() {
+    assertThatThrownBy(() -> new Commitment(2, "b", "s", null, "m", List.of()))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void readsV1Commitment() throws IOException {
+    var json =
+        "{\"baseSha\":\"b\",\"commitmentVersion\":1,\"examinerModel\":\"m\",\"files\":[],"
+            + "\"specSha256\":\"s\"}";
+    Files.writeString(dir.resolve("c.json"), json);
+    var c = Commitments.read(dir.resolve("c.json"));
+    assertThat(c.commitmentVersion()).isEqualTo(1);
+    assertThat(c.issueBodySha256()).isNull();
   }
 }

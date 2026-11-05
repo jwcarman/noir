@@ -79,7 +79,8 @@ class FactoryTest {
     copyTree(FIXTURES.resolve("seal/holdout-good"), itemDir.resolve("holdout"));
     SpecJson.write(spec, itemDir.resolve("spec.json"));
     Commitments.write(
-        Commitments.create(spec, itemDir, "examiner-model"), itemDir.resolve("commitment.json"));
+        Commitments.create(spec, itemDir, "examiner-model", "body"),
+        itemDir.resolve("commitment.json"));
     Files.writeString(itemDir.resolve("base.bundle"), "# v2 git bundle\nbase\n");
     int issue = gh.createIssue(REPO, spec.title(), "body", List.of("noir:ready"));
     store.writeWorkItem(WorkItem.sealed(Specs.ID, REPO, issue));

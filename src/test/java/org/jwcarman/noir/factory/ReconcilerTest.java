@@ -90,7 +90,7 @@ class ReconcilerTest {
     var changes = reconciler.reconcile();
 
     assertThat(changes).isEmpty();
-    assertThat(gh.issue(sealed).labels()).containsExactlyInAnyOrder("bug", "noir:ready");
+    assertThat(gh.issue(sealed).labels()).containsExactlyInAnyOrder("bug", "noir:building");
     assertThat(gh.issue(grading).labels()).containsExactlyInAnyOrder("noir:ready", "noir:building");
   }
 

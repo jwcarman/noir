@@ -24,7 +24,7 @@ import org.jwcarman.noir.spec.Spec;
 
 /** Canonical hashing of sealed material (spec §4.4). */
 public final class Commitments {
-  public static final int VERSION = 1;
+  public static final int VERSION = 2;
 
   private Commitments() {}
 
@@ -66,11 +66,13 @@ public final class Commitments {
     return sha256Hex(canonical(doc));
   }
 
-  public static Commitment create(Spec spec, Path itemDir, String examinerModel) {
+  public static Commitment create(
+      Spec spec, Path itemDir, String examinerModel, String issueBodySha256) {
     return new Commitment(
         VERSION,
         spec.baseSha(),
         specSha256(spec, itemDir),
+        issueBodySha256,
         examinerModel,
         hashTree(itemDir, List.of("holdout", "reference")));
   }
@@ -125,6 +127,11 @@ public final class Commitments {
       throw new SealedFileException("Sealed file is not valid UTF-8: " + rel, e);
     }
     return text.replace("\r\n", "\n").replace('\r', '\n').getBytes(UTF_8);
+  }
+
+  /** SHA-256 hex of the UTF-8 bytes of {@code text}. */
+  public static String sha256Hex(String text) {
+    return sha256Hex(text.getBytes(UTF_8));
   }
 
   private static String sha256Hex(byte[] bytes) {

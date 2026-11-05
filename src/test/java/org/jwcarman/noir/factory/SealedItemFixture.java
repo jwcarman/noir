@@ -76,7 +76,7 @@ record SealedItemFixture(
     copyTree(sealFixture("stubs"), itemDir.resolve("stubs"));
     copyTree(sealFixture("holdout-good"), itemDir.resolve("holdout"));
     copyTree(sealFixture("reference"), itemDir.resolve("reference"));
-    var commitment = Commitments.create(spec, itemDir, "scripted-examiner");
+    var commitment = Commitments.create(spec, itemDir, "scripted-examiner", "body");
     Commitments.write(commitment, itemDir.resolve("commitment.json"));
 
     int issue =

@@ -7,9 +7,13 @@ public record Commitment(
     int commitmentVersion,
     String baseSha,
     String specSha256,
+    String issueBodySha256,
     String examinerModel,
     List<FileHash> files) {
   public Commitment {
+    if (issueBodySha256 == null && commitmentVersion >= 2) {
+      throw new IllegalArgumentException("issueBodySha256 is required for commitmentVersion >= 2");
+    }
     files = files == null ? List.of() : List.copyOf(files);
   }
 }

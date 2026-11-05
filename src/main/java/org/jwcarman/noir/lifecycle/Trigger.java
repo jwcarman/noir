@@ -2,6 +2,12 @@ package org.jwcarman.noir.lifecycle;
 
 /** Events that drive the work-item lifecycle. */
 public sealed interface Trigger {
+  record Approved() implements Trigger {}
+
+  record SealPassed() implements Trigger {}
+
+  record SealRejected(SealRejection reason) implements Trigger {}
+
   record Pickup() implements Trigger {}
 
   record AgentExited(boolean producedCommits) implements Trigger {}

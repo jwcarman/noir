@@ -361,7 +361,7 @@ class DaemonTest {
     var error = (String) event.data().get("error");
     assertThat(error).doesNotContain(SECRET).doesNotContain("\n").contains("docker failed");
     // A SEALED item stays SEALED and keeps its state label (no flip to noir:blocked).
-    assertThat(gh.issue(failing).labels()).containsExactly("noir:ready");
+    assertThat(gh.issue(failing).labels()).containsExactlyInAnyOrder("noir:ready", "noir:building");
     assertThat(reported).anySatisfy(r -> assertThat(r).startsWith("error " + A + ": "));
     assertThat(String.join("\n", reported)).doesNotContain(SECRET);
   }

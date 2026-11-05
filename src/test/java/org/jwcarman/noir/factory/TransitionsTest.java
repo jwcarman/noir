@@ -59,4 +59,14 @@ class TransitionsTest {
         .doesNotContainKey("category");
     assertThat(Transitions.categoryOf(new Trigger.AgentExited(true))).isEmpty();
   }
+
+  @Test
+  void sealRejectedRecordsReason() {
+    item = item.withState(State.SEALING);
+    var data =
+        persist(
+            State.DRAFT,
+            new Trigger.SealRejected(org.jwcarman.noir.lifecycle.SealRejection.SUITE_TOO_WEAK));
+    assertThat(data).containsEntry("reason", "suite_too_weak").containsEntry("to", "DRAFT");
+  }
 }

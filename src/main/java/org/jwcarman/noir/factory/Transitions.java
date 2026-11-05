@@ -74,6 +74,9 @@ public final class Transitions {
     if (next.state() == State.REWORK || next.state() == State.FAILED) {
       categoryOf(trigger).ifPresent(c -> data.put("category", c.name()));
     }
+    if (trigger instanceof Trigger.SealRejected r) {
+      data.put("reason", r.reason().eventValue());
+    }
     store.appendEvent(Event.of(clock, item.id(), "transition", next.attempt(), data));
     return new StateChange(item.id(), item.state(), next.state());
   }

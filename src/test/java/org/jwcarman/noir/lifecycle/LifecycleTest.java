@@ -212,4 +212,61 @@ class LifecycleTest {
     assertThatThrownBy(() -> apply(atState(State.SEALED), new Trigger.InfraBlocked()))
         .isInstanceOf(IllegalTransitionException.class);
   }
+
+  @Test
+  void approvedMovesDraftToSealing() {
+    var t = apply(atState(State.DRAFT), new Trigger.Approved());
+    assertThat(t.next().state()).isEqualTo(State.SEALING);
+    assertThat(t.effects()).containsExactly(APPLY_LABEL);
+  }
+
+  @Test
+  void sealPassedMovesSealingToSealed() {
+    var t = apply(atState(State.SEALING), new Trigger.SealPassed());
+    assertThat(t.next().state()).isEqualTo(State.SEALED);
+    assertThat(t.effects()).containsExactly(APPLY_LABEL);
+  }
+
+  @Test
+  void sealRejectedReturnsToDraft() {
+    var t = apply(atState(State.SEALING), new Trigger.SealRejected(SealRejection.INVALID_SPEC));
+    assertThat(t.next().state()).isEqualTo(State.DRAFT);
+    assertThat(t.effects()).containsExactly(REJECT_APPROVAL, APPLY_LABEL);
+  }
+
+  @Test
+  void infraBlockedWhileSealingBlocksInSealingPhase() {
+    var t = apply(atState(State.SEALING), new Trigger.InfraBlocked());
+    assertThat(t.next().state()).isEqualTo(State.BLOCKED);
+    assertThat(t.next().blockReason()).isEqualTo(BlockReason.INFRASTRUCTURE);
+    assertThat(t.next().blockedPhase()).isEqualTo(State.SEALING);
+    assertThat(t.next().state().active()).isFalse();
+  }
+
+  @Test
+  void resumeFromSealingBlockReturnsToSealing() {
+    var blocked = apply(atState(State.SEALING), new Trigger.InfraBlocked()).next();
+    var t = apply(blocked, new Trigger.ResumeRequested());
+    assertThat(t.next().state()).isEqualTo(State.SEALING);
+    assertThat(t.next().blockReason()).isNull();
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = State.class,
+      names = {"DRAFT", "SEALING"})
+  void closedOrCancelledBeforeSealCancels(State s) {
+    assertThat(apply(atState(s), new Trigger.IssueClosed()).next().state())
+        .isEqualTo(State.CANCELLED);
+    assertThat(apply(atState(s), new Trigger.CancelRequested()).next().state())
+        .isEqualTo(State.CANCELLED);
+  }
+
+  @Test
+  void approvedFactoryStartsInSealing() {
+    var w = WorkItem.approved(ID, "o/r", 7);
+    assertThat(w.state()).isEqualTo(State.SEALING);
+    assertThat(w.attempt()).isZero();
+    assertThat(w.issueNumber()).isEqualTo(7);
+  }
 }

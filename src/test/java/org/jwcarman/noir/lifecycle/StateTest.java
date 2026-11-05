@@ -7,7 +7,9 @@ import org.junit.jupiter.api.Test;
 class StateTest {
   @Test
   void labels() {
-    assertThat(State.SEALED.label()).contains("noir:ready");
+    assertThat(State.DRAFT.label()).contains("noir:draft");
+    assertThat(State.SEALING.label()).contains("noir:sealing");
+    assertThat(State.SEALED.label()).contains("noir:building");
     for (var s : new State[] {State.BUILDING, State.MEASURING, State.GRADING, State.REWORK}) {
       assertThat(s.label()).contains("noir:building");
     }
@@ -21,9 +23,21 @@ class StateTest {
   void activeAndTerminal() {
     assertThat(State.values())
         .filteredOn(State::active)
-        .containsExactlyInAnyOrder(State.BUILDING, State.MEASURING, State.GRADING);
+        .containsExactlyInAnyOrder(State.SEALING, State.BUILDING, State.MEASURING, State.GRADING);
     assertThat(State.values())
         .filteredOn(State::terminal)
         .containsExactlyInAnyOrder(State.PR_OPEN, State.FAILED, State.CANCELLED);
+  }
+
+  @Test
+  void draftIsNeitherActiveNorTerminal() {
+    assertThat(State.DRAFT.active()).isFalse();
+    assertThat(State.DRAFT.terminal()).isFalse();
+  }
+
+  @Test
+  void sealingIsActive() {
+    assertThat(State.SEALING.active()).isTrue();
+    assertThat(State.SEALING.terminal()).isFalse();
   }
 }

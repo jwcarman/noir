@@ -9,5 +9,7 @@ public enum SideEffect {
   WRITE_FEEDBACK,
   OPEN_PR,
   OPEN_DRAFT_PR_OR_COMMENT,
-  STOP_CONTAINERS
+  STOP_CONTAINERS,
+  /** Comment and remove {@code noir:ready} from the issue. */
+  REJECT_APPROVAL
 }

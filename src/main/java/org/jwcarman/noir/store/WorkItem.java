@@ -14,6 +14,10 @@ public record WorkItem(
     BlockReason blockReason,
     State blockedPhase) {
 
+  public static WorkItem approved(String id, String repo, int issueNumber) {
+    return new WorkItem(id, repo, issueNumber, State.SEALING, 0, 0, null, null);
+  }
+
   public static WorkItem sealed(String id, String repo, int issueNumber) {
     return new WorkItem(id, repo, issueNumber, State.SEALED, 0, 0, null, null);
   }

@@ -106,13 +106,13 @@ public final class Sealer {
       return new SealResult.Rejected(model.problems());
     }
 
-    var commitment = Commitments.create(spec, draft, model.name());
+    var issueBody = SpecRenderer.issueBody(spec, stubs);
+    var commitment =
+        Commitments.create(spec, draft, model.name(), Commitments.sha256Hex(issueBody));
     Commitments.write(commitment, draft.resolve("commitment.json"));
 
     github.ensureLabels(spec.repo());
-    int n =
-        github.createIssue(
-            spec.repo(), spec.title(), SpecRenderer.issueBody(spec, stubs), List.of("noir:ready"));
+    int n = github.createIssue(spec.repo(), spec.title(), issueBody, List.of("noir:ready"));
     var created = new SealProgress(n, false);
     writeProgress(draft, created);
     return publish(spec, draft, created);

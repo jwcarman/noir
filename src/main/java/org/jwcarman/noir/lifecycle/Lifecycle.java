@@ -16,6 +16,12 @@ public final class Lifecycle {
       throw new IllegalTransitionException(state, trigger);
     }
     return switch (trigger) {
+      case Trigger.Approved a when state == State.DRAFT ->
+          to(item.withState(State.SEALING), APPLY_LABEL);
+      case Trigger.SealPassed s when state == State.SEALING ->
+          to(item.withState(State.SEALED), APPLY_LABEL);
+      case Trigger.SealRejected s when state == State.SEALING ->
+          to(item.withState(State.DRAFT), REJECT_APPROVAL, APPLY_LABEL);
       case Trigger.Pickup p when state == State.SEALED || state == State.REWORK ->
           to(
               item.withState(State.BUILDING).withAttempt(item.attempt() + 1),

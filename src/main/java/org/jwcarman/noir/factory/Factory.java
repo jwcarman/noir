@@ -401,6 +401,7 @@ public final class Factory implements ItemDriver {
         case OPEN_PR -> deliver(ctx, next, ctx.attempt(), false);
         case OPEN_DRAFT_PR_OR_COMMENT -> draftOrComment(ctx, next);
         // The runners already extracted and exported; containers are --rm and phase-scoped.
+        case REJECT_APPROVAL -> throw new UnsupportedOperationException("wired in Task 6");
         case EXTRACT_BUNDLE, EXPORT_ARTIFACTS, STOP_CONTAINERS -> {}
       }
     }
