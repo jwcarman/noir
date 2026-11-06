@@ -91,7 +91,7 @@ The skeleton shows the format. The spec is the issue body, and the issue title i
 
 - `## Intent`: a short paragraph, the problem and the outcome, not the implementation.
 - `## API contract`: one `### <path>` heading per stub (a repository-relative path under
-  `src/main/java/`), each followed by a fenced `java` block holding the complete stub source.
+  `src/main/java/`), each followed by a fenced `java` block holding the complete stub source (or, for a `(modify)` entry, a fragment; see 4d).
 - `## Requirements`: `### R1`, `### R2`, ... each with a one-line statement and one or more
   bullets of the form `- **Given** ... **when** ... **then** ...`.
 - `## Constraints`: bullets, or `_None._`.
@@ -181,12 +181,18 @@ targets and the tests under `## Tests to update`) plus new files may change.
    type, holding only the new and changed members (not the whole file), each with Javadoc and a
    body that is only `throw new UnsupportedOperationException();`. Unchanged members are left out
    and stay as they are.
-3. Search `src/test/java` with grep for the names of the changed members and for the type itself,
+3. Write fragments that seal. A **changed member** keeps its exact current signature (name,
+   parameter types, return type, modifiers, type parameters, throws) and only gets new Javadoc; a
+   different parameter list adds an overload instead. Members cannot be removed or renamed. A
+   changed member's current body stays in the stub, so each requirement on it must describe
+   behaviour that differs from what the code does today. Fragments contain only methods and
+   constructors, keep the same type kind and modifiers, and add the imports their signatures need.
+4. Search `src/test/java` with grep for the names of the changed members and for the type itself,
    and **ask** the user which of the files you found belong under `## Tests to update` (a
    section between `## Requirements` and `## Constraints`, one backticked path per bullet, such as
    ``- `src/test/java/com/example/FooTest.java` ``). Never guess: show what grep found and let the
    user decide; leave the section out if they list none.
-4. Check against the real code until clean:
+5. Check against the real code until clean:
 
 ```
 noir spec check <tmpdir>/body.md --title "<title>" --repo .
@@ -203,7 +209,8 @@ noir spec check <tmpdir>/body.md --title "<title>"
 
 If the spec has modify entries or tests to update, add `--repo .` so noir checks them against the
 default branch (see section 4d); `--repo .` needs `origin/HEAD`, and if the check says it is not
-set, run `git remote set-head origin --auto` and check again. The rule is: new-file stubs must not exist; modify targets must exist.
+set, run `git remote set-head origin --auto` and check again. The rule is:
+new-file stubs must not exist; modify targets must exist.
 For the new-file stubs, confirm that by hand as well. Find the default
 branch with `gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`, run
 `git fetch origin <default-branch>` once, and for each stub without `(modify)` run:
@@ -242,7 +249,10 @@ section 7.
    `<tmpdir>/body.md`, and work on `body.md`. Keep the title. If a seal was rejected, noir left a
    comment on the issue (`gh issue view N --repo <repo> --comments`): read it and address its
    problems.
-3. Revise with the user, one question at a time, using the guidance in section 4. Check with
+3. Revise with the user, one question at a time, using the guidance in section 4. If a noir
+   comment says `conflicts_with_existing_tests`, add the tests it names under
+   `## Tests to update` once the user agrees. Run `git fetch origin <default-branch>` again before
+   checking with `--repo .`. Check with
    `noir spec check <tmpdir>/body.md --title "<title>"` until `OK` (add `--repo .` when the
    spec modifies files), then confirm every new-file stub path is new with the `git cat-file -e`
    check from section 5.

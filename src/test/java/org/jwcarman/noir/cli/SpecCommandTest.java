@@ -8,12 +8,15 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.jwcarman.noir.NoirHome;
+import org.jwcarman.noir.git.GitFixtures;
 import org.jwcarman.noir.github.FakeGitHub;
 import org.jwcarman.noir.render.SpecRenderer;
+import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.IssueSpec;
 import org.jwcarman.noir.spec.Specs;
 
@@ -113,11 +116,11 @@ class SpecCommandTest {
 
   private Path cloneRepo() {
     var origin =
-        org.jwcarman.noir.git.GitFixtures.originWithFiles(
+        GitFixtures.originWithFiles(
             tmp.resolve("origins"),
             "o/r",
-            java.util.Map.of(FOO, BASE, FOO_TEST, "package com.example;\n\nclass FooTest {}\n"));
-    return org.jwcarman.noir.git.GitFixtures.cloneOf(origin, tmp.resolve("clone"));
+            Map.of(FOO, BASE, FOO_TEST, "package com.example;\n\nclass FooTest {}\n"));
+    return GitFixtures.cloneOf(origin, tmp.resolve("clone"));
   }
 
   private Path modifySpec(String target, String fragment, String test) throws IOException {
@@ -126,9 +129,7 @@ class SpecCommandTest {
             .withApiStubs(List.of(target))
             .withModifies(List.of(target))
             .withTestsToUpdate(List.of(test));
-    var body =
-        SpecRenderer.issueBody(
-            spec, List.of(new org.jwcarman.noir.render.StubSource(target, fragment)));
+    var body = SpecRenderer.issueBody(spec, List.of(new StubSource(target, fragment)));
     return write(body);
   }
 
@@ -149,7 +150,7 @@ class SpecCommandTest {
 
     assertThat(run("spec", "check", file.toString(), "--title", "t", "--repo", repo.toString()))
         .isEqualTo(1);
-    assertThat(out.toString()).contains(FOO).doesNotContain("OK");
+    assertThat(out.toString().lines().toList()).anyMatch(l -> l.startsWith(FOO + ": "));
   }
 
   @Test
@@ -164,33 +165,56 @@ class SpecCommandTest {
     assertThat(run("spec", "check", file.toString(), "--title", "t", "--repo", repo.toString()))
         .isEqualTo(1);
     var lines = out.toString().lines().toList();
-    assertThat(lines).anyMatch(l -> l.contains("Gone.java") && !l.contains("GoneTest"));
-    assertThat(lines).anyMatch(l -> l.contains("GoneTest.java"));
+    assertThat(lines)
+        .contains(
+            "API contract: `src/main/java/com/example/Gone.java` (modify) does not exist on the default branch");
+    assertThat(lines)
+        .contains(
+            "Tests to update: `src/test/java/com/example/GoneTest.java` does not exist on the default branch");
   }
 
   @Test
   void repoOptionReportsExistingNewFileStub() throws IOException {
     var repo = cloneRepo();
     var spec = Specs.counter().withApiStubs(List.of(FOO));
-    var file =
-        write(
-            SpecRenderer.issueBody(
-                spec, List.of(new org.jwcarman.noir.render.StubSource(FOO, BASE))));
+    var file = write(SpecRenderer.issueBody(spec, List.of(new StubSource(FOO, BASE))));
 
     assertThat(run("spec", "check", file.toString(), "--title", "t", "--repo", repo.toString()))
         .isEqualTo(1);
-    assertThat(out.toString()).contains(FOO).contains("already exists");
+    assertThat(out.toString().lines().toList())
+        .contains(
+            "API contract: `"
+                + FOO
+                + "` already exists on the default branch; stubs may only add new files");
   }
 
   @Test
   void repoOptionWithoutOriginHeadFails() throws IOException {
     var repo = cloneRepo();
-    org.jwcarman.noir.git.GitFixtures.git(repo, "remote", "set-head", "origin", "-d");
+    GitFixtures.git(repo, "remote", "set-head", "origin", "-d");
     var file = write(cleanBody());
 
     assertThat(run("spec", "check", file.toString(), "--title", "t", "--repo", repo.toString()))
         .isEqualTo(1);
     assertThat(out.toString() + err)
         .contains("origin/HEAD is not set; run `git remote set-head origin --auto`");
+  }
+
+  @Test
+  void repoOptionRejectsNonRepository() throws IOException {
+    var file = write(cleanBody());
+
+    assertThat(
+            run(
+                "spec",
+                "check",
+                file.toString(),
+                "--title",
+                "t",
+                "--repo",
+                tmp.resolve("nope").toString()))
+        .isEqualTo(1);
+    assertThat(out.toString())
+        .isEqualTo("--repo " + tmp.resolve("nope") + " is not a git repository\n");
   }
 }

@@ -24,6 +24,7 @@ import org.jwcarman.noir.lifecycle.SealRejection;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.IssueSpec;
 import org.jwcarman.noir.spec.IssueSpecException;
+import org.jwcarman.noir.spec.RepoProblems;
 import org.jwcarman.noir.spec.SpecJson;
 import org.jwcarman.noir.spec.SpliceException;
 import org.jwcarman.noir.spec.StubSplicer;
@@ -135,8 +136,7 @@ public final class ApprovalSealer implements ApprovalSealing {
       }
       var base = git.show(repoDir, baseSha, stub.path());
       if (base.isEmpty()) {
-        spliceProblems.add(
-            "API contract: `" + stub.path() + "` (modify) does not exist on the default branch");
+        spliceProblems.add(RepoProblems.modifyTargetMissing(stub.path()));
         continue;
       }
       try {
@@ -151,7 +151,7 @@ public final class ApprovalSealer implements ApprovalSealing {
     }
     for (var test : parsed.testsToUpdate()) {
       if (!git.exists(repoDir, baseSha, test)) {
-        spliceProblems.add("Tests to update: `" + test + "` does not exist on the default branch");
+        spliceProblems.add(RepoProblems.testMissing(test));
       }
     }
     if (!spliceProblems.isEmpty()) {

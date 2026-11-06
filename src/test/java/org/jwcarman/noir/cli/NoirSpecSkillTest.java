@@ -217,4 +217,18 @@ class NoirSpecSkillTest {
 
     assertThat(section).contains("ask").containsIgnoringCase("never guess");
   }
+
+  @Test
+  void skillExplainsChangedMemberSemantics() throws IOException {
+    var skill = SkillCommandTest.skillResource();
+
+    assertThat(skill)
+        .contains("keeps its exact current signature")
+        .contains("different parameter list adds an overload")
+        .contains("cannot be removed or renamed")
+        .contains("current body stays in the stub")
+        .contains("only methods and")
+        .contains("add the imports")
+        .contains("conflicts_with_existing_tests");
+  }
 }

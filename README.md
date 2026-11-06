@@ -26,7 +26,12 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    default branch. An optional `## Tests to update` section lists existing
    tests the build may change. **Lock rule:** for every spec, a build may
    change only the files the spec lists (modify targets and tests to update)
-   plus new files; any other change rejects the attempt. Check a spec against
+   plus new files; any other change (including deleting or renaming an allowed
+   file) is a violation and sends the attempt back as a contract-violation
+   rework. In modified files only the changed lines are measured. If the
+   change breaks existing tests that are not listed, sealing is rejected with
+   `conflicts_with_existing_tests`; list those tests under
+   `## Tests to update` and add `noir:ready` again. Check a spec against
    a local clone with `noir spec check <file> --title <t> --repo .`.
 2. **Approve.** A human reviews the issue and adds `noir:ready`. Only humans
    add that label; it is the approval.

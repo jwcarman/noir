@@ -15,6 +15,7 @@ import org.jwcarman.noir.git.GitPort;
 import org.jwcarman.noir.render.SpecRenderer;
 import org.jwcarman.noir.spec.IssueSpec;
 import org.jwcarman.noir.spec.IssueSpecException;
+import org.jwcarman.noir.spec.RepoProblems;
 import org.jwcarman.noir.spec.SpliceException;
 import org.jwcarman.noir.spec.StubSplicer;
 import picocli.CommandLine.Command;
@@ -132,6 +133,9 @@ final class SpecCommand implements Runnable {
   }
 
   private static List<String> checkAgainstRepoWith(GitPort git, Path repo, IssueSpec parsed) {
+    if (!Files.isDirectory(repo.resolve(".git")) && !Files.isRegularFile(repo.resolve(".git"))) {
+      throw new RepoNotReadyException("--repo " + repo + " is not a git repository");
+    }
     String base;
     try {
       base = git.revParse(repo, "origin/HEAD");
@@ -145,21 +149,21 @@ final class SpecCommand implements Runnable {
       if (parsed.modifies().contains(path)) {
         var source = git.show(repo, base, path);
         if (source.isEmpty()) {
-          problems.add("modify target " + path + " does not exist on the default branch");
+          problems.add(RepoProblems.modifyTargetMissing(path));
           continue;
         }
         try {
           StubSplicer.splice(path, source.get(), stub.content());
         } catch (SpliceException e) {
-          problems.add("modify target " + path + ": " + e.getMessage());
+          problems.add(e.getMessage());
         }
       } else if (git.exists(repo, base, path)) {
-        problems.add("API stub " + path + " already exists on the default branch");
+        problems.add(RepoProblems.stubExists(path));
       }
     }
     for (var test : parsed.testsToUpdate()) {
       if (!git.exists(repo, base, test)) {
-        problems.add("test to update " + test + " does not exist on the default branch");
+        problems.add(RepoProblems.testMissing(test));
       }
     }
     return problems;
