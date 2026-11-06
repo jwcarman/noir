@@ -7,7 +7,9 @@
 # Env: HOLDOUT_PKG, TEST_TIMEOUT (e.g. 10s), SUITE_TIMEOUT (e.g. 600s)
 #
 # The container is the sandbox: no network, read-only mounts, unprivileged user. The test JVM itself
-# is not sandboxed (the Security Manager is deprecated and Spring cannot run under a usable policy).
+# is not sandboxed: there is no Security Manager (it is deprecated, and test frameworks that use
+# reflection and class generation cannot run under a usable policy). Builder classes share the test
+# JVM, so a human reviews every PR noir opens.
 set -u
 
 OUT=/work/out

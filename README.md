@@ -54,10 +54,11 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    classes. These guide rework; they are not the gate.
 6. **Grade.** The sealed holdout suite runs in a grader container with no
    network and read-only mounts. noir does not sandbox the test JVM itself:
-   there is no Java Security Manager, and the container is the sandbox. Hidden
-   tests may use JUnit Jupiter, the JDK, and the repository's own test-scope
-   libraries and classes (for example Spring's test slices or Mockito), but not
-   a real server.
+   there is no Java Security Manager, and the container is the sandbox.
+   Builder code runs in the same JVM as the hidden tests and could tamper with
+   the results, so review every PR noir opens. Hidden tests may use JUnit
+   Jupiter, the JDK, and the repository's own test-scope libraries and classes
+   (for example Spring's test slices or Mockito), but not a real server.
    Failures go back to the builder as per-requirement pass counts only —
    never test code — so the agent can't overfit to the test.
 7. **Deliver.** On a pass noir pushes a branch and opens a PR with the
