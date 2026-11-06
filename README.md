@@ -75,7 +75,7 @@ the way, mirrored as `noir:*` labels on the issue (`noir:draft`, `noir:ready`,
 
 ## Requirements
 
-- Java 21 or later and Maven (to build noir)
+- Java 21 or later and Maven (to build noir); JDK 25 to run its Docker integration tests (`-Pdocker`)
 - [`gh`](https://cli.github.com/) authenticated with `repo` scope
 
 The **server** additionally needs Docker (Docker Desktop is fine; give it
@@ -84,6 +84,14 @@ The **server** additionally needs Docker (Docker Desktop is fine; give it
 credential.
 
 Target repositories must be single-module Maven projects whose `maven.compiler.release` is 17 to 25; noir builds and tests them on JDK 25.
+Repositories on an older release still compile and run their tests on JDK 25, which can break a
+build that worked on its own JDK:
+- annotation processors (Lombok, MapStruct, the Spring configuration processor) must be declared in
+  the compiler plugin's `annotationProcessorPaths` or enabled with `-proc:full`; since JDK 23 javac
+  no longer picks them up from the class path;
+- Lombok must be 1.18.40 or later, and Byte Buddy (Mockito's inline mocks) 1.17 or later, which
+  Spring Boot 3.5 and later already use;
+- tests must not install a Security Manager, which JDK 24 and later removed.
 
 ## Quick start
 

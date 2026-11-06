@@ -45,7 +45,7 @@ public record SealInputs(
   static List<String> topLevelTypesOf(Path file) {
     var parser =
         new JavaParser(
-            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
+            new ParserConfiguration().setLanguageLevel(org.jwcarman.noir.spec.JavaSyntax.LEVEL));
     try {
       var cu = parser.parse(Files.readString(file)).getResult();
       if (cu.isEmpty()) {

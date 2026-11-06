@@ -71,7 +71,10 @@ Before asking anything substantive, build a picture of the code the work will li
 - dependencies in `pom.xml`, and formatting plugins (such as Spotless or Checkstyle) that run
   during `mvn compile`; the stubs must pass them.
 
-noir builds single-module Maven projects whose `maven.compiler.release` is 17 to 25; if the repo is anything else, say so and stop.
+noir builds single-module Maven projects whose `maven.compiler.release` is 17 to 25; if the repo is anything else, say so and stop. noir builds every repository on JDK 25: if the repo is on an older release and uses
+annotation processors from the class path (Lombok, MapStruct), Lombok older than 1.18.40, Byte
+Buddy older than 1.17 (Spring Boot before 3.5) or a Security Manager in its tests, warn the user
+that its build may fail on JDK 25 before publishing.
 Keep your summary brief and relevant to the user's request.
 
 ## 4. The conversation

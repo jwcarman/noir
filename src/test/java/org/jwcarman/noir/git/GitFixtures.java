@@ -60,7 +60,6 @@ public final class GitFixtures {
     }
   }
 
-  /** A bare repository at {@code root/<owner>/<repo>.git} with {@code files} committed on main. */
   /** {@link #POM} with {@code maven.compiler.release} set to {@code release}. */
   public static String pomWithRelease(int release) {
     return POM.replace(
@@ -68,6 +67,7 @@ public final class GitFixtures {
         "<maven.compiler.release>" + release + "</maven.compiler.release>");
   }
 
+  /** A bare repository at {@code root/<owner>/<repo>.git} with {@code files} committed on main. */
   public static Path originWithFiles(
       Path root, String ownerRepo, java.util.Map<String, String> files) {
     try {

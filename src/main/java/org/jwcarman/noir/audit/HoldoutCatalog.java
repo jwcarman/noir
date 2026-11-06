@@ -40,7 +40,7 @@ public final class HoldoutCatalog {
     var tags = HoldoutAnalyzer.analyze(spec, holdoutDir, Set.of()).tagsByTest();
     var parser =
         new JavaParser(
-            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
+            new ParserConfiguration().setLanguageLevel(org.jwcarman.noir.spec.JavaSyntax.LEVEL));
     var tests = new ArrayList<HoldoutTest>();
     for (var file : javaFiles(holdoutDir)) {
       String text;

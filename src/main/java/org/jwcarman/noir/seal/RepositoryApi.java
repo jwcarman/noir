@@ -53,7 +53,7 @@ public final class RepositoryApi {
     var words = specWords(spec, contract);
     var parser =
         new JavaParser(
-            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
+            new ParserConfiguration().setLanguageLevel(org.jwcarman.noir.spec.JavaSyntax.LEVEL));
     var named = new ArrayList<String>();
     var rest = new ArrayList<String>();
     int unparsed = 0;

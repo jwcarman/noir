@@ -215,6 +215,27 @@ import java.time.Duration;
             .replace(
                 "<maven.compiler.release>21</maven.compiler.release>",
                 "<maven.compiler.release>25</maven.compiler.release>"));
+    // Java 25 syntax (an unnamed variable) in the builder's own test, compiled for release 25.
+    files.put(
+        "src/test/java/com/example/api/Java25SyntaxTest.java",
+        """
+        package com.example.api;
+
+        import static org.junit.jupiter.api.Assertions.assertEquals;
+
+        import org.junit.jupiter.api.Test;
+
+        class Java25SyntaxTest {
+          @Test
+          void countsWithAnUnnamedVariable() {
+            var c = new Counter();
+            for (var _ : new int[] {1, 2, 3}) {
+              c.increment();
+            }
+            assertEquals(3, c.get());
+          }
+        }
+        """);
     var m = measure(attempt(files));
     assertThat(m.outcome())
         .as(m.artifacts().logTail("build", 80))

@@ -53,7 +53,7 @@ public final class StubLint {
     var path = stub.path();
     var parser =
         new JavaParser(
-            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
+            new ParserConfiguration().setLanguageLevel(org.jwcarman.noir.spec.JavaSyntax.LEVEL));
     var result = parser.parse(stub.content());
     if (!result.isSuccessful() || result.getResult().isEmpty()) {
       problems.add("stub " + path + " does not parse as Java");

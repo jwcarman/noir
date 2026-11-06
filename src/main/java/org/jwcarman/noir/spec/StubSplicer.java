@@ -214,7 +214,7 @@ public final class StubSplicer {
   private static JavaParser parser() {
     return new JavaParser(
         new ParserConfiguration()
-            .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21)
+            .setLanguageLevel(org.jwcarman.noir.spec.JavaSyntax.LEVEL)
             .setTabSize(1));
   }
 

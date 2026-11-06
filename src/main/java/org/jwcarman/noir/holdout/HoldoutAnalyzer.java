@@ -98,7 +98,7 @@ public final class HoldoutAnalyzer {
     var expectedPackage = ItemId.holdoutPackage(spec.id());
     var parser =
         new JavaParser(
-            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
+            new ParserConfiguration().setLanguageLevel(org.jwcarman.noir.spec.JavaSyntax.LEVEL));
     var tagsByTest = new LinkedHashMap<String, Set<String>>();
     int totalTests = 0;
     boolean parseFailure = false;

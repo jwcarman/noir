@@ -62,7 +62,7 @@ public record RepoInventory(
     var applications = new ArrayList<String>();
     var parser =
         new JavaParser(
-            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
+            new ParserConfiguration().setLanguageLevel(org.jwcarman.noir.spec.JavaSyntax.LEVEL));
     for (var source : new TreeMap<>(mainSources).values()) {
       var m = PACKAGE.matcher(source);
       var pkg = m.find() ? m.group(1) : "";

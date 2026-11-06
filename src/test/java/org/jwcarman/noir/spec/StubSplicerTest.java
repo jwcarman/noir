@@ -46,6 +46,20 @@ class StubSplicerTest {
 
   // ---- Adding and changing members ----
 
+  /** A base file using Java 25 syntax (an unnamed variable) still splices. */
+  @Test
+  void baseWithJava25SyntaxSplices() {
+    var base =
+        "package com.example;\n\npublic class Csv {\n  int count(int[] xs) {\n    int n = 0;\n"
+            + "    for (var _ : xs) {\n      n++;\n    }\n    return n;\n  }\n}\n";
+    var frag =
+        "package com.example;\n\npublic class Csv {\n  /** New. */\n  public int one() {\n"
+            + UOE
+            + "  }\n}\n";
+    var result = StubSplicer.splice(PATH, base, frag);
+    assertThat(result.added()).containsExactly("one()");
+  }
+
   @Test
   void addsNewMethodAtEndOfType() {
     var frag =

@@ -305,6 +305,31 @@ class HoldoutAnalyzerTest {
         .isEmpty();
   }
 
+  /** Java 25 syntax (an unnamed variable) parses; noir supports releases up to 25. */
+  @Test
+  void java25SyntaxParses() {
+    source(
+        "Java25Test",
+        """
+        import org.junit.jupiter.api.Tag;
+        import org.junit.jupiter.api.Test;
+
+        class Java25Test {
+          /** R1. */
+          @Test
+          @Tag("R1")
+          void counts() {
+            int n = 0;
+            for (var _ : new int[] {1, 2}) {
+              n++;
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(2, n);
+          }
+        }
+        """);
+    assertThat(analyze().problems()).noneMatch(p -> p.contains("does not parse"));
+  }
+
   private HoldoutReport analyze() {
     return HoldoutAnalyzer.analyze(Specs.valid(), dir, Set.of("com.example.api"));
   }

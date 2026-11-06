@@ -14,6 +14,20 @@ class StubLintTest {
   }
 
   @Test
+  void acceptsJava25Syntax() {
+    assertThat(
+            StubLint.lint(
+                List.of(
+                    stub(
+                        PATH,
+                        "package com.example.api;\n\nimport module java.base;\n\n"
+                            + "public interface Foo {\n  default int f() {\n    int n = 0;\n"
+                            + "    for (var _ : List.of(1)) {\n      n++;\n    }\n"
+                            + "    return n;\n  }\n}\n"))))
+        .isEmpty();
+  }
+
+  @Test
   void acceptsAValidStub() {
     assertThat(StubLint.lint(List.of(stub(PATH, "package com.example.api;\n\ninterface Foo {}\n"))))
         .isEmpty();
