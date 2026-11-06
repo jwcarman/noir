@@ -57,6 +57,11 @@ class RepoMirrorTest {
     public boolean exists(Path repoDir, String sha, String path) {
       throw new UnsupportedOperationException();
     }
+
+    @Override
+    public String diffNoIndex(Path dir, String oldPath, String newPath) {
+      throw new UnsupportedOperationException();
+    }
   }
 
   @Test

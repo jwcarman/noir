@@ -127,6 +127,7 @@ public final class ApprovalSealer implements ApprovalSealing {
     var baseSha = git.revParse(repoDir, "origin/" + branch);
 
     var spliced = new ArrayList<String>();
+    var baseSources = new LinkedHashMap<String, String>();
     var stubs = new ArrayList<StubSource>();
     var spliceProblems = new ArrayList<String>();
     for (var stub : parsed.stubs()) {
@@ -145,6 +146,7 @@ public final class ApprovalSealer implements ApprovalSealing {
                 stub.path(),
                 StubSplicer.splice(stub.path(), base.get(), stub.content()).content()));
         spliced.add(stub.path());
+        baseSources.put(stub.path(), base.get());
       } catch (SpliceException e) {
         spliceProblems.add(e.getMessage());
       }
@@ -189,7 +191,8 @@ public final class ApprovalSealer implements ApprovalSealing {
     var bundle = itemDir.resolve("base.bundle");
     git.bundle(repoDir, baseSha, bundle);
 
-    var examination = suiteSealer.examine(spec, parsed.stubs(), stubs, itemDir, bundle);
+    var examination =
+        suiteSealer.examine(spec, parsed.stubs(), stubs, baseSources, itemDir, bundle);
     if (examination.problems() != null && !examination.conflictingTests().isEmpty()) {
       return reject(
           item,

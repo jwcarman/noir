@@ -360,6 +360,83 @@ class StubSplicerTest {
         .contains("/** C2 */\n  public void take(List<String> items) {}");
   }
 
+  @Test
+  void qualifiedAndSimpleParameterTypesAreTheSameSignature() {
+    var base =
+        """
+        package com.example;
+
+        public class A {
+          /** a */
+          public void f(java.lang.String s) {}
+
+          /** b */
+          public void g(java.util.Map<java.lang.String, java.util.List<java.io.File>>[] m) {}
+
+          /** c */
+          public void h(java.lang.Object... xs) {}
+
+          /** d */
+          public void e(java.util.Map.Entry<String, String> entry) {}
+        }
+        """;
+    var frag =
+        """
+        package com.example;
+
+        import java.io.File;
+        import java.util.List;
+        import java.util.Map;
+
+        public class A {
+          /** A2 */
+          public void f(String s) {
+            throw new UnsupportedOperationException();
+          }
+
+          /** B2 */
+          public void g(Map<String, List<File>>[] m) {
+            throw new UnsupportedOperationException();
+          }
+
+          /** C2 */
+          public void h(Object... xs) {
+            throw new UnsupportedOperationException();
+          }
+
+          /** D2 */
+          public void e(Map.Entry<java.lang.String, String> entry) {
+            throw new UnsupportedOperationException();
+          }
+        }
+        """;
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.added()).isEmpty();
+    assertThat(result.changed())
+        .containsExactly(
+            "f(String)",
+            "g(Map<String, List<File>>[])",
+            "h(Object...)",
+            "e(Map.Entry<java.lang.String, String>)");
+    assertThat(result.content())
+        .contains("/** A2 */\n  public void f(java.lang.String s) {}")
+        .doesNotContain("public void f(String s)");
+  }
+
+  @Test
+  void differentSimpleNamesAreDifferentSignatures() {
+    var base = "package com.example;\n\npublic class A {\n  void f(java.util.List l) {}\n}\n";
+    var frag =
+        "package com.example;\n\npublic class A {\n  void f(java.awt.Point p) {\n"
+            + "    throw new UnsupportedOperationException();\n  }\n}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.added()).containsExactly("f(java.awt.Point)");
+  }
+
   // ---- Comments around members (fix round 1) ----
 
   @Test

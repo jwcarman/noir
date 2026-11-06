@@ -35,6 +35,11 @@ public record LocalOriginGit(GitCli cli, Path origin) implements GitPort {
   }
 
   @Override
+  public String diffNoIndex(Path dir, String oldPath, String newPath) {
+    return cli.diffNoIndex(dir, oldPath, newPath);
+  }
+
+  @Override
   public void cloneRepo(String repo, Path dir) {
     GitFixtures.cloneOf(origin, dir);
   }

@@ -18,4 +18,19 @@ public class Counter {
   public void decrement() {
     count--;
   }
+
+  /** Whether the count is above {@code limit}. */
+  public boolean isAbove(int limit) {
+    return count > limit;
+  }
+
+  /** Returns the count doubled. */
+  public int doubled() {
+    return count * 2;
+  }
+
+  /** Returns the count halved, rounding toward zero. */
+  public int halved() {
+    return count / 2;
+  }
 }

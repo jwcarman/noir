@@ -76,32 +76,35 @@ public final class PullRequestBody {
   }
 
   /**
-   * Grouped Added, Modified, Tests updated; path order within each group. Deleted files are never
-   * listed (the lock check forbids deleting files). Omitted when nothing qualifies.
+   * Grouped Added, Modified, Deleted, Renamed, Tests updated; path order within each group. A draft
+   * pull request after a lock-check failure can delete or rename files, so those are listed too. A
+   * listed test that was modified goes under Tests updated. Omitted when there are no files.
    */
   private static void files(StringBuilder sb, List<FileChange> files, List<String> testsToUpdate) {
     var added = new ArrayList<String>();
     var modified = new ArrayList<String>();
+    var deleted = new ArrayList<String>();
+    var renamed = new ArrayList<String>();
     var tests = new ArrayList<String>();
     for (var f : files) {
-      if (f.status() == FileChange.Status.DELETED) {
-        continue;
-      }
       var entry = "`" + line(f.path()) + "` (" + counts(f) + ")";
-      if (testsToUpdate.contains(f.path())) {
-        tests.add(entry);
-      } else if (f.status() == FileChange.Status.ADDED) {
-        added.add(entry);
-      } else {
-        modified.add(entry);
+      switch (f.status()) {
+        case DELETED -> deleted.add("`" + line(f.path()) + "`");
+        case RENAMED ->
+            renamed.add(
+                "`" + line(f.oldPath()) + "` \u2192 `" + line(f.path()) + "` (" + counts(f) + ")");
+        case ADDED -> (testsToUpdate.contains(f.path()) ? tests : added).add(entry);
+        case MODIFIED -> (testsToUpdate.contains(f.path()) ? tests : modified).add(entry);
       }
     }
-    if (added.isEmpty() && modified.isEmpty() && tests.isEmpty()) {
+    if (files.isEmpty()) {
       return;
     }
     sb.append("\n### Files\n\n");
     added.forEach(e -> sb.append("- Added: ").append(e).append('\n'));
     modified.forEach(e -> sb.append("- Modified: ").append(e).append('\n'));
+    deleted.forEach(e -> sb.append("- Deleted: ").append(e).append('\n'));
+    renamed.forEach(e -> sb.append("- Renamed: ").append(e).append('\n'));
     tests.forEach(e -> sb.append("- Tests updated: ").append(e).append('\n'));
   }
 

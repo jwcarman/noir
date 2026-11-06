@@ -30,22 +30,31 @@ public record SealInputs(
   }
 
   static List<String> topLevelTypes(Path dir) {
-    var parser =
-        new JavaParser(
-            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
     var names = new ArrayList<String>();
     try (var files = Files.walk(dir)) {
       for (var file : files.filter(p -> p.toString().endsWith(".java")).sorted().toList()) {
-        var cu = parser.parse(Files.readString(file)).getResult();
-        if (cu.isEmpty()) {
-          continue;
-        }
-        var pkg = cu.get().getPackageDeclaration().map(p -> p.getNameAsString() + ".").orElse("");
-        cu.get().getTypes().forEach(t -> names.add(pkg + t.getNameAsString()));
+        names.addAll(topLevelTypesOf(file));
       }
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
     return names;
+  }
+
+  /** The fully qualified top-level types one source file declares; empty if it does not parse. */
+  static List<String> topLevelTypesOf(Path file) {
+    var parser =
+        new JavaParser(
+            new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21));
+    try {
+      var cu = parser.parse(Files.readString(file)).getResult();
+      if (cu.isEmpty()) {
+        return List.of();
+      }
+      var pkg = cu.get().getPackageDeclaration().map(p -> p.getNameAsString() + ".").orElse("");
+      return cu.get().getTypes().stream().map(t -> pkg + t.getNameAsString()).toList();
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 }

@@ -16,6 +16,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiFunction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,8 +28,11 @@ import org.jwcarman.noir.agent.AgentResult;
 import org.jwcarman.noir.agent.ScriptedAgent;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.DockerException;
+import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.factory.InfraFailure;
 import org.jwcarman.noir.factory.Retry;
+import org.jwcarman.noir.git.GitCli;
+import org.jwcarman.noir.git.GitPort;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.ItemId;
 import org.jwcarman.noir.spec.Spec;
@@ -37,6 +41,7 @@ import org.jwcarman.noir.store.Event;
 import org.jwcarman.noir.store.Store;
 
 class SuiteSealerTest {
+  static final GitPort GIT = new GitCli(new ProcessCommandRunner());
   static final String ID = Specs.ID;
   static final String GOOD_TEST =
       "package "
@@ -97,6 +102,7 @@ class SuiteSealerTest {
             store,
             new Examiner(agent, NoirConfig.defaults()),
             checks,
+            GIT,
             NoirConfig.defaults(),
             clock,
             retry());
@@ -117,7 +123,7 @@ class SuiteSealerTest {
   }
 
   SuiteSealer.Examination examine() {
-    return suiteSealer.examine(spec, List.of(STUB), List.of(STUB), itemDir, bundle);
+    return suiteSealer.examine(spec, List.of(STUB), List.of(STUB), Map.of(), itemDir, bundle);
   }
 
   @Test
@@ -196,10 +202,11 @@ class SuiteSealerTest {
             store,
             new Examiner(flaky, NoirConfig.defaults()),
             checks,
+            GIT,
             NoirConfig.defaults(),
             clock,
             retry());
-    var e = s.examine(spec, List.of(STUB), List.of(STUB), itemDir, bundle);
+    var e = s.examine(spec, List.of(STUB), List.of(STUB), Map.of(), itemDir, bundle);
     assertThat(e.problems()).isNull();
     assertThat(flaky.calls).isEqualTo(2);
     assertThat(store.readEvents(itemDir))
@@ -254,16 +261,123 @@ class SuiteSealerTest {
             store,
             new Examiner(failing, NoirConfig.defaults()),
             (in, out) -> SealArtifactsFixture.good(out),
+            GIT,
             NoirConfig.defaults(),
             Clock.systemUTC(),
             retry());
-    assertThatThrownBy(() -> s.examine(spec, List.of(STUB), List.of(STUB), itemDir, bundle))
+    assertThatThrownBy(
+            () -> s.examine(spec, List.of(STUB), List.of(STUB), Map.of(), itemDir, bundle))
         .isInstanceOf(ExaminerFailedException.class)
         .hasMessage("Examiner agent failed: Invalid API key · Fix external API key");
     assertThat(failing.calls).isEqualTo(1);
     assertThat(itemDir.resolve("examiner/attempt-1/agent.log"))
         .content()
         .contains("Invalid API key");
+  }
+
+  @Test
+  void referenceFileOutsideTheStubPathsIsFedBackWithoutRunningChecks() {
+    var strays = new ArrayDeque<>(List.of("src/main/java/com/example/api/Helper.java"));
+    var a =
+        new ScriptedAgent((n, work) -> {
+          write(work.resolve("out/holdout/noir/holdout/T.java"), GOOD_TEST);
+          write(
+              work.resolve("out/reference/src/main/java/com/example/api/Foo.java"),
+              "package com.example.api;\npublic interface Foo {}\n");
+          var stray = strays.poll();
+          if (stray != null) {
+            write(work.resolve("out/reference/" + stray), "package com.example.api;\nclass H {}\n");
+          }
+        });
+    var s =
+        new SuiteSealer(
+            store,
+            new Examiner(a, NoirConfig.defaults()),
+            checks,
+            GIT,
+            NoirConfig.defaults(),
+            clock,
+            retry());
+
+    var e = s.examine(spec, List.of(STUB), List.of(STUB), Map.of(), itemDir, bundle);
+
+    assertThat(e.problems()).isNull();
+    assertThat(a.requests()).hasSize(2);
+    assertThat(a.requests().get(1).prompt())
+        .contains(
+            "reference file not at an API stub path: src/main/java/com/example/api/Helper.java");
+    assertThat(checkCalls).hasSize(1);
+  }
+
+  static final String FOO_BASE =
+      "package com.example.api;\n\n/** A foo. */\npublic class Foo {\n"
+          + "  public int a() {\n    return 1;\n  }\n}\n";
+  static final String FOO_REFERENCE =
+      "package com.example.api;\n\n/** A foo. */\npublic class Foo {\n"
+          + "  public int a() {\n    return 1;\n  }\n\n"
+          + "  public int b() {\n    return 2;\n  }\n}\n";
+
+  static String mutant(String cls, int line, boolean detected) {
+    return "<mutation detected='"
+        + detected
+        + "'><mutatedClass>"
+        + cls
+        + "</mutatedClass><lineNumber>"
+        + line
+        + "</lineNumber></mutation>";
+  }
+
+  /**
+   * A suite sealer for a spec that modifies Foo: the reference adds b() (line 10 returns 2), and
+   * PIT reports five surviving mutants on a() (line 6, unchanged) plus {@code changedLineMutant}.
+   */
+  SuiteSealer.Examination examineModifiedFoo(String changedLineMutant) {
+    var a =
+        new ScriptedAgent((n, work) -> {
+          write(work.resolve("out/holdout/noir/holdout/T.java"), GOOD_TEST);
+          write(work.resolve("out/reference/" + STUB.path()), FOO_REFERENCE);
+        });
+    SealCheckRunner pit =
+        (in, out) -> {
+          checkCalls.add(in);
+          var artifacts = SealArtifactsFixture.good(out);
+          var mutants = new StringBuilder("<mutations>");
+          for (int i = 0; i < 5; i++) {
+            mutants.append(mutant("com.example.api.Foo", 6, false));
+          }
+          mutants.append(changedLineMutant).append("</mutations>");
+          write(out.resolve("pit/mutations.xml"), mutants.toString());
+          return artifacts;
+        };
+    var s =
+        new SuiteSealer(
+            store,
+            new Examiner(a, NoirConfig.defaults()),
+            pit,
+            GIT,
+            NoirConfig.defaults(),
+            clock,
+            retry());
+    var modifySpec = spec.withModifies(List.of(STUB.path()));
+    return s.examine(
+        modifySpec, List.of(STUB), List.of(STUB), Map.of(STUB.path(), FOO_BASE), itemDir, bundle);
+  }
+
+  @Test
+  void modifyTargetIsScoredOnLinesTheReferenceChanged() {
+    var e = examineModifiedFoo(mutant("com.example.api.Foo", 10, true));
+    assertThat(e.problems()).isNull();
+    assertThat(checkCalls).hasSize(1);
+    assertThat(checkCalls.getFirst().targetClasses()).containsExactly("com.example.api.Foo");
+  }
+
+  @Test
+  void survivingMutantOnAChangedLineStillFailsTheModifyTarget() {
+    var e = examineModifiedFoo(mutant("com.example.api.Foo", 10, false));
+    assertThat(e.problems())
+        .containsExactly(
+            "holdout tests are not discriminating enough: mutation score 0.00 < 0.70"
+                + " (0 of 1 mutants killed)");
   }
 
   @Test

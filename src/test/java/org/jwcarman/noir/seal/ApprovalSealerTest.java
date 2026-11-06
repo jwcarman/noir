@@ -68,6 +68,8 @@ class ApprovalSealerTest {
   Store store;
   FakeGitHub github;
   GitCli gitCli;
+  String referencePath = "src/main/java/com/example/api/Foo.java";
+  String referenceSource = "package com.example.api;\npublic interface Foo {}\n";
   Path origin;
   List<String> clones;
   Deque<BiFunction<SealInputs, Path, SealArtifacts>> checkResults;
@@ -88,9 +90,7 @@ class ApprovalSealerTest {
     agent =
         new ScriptedAgent((n, work) -> {
           write(work.resolve("out/holdout/noir/holdout/T.java"), GOOD_TEST);
-          write(
-              work.resolve("out/reference/src/main/java/com/example/api/Foo.java"),
-              "package com.example.api;\npublic interface Foo {}\n");
+          write(work.resolve("out/reference/" + referencePath), referenceSource);
         });
     SealCheckRunner checks =
         (inputs, out) ->
@@ -110,6 +110,7 @@ class ApprovalSealerTest {
                 store,
                 new Examiner(agent, config),
                 checks,
+                git,
                 config,
                 clock,
                 Retry.forConfig(config, d -> {})),
@@ -156,6 +157,11 @@ class ApprovalSealerTest {
     @Override
     public boolean exists(Path repoDir, String sha, String path) {
       return gitCli.exists(repoDir, sha, path);
+    }
+
+    @Override
+    public String diffNoIndex(Path dir, String oldPath, String newPath) {
+      return gitCli.diffNoIndex(dir, oldPath, newPath);
     }
   }
 
@@ -535,13 +541,13 @@ class ApprovalSealerTest {
     assertThat(ApprovalComments.invalidSpec(List.of("a", "b")))
         .isEqualTo(
             "noir could not read this issue as a spec:\n\n- a\n- b\n\nFix the issue body (`noir"
-                + " spec check --issue <repo>#<n>` shows the same list), then add `noir:ready`"
-                + " again.");
+                + " spec check --issue <repo>#<n> --repo <clone>` shows the same list), then add"
+                + " `noir:ready` again.");
     assertThat(ApprovalComments.stubExists(List.of("x/A.java")))
         .isEqualTo(
             "noir did not seal this issue: these API stub files already exist on the default"
-                + " branch:\n\n- x/A.java\n\nStubs may only add new files. Revise the spec, then"
-                + " add `noir:ready` again.");
+                + " branch:\n\n- x/A.java\n\nStubs may only add new files; change an existing"
+                + " file with a `(modify)` entry. Revise the spec, then add `noir:ready` again.");
     assertThat(ApprovalComments.suiteTooWeak(3, List.of("p", "q")))
         .isEqualTo(
             "noir could not produce a hidden test suite that passes its checks after 3"
@@ -593,10 +599,20 @@ class ApprovalSealerTest {
   void modifySpecSplicesAgainstBaseAndStoresBoth() {
     commitToOrigin(CSV, CSV_BASE);
     openModifyIssue(modifySpec(), CSV_FRAGMENT);
+    referencePath = CSV;
+    referenceSource =
+        CSV_BASE.replace(
+            "  }\n}\n",
+            "  }\n\n  public static String[] split(String line, char delimiter) {\n"
+                + "    return line.split(java.util.regex.Pattern.quote(String.valueOf(delimiter)));"
+                + "\n  }\n}\n");
 
     var outcome = sealer.seal(item);
 
     assertThat(outcome).isInstanceOf(SealOutcome.Passed.class);
+    // The suite sealer diffed the reference against the base content sealing read.
+    assertThat(itemDir().resolve("examiner/attempt-1/changed-lines/1/base.java"))
+        .hasContent(CSV_BASE);
     var spliced = StubSplicer.splice(CSV, CSV_BASE, CSV_FRAGMENT).content();
     assertThat(spliced).contains("line.split(\",\")").contains("char delimiter");
     assertThat(itemDir().resolve("stubs").resolve(CSV)).hasContent(spliced);

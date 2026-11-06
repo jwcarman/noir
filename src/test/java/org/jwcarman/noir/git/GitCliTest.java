@@ -190,4 +190,56 @@ class GitCliTest {
     assertThat(g.exists(p, "abc", "no")).isFalse();
     assertThatThrownBy(() -> g.exists(p, "abc", "err")).isInstanceOf(GitException.class);
   }
+
+  @Test
+  void diffNoIndexGivesTheChangedLines(@TempDir Path tmp) throws Exception {
+    Files.writeString(tmp.resolve("base.java"), "a\nb\nc\n");
+    Files.writeString(tmp.resolve("reference.java"), "a\nB\nc\nd\n");
+    var diff = gitPort.diffNoIndex(tmp, "base.java", "reference.java");
+    assertThat(diff).contains("+++ b/reference.java");
+    assertThat(org.jwcarman.noir.measure.DiffLines.added(diff, java.util.Set.of("reference.java")))
+        .containsEntry("reference.java", java.util.Set.of(2, 4));
+  }
+
+  @Test
+  void diffNoIndexOfEqualFilesIsEmpty(@TempDir Path tmp) throws Exception {
+    Files.writeString(tmp.resolve("base.java"), "a\n");
+    Files.writeString(tmp.resolve("reference.java"), "a\n");
+    assertThat(gitPort.diffNoIndex(tmp, "base.java", "reference.java")).isEmpty();
+  }
+
+  @Test
+  void diffNoIndexOfAMissingFileThrows(@TempDir Path tmp) throws Exception {
+    // git exits 1 for a file it cannot read, as it does for a difference, but prints no diff.
+    Files.writeString(tmp.resolve("base.java"), "a\n");
+    assertThatThrownBy(() -> gitPort.diffNoIndex(tmp, "base.java", "missing.java"))
+        .isInstanceOf(GitException.class)
+        .hasMessageContaining("Could not access");
+  }
+
+  @Test
+  void diffNoIndexIgnoresUserPrefixAndExternalDiffConfig() {
+    var runner =
+        new org.jwcarman.noir.exec.FakeCommandRunner()
+            .whenArgvStartsWith(
+                java.util.List.of("git"),
+                new org.jwcarman.noir.exec.CommandResult(1, "diff --git x", "", false, false));
+    new GitCli(runner).diffNoIndex(Path.of("/d"), "o", "n");
+    assertThat(runner.commands().getFirst().argv())
+        .containsExactly(
+            "git",
+            "-C",
+            "/d",
+            "diff",
+            "--no-index",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "-U0",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--",
+            "o",
+            "n");
+  }
 }

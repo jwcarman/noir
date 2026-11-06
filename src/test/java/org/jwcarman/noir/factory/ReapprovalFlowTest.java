@@ -97,6 +97,7 @@ class ReapprovalFlowTest {
                 store,
                 new Examiner(examiner, config),
                 checks,
+                git,
                 config,
                 clock,
                 Retry.forConfig(config, d -> {})),

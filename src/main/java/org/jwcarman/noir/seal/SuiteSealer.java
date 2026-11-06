@@ -1,18 +1,26 @@
 package org.jwcarman.noir.seal;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 import org.jwcarman.noir.commit.SealedFileException;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.factory.Retry;
+import org.jwcarman.noir.git.GitPort;
 import org.jwcarman.noir.holdout.HoldoutAnalyzer;
+import org.jwcarman.noir.measure.DiffLines;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.Spec;
 import org.jwcarman.noir.store.Event;
@@ -28,11 +36,18 @@ import org.jwcarman.noir.store.Store;
  * this throws {@link org.jwcarman.noir.factory.InfraFailure}, which the factory blocks on.
  */
 public final class SuiteSealer {
+  /** Prefix of the problem for a reference file outside the API stub paths. */
+  static final String STRAY_REFERENCE = "reference file not at an API stub path: ";
+
+  private static final String BASE_FILE = "base.java";
+  private static final String REFERENCE_FILE = "reference.java";
+
   private static final Pattern PACKAGE = Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
 
   private final Store store;
   private final Examiner examiner;
   private final SealCheckRunner checks;
+  private final GitPort git;
   private final NoirConfig config;
   private final Clock clock;
   private final Retry retry;
@@ -41,12 +56,14 @@ public final class SuiteSealer {
       Store store,
       Examiner examiner,
       SealCheckRunner checks,
+      GitPort git,
       NoirConfig config,
       Clock clock,
       Retry retry) {
     this.store = store;
     this.examiner = examiner;
     this.checks = checks;
+    this.git = git;
     this.config = config;
     this.clock = clock;
     this.retry = retry;
@@ -65,10 +82,16 @@ public final class SuiteSealer {
 
   /**
    * Examines the spec: {@code contract} is the issue view (fragments for modify targets) shown to
-   * the Examiner, {@code stubs} the complete files.
+   * the Examiner, {@code stubs} the complete files, and {@code baseSources} each modify target's
+   * content at the base commit, keyed by path (empty for a spec that modifies nothing).
    */
   public Examination examine(
-      Spec spec, List<StubSource> contract, List<StubSource> stubs, Path itemDir, Path bundle) {
+      Spec spec,
+      List<StubSource> contract,
+      List<StubSource> stubs,
+      Map<String, String> baseSources,
+      Path itemDir,
+      Path bundle) {
     var stubPackages = stubPackages(stubs);
     List<String> problems = List.of();
     for (int attempt = 1; attempt <= config.examiner().attempts(); attempt++) {
@@ -79,7 +102,7 @@ public final class SuiteSealer {
         out =
             retry.call(
                 () -> examiner.attempt(spec, contract, stubs, previous, attemptDir, itemDir));
-        problems = checkSuite(spec, itemDir, bundle, stubPackages, out, attemptDir);
+        problems = checkSuite(spec, baseSources, itemDir, bundle, stubPackages, out, attemptDir);
       } catch (SealedFileException e) {
         out = null;
         problems = List.of(e.getMessage());
@@ -105,20 +128,71 @@ public final class SuiteSealer {
 
   private List<String> checkSuite(
       Spec spec,
+      Map<String, String> baseSources,
       Path itemDir,
       Path bundle,
       Set<String> stubPackages,
       ExaminerOutput out,
       Path attemptDir) {
-    var problems =
-        new ArrayList<>(HoldoutAnalyzer.analyze(spec, out.holdoutDir(), stubPackages).problems());
+    var problems = new ArrayList<>(strayReferenceFiles(spec, out.referenceDir()));
+    problems.addAll(HoldoutAnalyzer.analyze(spec, out.holdoutDir(), stubPackages).problems());
     if (!problems.isEmpty()) {
       return problems;
     }
+    var changedLines =
+        changedLinesByClass(baseSources, out.referenceDir(), attemptDir.resolve("changed-lines"));
     var inputs =
         SealInputs.of(spec, bundle, itemDir.resolve("stubs"), out.holdoutDir(), out.referenceDir());
     var artifacts = retry.call(() -> checks.run(inputs, attemptDir.resolve("checks")));
-    return SealJudge.judge(artifacts, config.sealDiscrimination());
+    return SealJudge.judge(artifacts, config.sealDiscrimination(), changedLines);
+  }
+
+  /** A problem for each reference {@code .java} file whose path is not one of the API stubs. */
+  static List<String> strayReferenceFiles(Spec spec, Path referenceDir) {
+    var allowed = Set.copyOf(spec.apiStubs());
+    var problems = new ArrayList<String>();
+    try (var paths = Files.walk(referenceDir)) {
+      for (var p : paths.filter(Files::isRegularFile).sorted().toList()) {
+        var rel = referenceDir.relativize(p).toString().replace('\\', '/');
+        if (rel.endsWith(".java") && !allowed.contains(rel)) {
+          problems.add(STRAY_REFERENCE + rel);
+        }
+      }
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+    return problems;
+  }
+
+  /**
+   * The lines the reference added or changed in each modify target, against its base content, keyed
+   * by each top-level type the reference file declares. A target the reference does not contain is
+   * left out (it is not mutated); one it left unchanged maps to no lines.
+   */
+  private Map<String, Set<Integer>> changedLinesByClass(
+      Map<String, String> baseSources, Path referenceDir, Path workDir) {
+    var byClass = new LinkedHashMap<String, Set<Integer>>();
+    int n = 0;
+    for (var entry : baseSources.entrySet()) {
+      var reference = referenceDir.resolve(entry.getKey());
+      if (!Files.isRegularFile(reference, LinkOption.NOFOLLOW_LINKS)) {
+        continue;
+      }
+      var dir = workDir.resolve(String.valueOf(++n));
+      try {
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve(BASE_FILE), entry.getValue());
+        Files.copy(reference, dir.resolve(REFERENCE_FILE), StandardCopyOption.REPLACE_EXISTING);
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+      var diff = git.diffNoIndex(dir, BASE_FILE, REFERENCE_FILE);
+      var lines = DiffLines.added(diff, Set.of(REFERENCE_FILE)).get(REFERENCE_FILE);
+      for (var type : SealInputs.topLevelTypesOf(reference)) {
+        byClass.put(type, lines);
+      }
+    }
+    return byClass;
   }
 
   /** The classes named by check-4 problems, when every problem is one; empty otherwise. */

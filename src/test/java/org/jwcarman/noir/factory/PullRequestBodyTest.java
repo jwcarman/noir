@@ -148,13 +148,20 @@ class PullRequestBodyTest {
 
             - Added: `src/Helper.java` (+40)
             - Modified: `src/Calc.java` (+12 \u22123)
-            - Modified: `src/New.java` (+1 \u22121)
+            - Deleted: `src/Gone.java`
+            - Renamed: `src/Old.java` \u2192 `src/New.java` (+1 \u22121)
             - Tests updated: `src/CalcTest.java` (+2 \u22122)
 
             ### Provenance
-            """)
-        .doesNotContain("Gone");
+            """);
     assertThat(body.indexOf("### Files")).isGreaterThan(body.indexOf("### Holdout results"));
+  }
+
+  @Test
+  void deletedOnlyStillRendersFilesSection() {
+    var files = List.of(new FileChange(FileChange.Status.DELETED, "src/Gone.java", null, 0, 9));
+    var body = PullRequestBody.render(1, Optional.empty(), RESULTS, PROV, files, List.of(), true);
+    assertThat(body).contains("### Files\n\n- Deleted: `src/Gone.java`\n\n### Provenance");
   }
 
   @Test

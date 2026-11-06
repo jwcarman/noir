@@ -11,12 +11,23 @@ import org.jwcarman.noir.spec.Spec;
 
 /**
  * Rejects an attempt that changes an existing file the spec does not allow. Only the files in
- * {@code modifies} and {@code testsToUpdate} may be modified, and none may be deleted or renamed;
- * new files are always allowed. Applies to every spec.
+ * {@code modifies} and {@code testsToUpdate} may be modified, and none may be deleted or renamed.
+ * New files are allowed, except build and test-runtime configuration that could stop locked tests
+ * from failing the build ({@code .mvn/**}, {@code src/test/resources/junit-platform.properties} and
+ * {@code src/test/resources/META-INF/services/**}). Applies to every spec.
  */
 final class LockCheck {
 
+  private static final String TEST_RESOURCES = "src/test/resources/";
+
   private LockCheck() {}
+
+  /** An added file that could change how Maven or JUnit runs the locked tests. */
+  static boolean lockedNewFile(String path) {
+    return path.startsWith(".mvn/")
+        || path.equals(TEST_RESOURCES + "junit-platform.properties")
+        || path.startsWith(TEST_RESOURCES + "META-INF/services/");
+  }
 
   /** The builder feedback for the locked files the attempt changed, or empty if it changed none. */
   static Optional<String> violation(Spec spec, List<FileChange> changes) {
@@ -24,10 +35,15 @@ final class LockCheck {
     allowed.addAll(spec.modifies());
     allowed.addAll(spec.testsToUpdate());
     var modified = new ArrayList<String>();
+    var added = new ArrayList<String>();
     var deleted = new ArrayList<String>();
     for (var c : changes) {
       switch (c.status()) {
-        case ADDED -> {}
+        case ADDED -> {
+          if (lockedNewFile(c.path())) {
+            added.add(c.path());
+          }
+        }
         case MODIFIED -> {
           if (!allowed.contains(c.path())) {
             modified.add(c.path());
@@ -37,17 +53,22 @@ final class LockCheck {
         case RENAMED -> deleted.add(c.oldPath());
       }
     }
-    if (modified.isEmpty() && deleted.isEmpty()) {
+    if (modified.isEmpty() && added.isEmpty() && deleted.isEmpty()) {
       return Optional.empty();
     }
     var clauses = new ArrayList<String>();
     if (!modified.isEmpty()) {
       clauses.add("modified " + list(modified));
     }
+    if (!added.isEmpty()) {
+      clauses.add("added " + list(added));
+    }
     if (!deleted.isEmpty()) {
       clauses.add("deleted " + list(deleted));
     }
-    var sb = new StringBuilder("You ").append(String.join(" and ", clauses)).append(". ");
+    var last = clauses.removeLast();
+    var joined = clauses.isEmpty() ? last : String.join(", ", clauses) + " and " + last;
+    var sb = new StringBuilder("You ").append(joined).append(". ");
     sb.append("This spec allows changes only to: ");
     sb.append(allowed.isEmpty() ? "new files" : list(allowed) + ", and new files");
     sb.append(". Restore those files and make the change another way.");

@@ -82,6 +82,66 @@ class LockCheckTest {
   }
 
   @Test
+  void addedMavenConfigIsAViolation() {
+    // Path-based: a .mvn/maven.config with -Dmaven.test.failure.ignore=true or -Dtest=!CsvTest
+    // would let locked tests fail while mvn verify exits 0, whatever its content.
+    assertThat(LockCheck.violation(csv, List.of(change(Status.ADDED, ".mvn/maven.config"))))
+        .hasValueSatisfying(t -> assertThat(t).startsWith("You added `.mvn/maven.config`."));
+    assertThat(LockCheck.violation(csv, List.of(change(Status.ADDED, ".mvn/jvm.config"))))
+        .isPresent();
+    assertThat(LockCheck.violation(csv, List.of(change(Status.ADDED, ".mvn/extensions/x/ext.xml"))))
+        .isPresent();
+  }
+
+  @Test
+  void addedTestRuntimeConfigIsAViolation() {
+    assertThat(
+            LockCheck.violation(
+                csv, List.of(change(Status.ADDED, "src/test/resources/junit-platform.properties"))))
+        .hasValueSatisfying(t ->
+            assertThat(t).startsWith("You added `src/test/resources/junit-platform.properties`."));
+    assertThat(
+            LockCheck.violation(
+                csv,
+                List.of(
+                    change(
+                        Status.ADDED,
+                        "src/test/resources/META-INF/services/"
+                            + "org.junit.platform.launcher.PostDiscoveryFilter"))))
+        .isPresent();
+  }
+
+  @Test
+  void otherAddedResourcesAreAllowed() {
+    assertThat(
+            LockCheck.violation(
+                csv,
+                List.of(
+                    change(Status.ADDED, "src/test/resources/data.csv"),
+                    change(Status.ADDED, "src/main/resources/junit-platform.properties"),
+                    change(Status.ADDED, "src/test/java/META-INF/services/x"),
+                    change(Status.ADDED, "docs/.mvn/notes.md"))))
+        .isEmpty();
+  }
+
+  @Test
+  void feedbackTextWithAllThreeClausesIsExact() {
+    var s = spec(List.of("A.java"), List.of());
+    var text =
+        LockCheck.violation(
+            s,
+            List.of(
+                change(Status.MODIFIED, "pom.xml"),
+                change(Status.ADDED, ".mvn/maven.config"),
+                change(Status.DELETED, "B.java")));
+    assertThat(text)
+        .contains(
+            "You modified `pom.xml`, added `.mvn/maven.config` and deleted `B.java`. This spec"
+                + " allows changes only to: `A.java`, and new files. Restore those files and make"
+                + " the change another way.");
+  }
+
+  @Test
   void pomIsLocked() {
     assertThat(LockCheck.violation(csv, List.of(change(Status.MODIFIED, "pom.xml"))))
         .hasValueSatisfying(t -> assertThat(t).contains("`pom.xml`"));

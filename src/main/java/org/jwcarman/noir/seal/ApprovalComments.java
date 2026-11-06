@@ -18,7 +18,8 @@ public final class ApprovalComments {
   public static String invalidSpec(List<String> problems) {
     return "noir could not read this issue as a spec:\n\n"
         + bullets(problems)
-        + "\nFix the issue body (`noir spec check --issue <repo>#<n>` shows the same list), then "
+        + "\nFix the issue body (`noir spec check --issue <repo>#<n> --repo <clone>` shows the same"
+        + " list), then "
         + READY_AGAIN;
   }
 
@@ -26,7 +27,8 @@ public final class ApprovalComments {
     return "noir did not seal this issue: these API stub files already exist on the default"
         + " branch:\n\n"
         + bullets(paths)
-        + "\nStubs may only add new files. Revise the spec, then "
+        + "\nStubs may only add new files; change an existing file with a `(modify)` entry."
+        + " Revise the spec, then "
         + READY_AGAIN;
   }
 

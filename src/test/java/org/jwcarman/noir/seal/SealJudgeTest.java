@@ -160,6 +160,92 @@ class SealJudgeTest {
         .containsExactly("mutation testing produced no mutants:\nPIT >> SEVERE : no tests");
   }
 
+  static final String COUNTER = "com.example.api.Counter";
+
+  /** One PIT mutant: its mutated class, source line and whether a test detected it. */
+  static String mutant(String cls, int line, boolean detected) {
+    return "<mutation detected='"
+        + detected
+        + "'><mutatedClass>"
+        + cls
+        + "</mutatedClass><lineNumber>"
+        + line
+        + "</lineNumber></mutation>";
+  }
+
+  void pitMutants(String... mutants) {
+    file("pit/mutations.xml", "<mutations>" + String.join("", mutants) + "</mutations>");
+  }
+
+  java.util.List<String> judge(java.util.Map<String, java.util.Set<Integer>> changed) {
+    return SealJudge.judge(new SealArtifacts(out), 0.70, changed);
+  }
+
+  /**
+   * Ten surviving mutants on untouched lines of the modify target, and every changed one killed.
+   */
+  @Test
+  void modifyTargetIsScoredOnChangedLinesOnly() {
+    var mutants = new java.util.ArrayList<String>();
+    for (int i = 0; i < 10; i++) {
+      mutants.add(mutant(COUNTER, 5 + i, false));
+    }
+    mutants.add(mutant(COUNTER, 30, true));
+    mutants.add(mutant(COUNTER + "$Inner", 31, true));
+    pitMutants(mutants.toArray(String[]::new));
+
+    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of(30, 31)))).isEmpty();
+    // Scored whole, the same report fails.
+    assertThat(judge())
+        .containsExactly(
+            "holdout tests are not discriminating enough: mutation score 0.17 < 0.70"
+                + " (2 of 12 mutants killed)");
+  }
+
+  @Test
+  void survivingChangedLineMutantStillCounts() {
+    pitMutants(
+        mutant(COUNTER, 5, false),
+        mutant(COUNTER, 30, true),
+        mutant(COUNTER, 31, false),
+        mutant("com.example.api.Helper", 3, true));
+
+    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of(30, 31))))
+        .containsExactly(
+            "holdout tests are not discriminating enough: mutation score 0.67 < 0.70"
+                + " (2 of 3 mutants killed)");
+  }
+
+  @Test
+  void newFileClassesAreStillScoredWhole() {
+    pitMutants(
+        mutant(COUNTER, 30, true),
+        mutant("com.example.api.Helper", 3, true),
+        mutant("com.example.api.Helper", 4, false),
+        mutant("com.example.api.Helper$1", 9, false));
+
+    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of(30))))
+        .containsExactly(
+            "holdout tests are not discriminating enough: mutation score 0.50 < 0.70"
+                + " (2 of 4 mutants killed)");
+  }
+
+  @Test
+  void modifyTargetWithNoChangedLinesContributesNoMutants() {
+    pitMutants(mutant(COUNTER, 5, false), mutant("com.example.api.Helper", 3, true));
+    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of()))).isEmpty();
+
+    pitMutants(mutant(COUNTER, 5, false));
+    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of())))
+        .containsExactly("mutation testing produced no mutants");
+  }
+
+  @Test
+  void mutantWithoutAClassIsStillCounted() {
+    pitMutants(mutant(COUNTER, 5, false), "<mutation detected='true'/>");
+    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of(30)))).isEmpty();
+  }
+
   @Test
   void notDiscriminating() {
     pit(20, 11);

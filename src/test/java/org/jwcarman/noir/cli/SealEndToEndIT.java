@@ -99,6 +99,7 @@ class SealEndToEndIT {
                 store,
                 examiner,
                 new ContainerSealCheckRunner(docker, config),
+                git,
                 config,
                 clock,
                 Retry.forConfig(config, d -> {})),

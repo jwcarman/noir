@@ -24,4 +24,10 @@ public interface GitPort {
 
   /** The content of {@code path} at {@code rev}, or empty when the path does not exist there. */
   Optional<String> show(Path repoDir, String rev, String path);
+
+  /**
+   * {@code git diff --no-index -U0} of two files under {@code dir} (paths relative to it), with
+   * {@code a/} and {@code b/} prefixes; empty when they are equal.
+   */
+  String diffNoIndex(Path dir, String oldPath, String newPath);
 }

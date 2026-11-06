@@ -250,8 +250,8 @@ section 7.
    comment on the issue (`gh issue view N --repo <repo> --comments`): read it and address its
    problems.
 3. Revise with the user, one question at a time, using the guidance in section 4. If a noir
-   comment says `conflicts_with_existing_tests`, add the tests it names under
-   `## Tests to update` once the user agrees. Run `git fetch origin <default-branch>` again before
+   comment says the change breaks existing tests that this spec does not allow to change, add
+   the tests it names under `## Tests to update` once the user agrees. Run `git fetch origin <default-branch>` again before
    checking with `--repo .`. Check with
    `noir spec check <tmpdir>/body.md --title "<title>"` until `OK` (add `--repo .` when the
    spec modifies files), then confirm every new-file stub path is new with the `git cat-file -e`

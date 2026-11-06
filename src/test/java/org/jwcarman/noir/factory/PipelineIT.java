@@ -341,9 +341,10 @@ class PipelineIT {
   }
 
   /**
-   * A new file passes the lock check, so skipping tests through {@code .mvn/maven.config} is still
-   * caught by measurement: the builder's tests never run, noir's JaCoCo agent records no coverage
-   * and measurement reports a shortfall. The grader runs no Maven at all, so it cannot be skipped.
+   * Adding {@code .mvn/maven.config} (here {@code -DskipTests} and {@code
+   * -Dmaven.test.failure.ignore=true}; equally {@code -Dtest=!CounterTest}) could let locked tests
+   * fail while {@code mvn verify} exits 0, so the lock check rejects the new file before
+   * measurement runs and the grader is never reached.
    */
   @Test
   void mavenConfigCannotSkipTheGrader() {
@@ -352,11 +353,11 @@ class PipelineIT {
     assertThat(run.finalItem().state()).as(run.path()).isEqualTo(State.FAILED);
     assertThat(run.path())
         .isEqualTo(
-            "SEALED > BUILDING > MEASURING > REWORK(QUALITY_SHORTFALL)"
-                + " > BUILDING > MEASURING > FAILED(QUALITY_SHORTFALL)");
-    assertThat(run.ofType("measurement").get(0).data()).containsEntry("lineCoverage", 0.0);
+            "SEALED > BUILDING > MEASURING > REWORK(CONTRACT_VIOLATION)"
+                + " > BUILDING > MEASURING > FAILED(CONTRACT_VIOLATION)");
+    assertThat(run.ofType("grade")).isEmpty();
     assertThat(run.read(run.attempt(1).resolve("FEEDBACK.md")))
-        .contains("| com.example.api.Counter | 0.0% |");
+        .contains("You added `.mvn/maven.config`.");
     assertThat(run.item().github().pullRequests())
         .singleElement()
         .satisfies(pr -> assertThat(pr.draft()).isTrue());
@@ -539,6 +540,7 @@ class PipelineIT {
                 store,
                 new Examiner(examinerAgent, cfg),
                 new ContainerSealCheckRunner(docker, cfg),
+                git,
                 cfg,
                 clock,
                 Retry.forConfig(cfg, d -> {})),
@@ -720,6 +722,14 @@ class PipelineIT {
         .isEqualTo(readFile(modifyFixture("fragments").resolve(SealedItemFixture.COUNTER_PATH)));
     assertThat(readFile(itemDir.resolve("stubs").resolve(SealedItemFixture.COUNTER_PATH)))
         .isEqualTo(readFile(modifyFixture("spliced").resolve(SealedItemFixture.COUNTER_PATH)));
+
+    // Seal check 3 scored Counter on the lines the reference changed. The base methods no test
+    // calls (decrement, isAbove, doubled, halved) keep whole-class PIT below the threshold, so
+    // whole-class scoring could never have sealed this spec.
+    var pit =
+        org.jwcarman.noir.reports.PitMutations.parse(
+            itemDir.resolve("examiner/attempt-1/checks/pit/mutations.xml"));
+    assertThat(pit.score()).as("whole-class mutation score").isLessThan(0.70);
 
     // The base Counter has decrement(), which no test calls. Whole-class measurement would
     // report it as an uncovered line and a surviving mutant; changed-lines measurement counts

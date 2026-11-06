@@ -1,6 +1,7 @@
 package org.jwcarman.noir.seal;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -9,8 +10,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.jwcarman.noir.feedback.TestOutcome;
+import org.jwcarman.noir.measure.PitByClass;
 import org.jwcarman.noir.reports.JUnitXmlReports;
 import org.jwcarman.noir.reports.PitMutations;
+import org.jwcarman.noir.reports.PitSummary;
 
 /** Turns seal-check artifacts into problems (spec §5.3). An empty list means sealable. */
 public final class SealJudge {
@@ -26,6 +29,18 @@ public final class SealJudge {
   private SealJudge() {}
 
   public static List<String> judge(SealArtifacts a, double discriminationThreshold) {
+    return judge(a, discriminationThreshold, Map.of());
+  }
+
+  /**
+   * Judges the artifacts. {@code changedLinesByClass} maps each top-level class of a modify target
+   * to the reference lines it added or changed against the base file: check 3 counts only that
+   * class's mutants on those lines. Every other class (a new file) is counted whole.
+   */
+  public static List<String> judge(
+      SealArtifacts a,
+      double discriminationThreshold,
+      Map<String, Set<Integer>> changedLinesByClass) {
     var problems = new ArrayList<String>();
     if (!stepOk(a, "clone", problems) || !stepCompleted(a, "assumptions", problems)) {
       return problems;
@@ -67,7 +82,7 @@ public final class SealJudge {
     if (!problems.isEmpty()) {
       return problems;
     }
-    checkDiscrimination(a, discriminationThreshold, problems);
+    checkDiscrimination(a, discriminationThreshold, changedLinesByClass, problems);
     checkExistingTests(a, problems);
     return problems;
   }
@@ -153,14 +168,20 @@ public final class SealJudge {
   }
 
   private static void checkDiscrimination(
-      SealArtifacts a, double threshold, List<String> problems) {
+      SealArtifacts a,
+      double threshold,
+      Map<String, Set<Integer>> changedLinesByClass,
+      List<String> problems) {
     var xml = a.path("pit/mutations.xml");
     if (!Files.isRegularFile(xml)) {
       var tail = a.logTail("pit", TAIL);
       problems.add("mutation testing produced no mutants" + (tail.isBlank() ? "" : ":\n" + tail));
       return;
     }
-    var summary = PitMutations.parse(xml);
+    var summary =
+        changedLinesByClass.isEmpty()
+            ? PitMutations.parse(xml)
+            : changedLineSummary(xml, changedLinesByClass);
     if (summary.total() == 0) {
       problems.add("mutation testing produced no mutants");
     } else if (summary.score() < threshold) {
@@ -174,6 +195,33 @@ public final class SealJudge {
               summary.detected(),
               summary.total()));
     }
+  }
+
+  /**
+   * The whole report less the mutants of each class in {@code changedLinesByClass} that are not on
+   * its changed lines (so a class with no changed lines contributes none). Every other mutant,
+   * including one PIT names no class for, is counted.
+   */
+  private static PitSummary changedLineSummary(
+      Path xml, Map<String, Set<Integer>> changedLinesByClass) {
+    var whole = PitMutations.parse(xml);
+    int total = whole.total();
+    int detected = whole.detected();
+    for (var entry : PitByClass.parseLines(xml).entrySet()) {
+      var lines = changedLinesByClass.get(entry.getKey());
+      if (lines == null) {
+        continue;
+      }
+      for (var m : entry.getValue()) {
+        if (!lines.contains(m.line())) {
+          total--;
+          if (m.detected()) {
+            detected--;
+          }
+        }
+      }
+    }
+    return new PitSummary(total, detected);
   }
 
   private static String skipped(String testId) {

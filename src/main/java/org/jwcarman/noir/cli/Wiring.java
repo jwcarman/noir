@@ -82,6 +82,7 @@ final class Wiring {
                 store,
                 new Examiner(new ClaudeContainerAgent(docker, auth), config),
                 new ContainerSealCheckRunner(docker, config),
+                git,
                 config,
                 clock,
                 Retry.forConfig(config, sleeper)),

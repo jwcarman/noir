@@ -25,6 +25,8 @@ import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithName;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ThrowStmt;
+import com.github.javaparser.ast.type.ClassOrInterfaceType;
+import com.github.javaparser.ast.type.Type;
 import com.github.javaparser.printer.DefaultPrettyPrinter;
 import com.github.javaparser.printer.configuration.DefaultConfigurationOption;
 import com.github.javaparser.printer.configuration.DefaultPrinterConfiguration;
@@ -464,9 +466,25 @@ public final class StubSplicer {
         + callable.getNameAsString()
         + "("
         + callable.getParameters().stream()
-            .map(p -> strip(p.getType()) + (p.isVarArgs() ? "..." : ""))
+            .map(p -> simpleNames(p.getType()) + (p.isVarArgs() ? "..." : ""))
             .collect(Collectors.joining(","))
         + ")";
+  }
+
+  /**
+   * A parameter type with every class or interface type reduced to its simple name, including
+   * inside type arguments and array components, so {@code java.lang.String} and {@code String} give
+   * the same signature key.
+   */
+  private static String simpleNames(Type type) {
+    var copy = type.clone();
+    var named = new ArrayList<ClassOrInterfaceType>();
+    if (copy instanceof ClassOrInterfaceType root) {
+      named.add(root);
+    }
+    named.addAll(copy.findAll(ClassOrInterfaceType.class));
+    named.forEach(ClassOrInterfaceType::removeScope);
+    return strip(copy);
   }
 
   private static String display(CallableDeclaration<?> callable) {

@@ -229,6 +229,7 @@ class NoirSpecSkillTest {
         .contains("current body stays in the stub")
         .contains("only methods and")
         .contains("add the imports")
-        .contains("conflicts_with_existing_tests");
+        .contains("breaks existing tests that this spec does not allow to change")
+        .doesNotContain("conflicts_with_existing_tests");
   }
 }

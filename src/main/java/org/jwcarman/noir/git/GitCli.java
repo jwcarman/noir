@@ -103,6 +103,36 @@ public final class GitCli implements GitPort {
     throw new GitException("git show failed: " + result.tail(20));
   }
 
+  @Override
+  public String diffNoIndex(Path dir, String oldPath, String newPath) {
+    var result =
+        runner.run(
+            Command.of(
+                    List.of(
+                        "git",
+                        "-C",
+                        dir.toString(),
+                        "diff",
+                        "--no-index",
+                        "--no-color",
+                        "--no-ext-diff",
+                        "--no-textconv",
+                        "-U0",
+                        "--src-prefix=a/",
+                        "--dst-prefix=b/",
+                        "--",
+                        oldPath,
+                        newPath))
+                .withEnv(java.util.Map.of("GIT_TERMINAL_PROMPT", "0", "LC_ALL", "C")));
+    // Exit 1 means "the files differ", but git also exits 1, printing no diff, when it cannot
+    // read a file.
+    var differs = result.exitCode() == 1 && !result.stdout().isBlank();
+    if (result.timedOut() || result.truncated() || !(result.ok() || differs)) {
+      throw new GitException("git diff --no-index failed: " + result.tail(20));
+    }
+    return result.stdout();
+  }
+
   /** Parses {@code owner/name} from an https, scp-style, or filesystem remote URL. */
   public static String ownerRepo(String url) {
     var s = url.trim();
