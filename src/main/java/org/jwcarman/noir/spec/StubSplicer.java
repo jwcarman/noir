@@ -137,10 +137,11 @@ public final class StubSplicer {
     var target = targetType(path, baseUnit, fragmentType);
     var members = fragmentMembers(path, fragmentType);
 
-    var baseMembers = new HashMap<String, CallableDeclaration<?>>();
+    var baseMembers = new HashMap<String, BodyDeclaration<?>>();
     for (var member : target.getMembers()) {
-      if (member instanceof CallableDeclaration<?> callable) {
-        baseMembers.putIfAbsent(key(callable), callable);
+      if (member instanceof CallableDeclaration<?>
+          || member instanceof CompactConstructorDeclaration) {
+        baseMembers.putIfAbsent(key(member), member);
       }
     }
 
@@ -324,18 +325,19 @@ public final class StubSplicer {
     return ("aeiou".indexOf(kind.charAt(0)) >= 0 ? "an " : "a ") + kind;
   }
 
-  private static List<CallableDeclaration<?>> fragmentMembers(
+  private static List<BodyDeclaration<?>> fragmentMembers(
       String path, TypeDeclaration<?> fragmentType) {
     if (fragmentType instanceof EnumDeclaration e && !e.getEntries().isEmpty()) {
       throw notAllowed(path, "an enum constant");
     }
-    var members = new ArrayList<CallableDeclaration<?>>();
+    var members = new ArrayList<BodyDeclaration<?>>();
     var seen = new HashSet<String>();
-    for (BodyDeclaration<?> member : fragmentType.getMembers()) {
-      if (!(member instanceof MethodDeclaration) && !(member instanceof ConstructorDeclaration)) {
-        throw notAllowed(path, describeMember(member));
+    for (BodyDeclaration<?> callable : fragmentType.getMembers()) {
+      if (!(callable instanceof MethodDeclaration)
+          && !(callable instanceof ConstructorDeclaration)
+          && !(callable instanceof CompactConstructorDeclaration)) {
+        throw notAllowed(path, describeMember(callable));
       }
-      var callable = (CallableDeclaration<?>) member;
       if (!isUoeBody(callable)) {
         throw fail(
             path,
@@ -358,7 +360,6 @@ public final class StubSplicer {
       case FieldDeclaration f -> "a field";
       case InitializerDeclaration i -> "an initializer";
       case TypeDeclaration<?> t -> "a nested type";
-      case CompactConstructorDeclaration c -> "a compact constructor";
       default -> "a member that is not a method or constructor";
     };
   }
@@ -371,11 +372,12 @@ public final class StubSplicer {
             + " this way.");
   }
 
-  private static boolean isUoeBody(CallableDeclaration<?> callable) {
+  private static boolean isUoeBody(BodyDeclaration<?> callable) {
     Optional<BlockStmt> body =
         switch (callable) {
           case MethodDeclaration m -> m.getBody();
           case ConstructorDeclaration c -> Optional.of(c.getBody());
+          case CompactConstructorDeclaration c -> Optional.of(c.getBody());
           default -> Optional.empty();
         };
     if (body.isEmpty() || body.get().getStatements().size() != 1) {
@@ -393,7 +395,7 @@ public final class StubSplicer {
   }
 
   private static void checkSameDeclaration(
-      String path, CallableDeclaration<?> base, CallableDeclaration<?> fragment) {
+      String path, BodyDeclaration<?> base, BodyDeclaration<?> fragment) {
     var signature = display(fragment);
     var hint = "Make it match the file, or give the new behavior a new signature.";
     if (base instanceof MethodDeclaration baseMethod
@@ -409,8 +411,8 @@ public final class StubSplicer {
               + "' in the file",
           hint);
     }
-    var baseModifiers = modifiers(base.getModifiers());
-    var fragmentModifiers = modifiers(fragment.getModifiers());
+    var baseModifiers = modifiers(modifiersOf(base));
+    var fragmentModifiers = modifiers(modifiersOf(fragment));
     if (!baseModifiers.equals(fragmentModifiers)) {
       throw fail(
           path,
@@ -422,28 +424,40 @@ public final class StubSplicer {
               + "' in the file",
           hint);
     }
-    if (!stripAll(base.getTypeParameters()).equals(stripAll(fragment.getTypeParameters()))) {
+    if (!(base instanceof CallableDeclaration<?> baseCallable)
+        || !(fragment instanceof CallableDeclaration<?> fragmentCallable)) {
+      return;
+    }
+    if (!stripAll(baseCallable.getTypeParameters())
+        .equals(stripAll(fragmentCallable.getTypeParameters()))) {
       throw fail(
           path,
           signature
               + " has type parameters '"
-              + printAll(fragment.getTypeParameters())
+              + printAll(fragmentCallable.getTypeParameters())
               + "' in the fragment but '"
-              + printAll(base.getTypeParameters())
+              + printAll(baseCallable.getTypeParameters())
               + "' in the file",
           hint);
     }
-    if (!stripAll(base.getThrownExceptions()).equals(stripAll(fragment.getThrownExceptions()))) {
+    if (!stripAll(baseCallable.getThrownExceptions())
+        .equals(stripAll(fragmentCallable.getThrownExceptions()))) {
       throw fail(
           path,
           signature
               + " has throws clause '"
-              + printAll(fragment.getThrownExceptions())
+              + printAll(fragmentCallable.getThrownExceptions())
               + "' in the fragment but '"
-              + printAll(base.getThrownExceptions())
+              + printAll(baseCallable.getThrownExceptions())
               + "' in the file",
           hint);
     }
+  }
+
+  private static List<Modifier> modifiersOf(BodyDeclaration<?> member) {
+    return member instanceof CompactConstructorDeclaration c
+        ? c.getModifiers()
+        : ((CallableDeclaration<?>) member).getModifiers();
   }
 
   private static Set<Modifier.Keyword> modifiers(List<Modifier> modifiers) {
@@ -460,7 +474,14 @@ public final class StubSplicer {
 
   // ---- signatures ----
 
-  private static String key(CallableDeclaration<?> callable) {
+  /** The record's compact constructor has no parameter list; there is at most one. */
+  private static final String COMPACT = "compact ";
+
+  private static String key(BodyDeclaration<?> member) {
+    if (member instanceof CompactConstructorDeclaration c) {
+      return COMPACT + c.getNameAsString();
+    }
+    var callable = (CallableDeclaration<?>) member;
     var kind = callable instanceof ConstructorDeclaration ? "new " : "";
     return kind
         + callable.getNameAsString()
@@ -487,7 +508,11 @@ public final class StubSplicer {
     return strip(copy);
   }
 
-  private static String display(CallableDeclaration<?> callable) {
+  private static String display(BodyDeclaration<?> member) {
+    if (member instanceof CompactConstructorDeclaration c) {
+      return c.getNameAsString() + " (compact constructor)";
+    }
+    var callable = (CallableDeclaration<?>) member;
     return callable.getNameAsString()
         + "("
         + callable.getParameters().stream()
@@ -626,9 +651,13 @@ public final class StubSplicer {
    * the annotations) or leave it orphaned (when a line comment follows it).
    */
   private static Optional<JavadocComment> javadocOf(
-      CompilationUnit unit, Source src, TypeDeclaration<?> type, CallableDeclaration<?> member) {
+      CompilationUnit unit, Source src, TypeDeclaration<?> type, BodyDeclaration<?> member) {
     int boundary = declarationBoundary(src, type, src.begin(member));
-    int limit = src.begin(member.getName());
+    int limit =
+        src.begin(
+            member instanceof CompactConstructorDeclaration c
+                ? c.getName()
+                : ((CallableDeclaration<?>) member).getName());
     return unit.getAllComments().stream()
         .filter(JavadocComment.class::isInstance)
         .map(JavadocComment.class::cast)

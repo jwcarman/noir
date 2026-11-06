@@ -630,13 +630,64 @@ class StubSplicerTest {
                 + "}\n");
   }
 
+  static final String RECORD_PATH = "src/main/java/com/example/P.java";
+
+  static final String COMPACT_FRAGMENT =
+      "package com.example;\n\npublic record P(int x) {\n  /** New: x must be even. */\n"
+          + "  public P {\n"
+          + UOE
+          + "  }\n}\n";
+
+  /** A changed compact constructor keeps today's body and takes the fragment's Javadoc. */
   @Test
-  void rejectsCompactConstructorByName() {
+  void changedCompactConstructorKeepsItsBody() {
+    var base =
+        "package com.example;\n\npublic record P(int x) {\n  /** Old. */\n  public P {\n"
+            + "    if (x < 0) {\n      throw new IllegalArgumentException();\n    }\n  }\n}\n";
+
+    var result = StubSplicer.splice(RECORD_PATH, base, COMPACT_FRAGMENT);
+
+    assertThat(result.changed()).containsExactly("P (compact constructor)");
+    assertThat(result.added()).isEmpty();
+    assertThat(result.content())
+        .isEqualTo(
+            "package com.example;\n\npublic record P(int x) {\n  /** New: x must be even. */\n"
+                + "  public P {\n    if (x < 0) {\n      throw new IllegalArgumentException();\n"
+                + "    }\n  }\n}\n");
+  }
+
+  @Test
+  void compactConstructorIsAddedWhenTheRecordHasNone() {
+    var base =
+        "package com.example;\n\npublic record P(int x) {\n  int twice() {\n    return 2 * x;\n  }\n}\n";
+
+    var result = StubSplicer.splice(RECORD_PATH, base, COMPACT_FRAGMENT);
+
+    assertThat(result.added()).containsExactly("P (compact constructor)");
+    assertThat(result.content())
+        .isEqualTo(
+            "package com.example;\n\npublic record P(int x) {\n  int twice() {\n    return 2 * x;\n  }\n\n"
+                + "  /** New: x must be even. */\n  public P {\n"
+                + UOE
+                + "  }\n}\n");
+  }
+
+  @Test
+  void compactConstructorModifiersMustMatch() {
+    var base = "package com.example;\n\npublic record P(int x) {\n  P {}\n}\n";
+    assertThatThrownBy(() -> StubSplicer.splice(RECORD_PATH, base, COMPACT_FRAGMENT))
+        .isInstanceOf(SpliceException.class)
+        .hasMessageContaining(
+            "P (compact constructor) has modifiers 'public' in the fragment but 'none'");
+  }
+
+  @Test
+  void compactConstructorBodyMustBeTheThrow() {
     var base = "package com.example;\n\npublic record Csv(int x) {}\n";
     assertRejected(
         base,
-        "package com.example;\n\npublic record Csv(int x) {\n  public Csv {\n" + UOE + "  }\n}\n",
-        "a compact constructor");
+        "package com.example;\n\npublic record Csv(int x) {\n  public Csv {\n    x = 1;\n  }\n}\n",
+        "is not exactly");
   }
 
   @Test
