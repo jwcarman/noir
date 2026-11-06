@@ -71,6 +71,21 @@ class RunCommandTest {
   }
 
   @Test
+  void printsAStartupLine() {
+    int code =
+        run(
+            (once, listener) ->
+                listener.started(
+                    List.of("jwcarman/demo", "jwcarman/other"), java.time.Duration.ofSeconds(60)),
+            "run");
+    assertThat(code).isZero();
+    assertThat(out.toString())
+        .isEqualTo(
+            "noir running: watching jwcarman/demo, jwcarman/other; polling every 1m;"
+                + " Ctrl-C to stop\n");
+  }
+
+  @Test
   void printsCreatedItems() {
     int code =
         run(

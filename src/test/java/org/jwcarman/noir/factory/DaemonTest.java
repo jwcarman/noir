@@ -71,6 +71,11 @@ class DaemonTest {
         public void created(String itemId, String repo, int issue) {
           reported.add("created " + itemId + " " + repo + "#" + issue);
         }
+
+        @Override
+        public void started(List<String> repos, Duration pollInterval) {
+          reported.add("started " + repos + " every " + pollInterval);
+        }
       };
 
   @BeforeEach
@@ -690,6 +695,8 @@ class DaemonTest {
 
     assertThat(sleeps).containsExactly(Duration.ofSeconds(42), Duration.ofSeconds(42));
     assertThat(driver.driven).containsExactly(A);
+    assertThat(reported).first().asString().startsWith("started [");
+    assertThat(reported).filteredOn(r -> r.startsWith("started")).hasSize(1);
     assertThat(Thread.currentThread().isInterrupted()).isTrue();
   }
 

@@ -48,6 +48,12 @@ final class RunCommand implements Callable<Integer> {
   private static Daemon.Listener printer(PrintWriter out, PrintWriter err) {
     return new Daemon.Listener() {
       @Override
+      public void started(java.util.List<String> repos, java.time.Duration pollInterval) {
+        out.println(startedLine(repos, pollInterval));
+        out.flush();
+      }
+
+      @Override
       public void transition(StateChange c) {
         out.println(ItemTriggers.line(c));
         out.flush();
@@ -76,5 +82,15 @@ final class RunCommand implements Callable<Integer> {
   /** {@code nr-… jwcarman/demo#12 approved → SEALING}. */
   static String createdLine(String itemId, String repo, int issue) {
     return itemId + "  " + repo + "#" + issue + "  approved → SEALING";
+  }
+
+  static String startedLine(java.util.List<String> repos, java.time.Duration pollInterval) {
+    var watching =
+        repos.isEmpty() ? "no repos (add some to config.yaml)" : String.join(", ", repos);
+    return "noir running: watching "
+        + watching
+        + "; polling every "
+        + pollInterval.toString().substring(2).toLowerCase(java.util.Locale.ROOT)
+        + "; Ctrl-C to stop";
   }
 }

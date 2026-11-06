@@ -59,6 +59,9 @@ public final class Daemon {
 
     /** A work item was created for an approved issue; it starts in {@code SEALING}. */
     void created(String itemId, String repo, int issue);
+
+    /** {@link #runForever()} is starting its poll loop over {@code repos}. */
+    default void started(java.util.List<String> repos, java.time.Duration pollInterval) {}
   }
 
   private final Store store;
@@ -122,6 +125,7 @@ public final class Daemon {
 
   /** Runs passes separated by {@code pollInterval} until the thread is interrupted. */
   public void runForever() {
+    listener.started(config.repos(), config.pollInterval());
     while (!interrupted()) {
       runOnce();
       if (interrupted()) {
