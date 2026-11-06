@@ -11,6 +11,7 @@ import com.github.javaparser.ast.body.AnnotationDeclaration;
 import com.github.javaparser.ast.body.BodyDeclaration;
 import com.github.javaparser.ast.body.CallableDeclaration;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.CompactConstructorDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.EnumDeclaration;
 import com.github.javaparser.ast.body.FieldDeclaration;
@@ -18,10 +19,16 @@ import com.github.javaparser.ast.body.InitializerDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.RecordDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
+import com.github.javaparser.ast.comments.Comment;
+import com.github.javaparser.ast.comments.JavadocComment;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithName;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ThrowStmt;
+import com.github.javaparser.printer.DefaultPrettyPrinter;
+import com.github.javaparser.printer.configuration.DefaultConfigurationOption;
+import com.github.javaparser.printer.configuration.DefaultPrinterConfiguration;
+import com.github.javaparser.printer.configuration.DefaultPrinterConfiguration.ConfigOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
@@ -29,6 +36,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -40,6 +48,14 @@ import java.util.stream.Collectors;
  * is <em>changed</em>: it keeps the base body and annotations and takes the fragment's Javadoc. Any
  * other fragment member is <em>added</em> before the type's closing brace. Missing imports are
  * added. Every other byte of the base file is left as it is.
+ *
+ * <p>The fragment's type is matched to a base top-level type by name, kind and modifiers only. Its
+ * type parameters, {@code extends}, {@code implements} and {@code permits} clauses and record
+ * components are not compared and never change the base file.
+ *
+ * <p>A member's Javadoc is the last Javadoc comment between the end of the previous declaration and
+ * the member's name, so a Javadoc after the annotations or before a line comment is found. Types
+ * are compared and printed without their comments.
  */
 public final class StubSplicer {
   private static final String DEFAULT_INDENT = "  ";
@@ -142,11 +158,11 @@ public final class StubSplicer {
       if (baseMember != null) {
         checkSameDeclaration(path, baseMember, member);
         changed.add(display(member));
-        var fragmentDoc = member.getJavadocComment();
+        var fragmentDoc = javadocOf(fragmentUnit, frag, fragmentType, member);
         if (fragmentDoc.isPresent()) {
           var indent = base.indentOf(baseMember).orElse(memberIndent);
           var doc = reindent(frag, fragmentDoc.get(), indent, sep);
-          var baseDoc = baseMember.getJavadocComment();
+          var baseDoc = javadocOf(baseUnit, base, target, baseMember);
           if (baseDoc.isPresent()) {
             edits.add(new Edit(base.begin(baseDoc.get()), base.end(baseDoc.get()), doc));
           } else {
@@ -157,8 +173,8 @@ public final class StubSplicer {
       } else {
         added.add(display(member));
         appended.append(sep).append(sep).append(memberIndent);
-        member
-            .getJavadocComment()
+        javadocOf(fragmentUnit, frag, fragmentType, member)
+            .filter(doc -> frag.begin(doc) < frag.begin(member))
             .ifPresent(doc ->
                 appended
                     .append(reindent(frag, doc, memberIndent, sep))
@@ -169,7 +185,16 @@ public final class StubSplicer {
     }
 
     if (!appended.isEmpty()) {
-      edits.add(appendEdit(base, target, appended, sep));
+      int at = appendPosition(base, target, appended, sep);
+      if (target instanceof EnumDeclaration e && e.getMembers().isEmpty()) {
+        var semicolon = missingEnumSemicolon(base, e);
+        if (semicolon.isPresent() && semicolon.getAsInt() == at) {
+          appended.insert(0, ';');
+        } else {
+          semicolon.ifPresent(i -> edits.add(new Edit(i, i, ";")));
+        }
+      }
+      edits.add(new Edit(at, at, appended.toString()));
     }
     importEdit(base, baseUnit, frag, fragmentUnit, sep).ifPresent(edits::add);
 
@@ -331,6 +356,7 @@ public final class StubSplicer {
       case FieldDeclaration f -> "a field";
       case InitializerDeclaration i -> "an initializer";
       case TypeDeclaration<?> t -> "a nested type";
+      case CompactConstructorDeclaration c -> "a compact constructor";
       default -> "a member that is not a method or constructor";
     };
   }
@@ -361,7 +387,7 @@ public final class StubSplicer {
         && created.getTypeArguments().isEmpty()
         && created.getAnonymousClassBody().isEmpty()
         && created.getArguments().isEmpty()
-        && created.getType().toString().equals("UnsupportedOperationException");
+        && print(created.getType()).equals("UnsupportedOperationException");
   }
 
   private static void checkSameDeclaration(
@@ -375,9 +401,9 @@ public final class StubSplicer {
           path,
           signature
               + " has return type '"
-              + fragmentMethod.getType()
+              + print(fragmentMethod.getType())
               + "' in the fragment but '"
-              + baseMethod.getType()
+              + print(baseMethod.getType())
               + "' in the file",
           hint);
     }
@@ -399,9 +425,9 @@ public final class StubSplicer {
           path,
           signature
               + " has type parameters '"
-              + fragment.getTypeParameters()
+              + printAll(fragment.getTypeParameters())
               + "' in the fragment but '"
-              + base.getTypeParameters()
+              + printAll(base.getTypeParameters())
               + "' in the file",
           hint);
     }
@@ -410,9 +436,9 @@ public final class StubSplicer {
           path,
           signature
               + " has throws clause '"
-              + fragment.getThrownExceptions()
+              + printAll(fragment.getThrownExceptions())
               + "' in the fragment but '"
-              + base.getThrownExceptions()
+              + printAll(base.getThrownExceptions())
               + "' in the file",
           hint);
     }
@@ -447,13 +473,27 @@ public final class StubSplicer {
     return callable.getNameAsString()
         + "("
         + callable.getParameters().stream()
-            .map(p -> p.getType().toString() + (p.isVarArgs() ? "..." : ""))
+            .map(p -> print(p.getType()) + (p.isVarArgs() ? "..." : ""))
             .collect(Collectors.joining(", "))
         + ")";
   }
 
+  private static String print(Node node) {
+    var config =
+        new DefaultPrinterConfiguration()
+            .removeOption(new DefaultConfigurationOption(ConfigOption.PRINT_COMMENTS))
+            .removeOption(new DefaultConfigurationOption(ConfigOption.PRINT_JAVADOC));
+    return new DefaultPrettyPrinter(config).print(node).replaceAll("\\s+", " ").trim();
+  }
+
+  private static String printAll(List<? extends Node> nodes) {
+    return nodes.isEmpty()
+        ? "none"
+        : nodes.stream().map(StubSplicer::print).collect(Collectors.joining(", "));
+  }
+
   private static String strip(Node node) {
-    return node.toString().replaceAll("\\s+", "");
+    return print(node).replaceAll("\\s+", "");
   }
 
   private static List<String> stripAll(List<? extends Node> nodes) {
@@ -484,8 +524,11 @@ public final class StubSplicer {
     return out.toString();
   }
 
-  /** Inserts the added members after the last non-blank text before the type's closing brace. */
-  private static Edit appendEdit(
+  /**
+   * Where the added members go: after the last non-blank text before the type's closing brace. Adds
+   * a line break to {@code appended} when the brace shares a line with that text.
+   */
+  private static int appendPosition(
       Source base, TypeDeclaration<?> target, StringBuilder appended, String sep) {
     int brace = base.end(target) - 1;
     var text = base.text();
@@ -497,7 +540,82 @@ public final class StubSplicer {
     if (!between.contains("\n") && !between.contains("\r")) {
       appended.append(sep);
     }
-    return new Edit(at, at, appended.toString());
+    return at;
+  }
+
+  /**
+   * The offset at which an enum with no body declarations needs a {@code ;} before members can be
+   * added, or empty when it already has one. The offset is after the last constant, or after its
+   * trailing comma, or after the opening brace when there are no constants.
+   */
+  private static OptionalInt missingEnumSemicolon(Source base, EnumDeclaration e) {
+    var text = base.text();
+    int at;
+    int next;
+    if (e.getEntries().isNonEmpty()) {
+      at = base.end(e.getEntries().get(e.getEntries().size() - 1));
+      next = skipBlankAndComments(text, at);
+      if (next < text.length() && text.charAt(next) == ',') {
+        at = next + 1;
+        next = skipBlankAndComments(text, at);
+      }
+    } else {
+      int brace = skipBlankAndComments(text, declarationBoundary(base, e, base.end(e) - 1));
+      at = brace + 1;
+      next = skipBlankAndComments(text, at);
+    }
+    return next < text.length() && text.charAt(next) == ';'
+        ? OptionalInt.empty()
+        : OptionalInt.of(at);
+  }
+
+  private static int skipBlankAndComments(String text, int i) {
+    while (i < text.length()) {
+      if (Character.isWhitespace(text.charAt(i))) {
+        i++;
+      } else if (text.startsWith("//", i)) {
+        int eol = i;
+        while (eol < text.length() && text.charAt(eol) != '\n' && text.charAt(eol) != '\r') {
+          eol++;
+        }
+        i = eol;
+      } else if (text.startsWith("/*", i)) {
+        int close = text.indexOf("*/", i + 2);
+        i = close < 0 ? text.length() : close + 2;
+      } else {
+        break;
+      }
+    }
+    return i;
+  }
+
+  /**
+   * The end of the last non-comment child of {@code type} (a member, constant, name, clause,
+   * annotation...) that ends at or before {@code limit}.
+   */
+  private static int declarationBoundary(Source src, TypeDeclaration<?> type, int limit) {
+    return type.getChildNodes().stream()
+        .filter(n -> !(n instanceof Comment) && n.hasRange())
+        .mapToInt(src::end)
+        .filter(end -> end <= limit)
+        .max()
+        .orElse(src.begin(type));
+  }
+
+  /**
+   * The member's Javadoc: the last Javadoc comment between the previous declaration in the type and
+   * the member's name. JavaParser may attach it to the member, to its return type (when it follows
+   * the annotations) or leave it orphaned (when a line comment follows it).
+   */
+  private static Optional<JavadocComment> javadocOf(
+      CompilationUnit unit, Source src, TypeDeclaration<?> type, CallableDeclaration<?> member) {
+    int boundary = declarationBoundary(src, type, src.begin(member));
+    int limit = src.begin(member.getName());
+    return unit.getAllComments().stream()
+        .filter(JavadocComment.class::isInstance)
+        .map(JavadocComment.class::cast)
+        .filter(c -> src.begin(c) >= boundary && src.end(c) <= limit)
+        .max(Comparator.comparingInt(src::begin));
   }
 
   private static Optional<Edit> importEdit(

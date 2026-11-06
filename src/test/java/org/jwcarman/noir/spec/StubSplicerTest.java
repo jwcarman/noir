@@ -343,11 +343,6 @@ class StubSplicerTest {
           }
 
           /** C2 */
-          public void take(List<Integer> items) {
-            throw new UnsupportedOperationException();
-          }
-
-          /** D2 */
           public void take(List<String> items) {
             throw new UnsupportedOperationException();
           }
@@ -358,12 +353,213 @@ class StubSplicerTest {
 
     assertThat(result.changed())
         .containsExactly("get(Class<T>)", "log(String...)", "take(List<String>)");
-    assertThat(result.added()).containsExactly("take(List<Integer>)");
+    assertThat(result.added()).isEmpty();
     assertThat(result.content())
         .contains("/** A2 */\n  public <T> T get(Class<T> type) {\n    return null;")
         .contains("/** B2 */\n  public void log(String... parts) {}")
-        .contains("/** D2 */\n  public void take(List<String> items) {}")
-        .contains("/** C2 */\n  public void take(List<Integer> items) {\n");
+        .contains("/** C2 */\n  public void take(List<String> items) {}");
+  }
+
+  // ---- Comments around members (fix round 1) ----
+
+  @Test
+  void javadocAfterAnnotationIsReplacedNotDuplicated() {
+    var base =
+        "package com.example;\n\npublic class A {\n  @Deprecated\n  /** Old. */\n"
+            + "  public void m() {}\n}\n";
+    var frag =
+        "package com.example;\n\npublic class A {\n  /** New. */\n  public void m() {\n"
+            + "    throw new UnsupportedOperationException();\n  }\n}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.changed()).containsExactly("m()");
+    assertThat(result.content()).isEqualTo(base.replace("/** Old. */", "/** New. */"));
+  }
+
+  @Test
+  void commentOnTypeNeverLeaksIntoRejectionMessage() {
+    var base =
+        "package com.example;\n\npublic class A {\n  @Deprecated\n  /**\n   * Old.\n   */\n"
+            + "  public void m() {}\n}\n";
+    var frag =
+        "package com.example;\n\npublic class A {\n  public int m() {\n"
+            + "    throw new UnsupportedOperationException();\n  }\n}\n";
+
+    assertThatThrownBy(() -> StubSplicer.splice(PATH, base, frag))
+        .isInstanceOf(SpliceException.class)
+        .hasMessageStartingWith(PATH + ": ")
+        .hasMessageContaining("'void' in the file")
+        .hasMessageNotContaining("\n")
+        .hasMessageNotContaining("Old");
+  }
+
+  @Test
+  void commentsInsideParameterTypesDoNotAffectSignatures() {
+    var base =
+        "package com.example;\n\npublic class A {\n  /** Old. */\n"
+            + "  public void m(/* the text */ String text) {}\n}\n";
+    var frag =
+        "package com.example;\n\npublic class A {\n  /** New. */\n  public void m(String text) {\n"
+            + "    throw new UnsupportedOperationException();\n  }\n}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.changed()).containsExactly("m(String)");
+    assertThat(result.added()).isEmpty();
+  }
+
+  @Test
+  void javadocBeforeALineCommentIsReplacedNotDuplicated() {
+    var base =
+        "package com.example;\n\npublic class A {\n  void a() {}\n\n  /** Old. */\n  // note\n"
+            + "  @Deprecated\n  void m() {\n    a();\n  }\n}\n";
+    var frag =
+        "package com.example;\n\npublic class A {\n  /** New. */\n  void m() {\n"
+            + "    throw new UnsupportedOperationException();\n  }\n}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.content()).isEqualTo(base.replace("/** Old. */", "/** New. */"));
+  }
+
+  @Test
+  void otherMembersJavadocIsNotTaken() {
+    var base =
+        "package com.example;\n\npublic class A {\n  /** Field. */\n  int x;\n  // note\n"
+            + "  void m() {}\n}\n";
+    var frag =
+        "package com.example;\n\npublic class A {\n  /** New. */\n  void m() {\n"
+            + "    throw new UnsupportedOperationException();\n  }\n}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.content())
+        .isEqualTo(
+            "package com.example;\n\npublic class A {\n  /** Field. */\n  int x;\n  // note\n"
+                + "  /** New. */\n  void m() {}\n}\n");
+  }
+
+  @Test
+  void addedMemberWithJavadocAfterAnnotationIsNotDuplicated() {
+    var base = "package com.example;\n\npublic class A {\n  void a() {}\n}\n";
+    var frag =
+        "package com.example;\n\npublic class A {\n  @Deprecated\n  /** New. */\n  void b() {\n"
+            + "    throw new UnsupportedOperationException();\n  }\n}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.content().split("New\\.", -1)).hasSize(2);
+    assertThat(result.content())
+        .isEqualTo(
+            "package com.example;\n\npublic class A {\n  void a() {}\n\n  @Deprecated\n"
+                + "  /** New. */\n  void b() {\n    throw new UnsupportedOperationException();\n"
+                + "  }\n}\n");
+  }
+
+  // ---- Enums and records (fix round 1) ----
+
+  static final String ADD_B =
+      "  /** B. */\n  public int b() {\n    throw new UnsupportedOperationException();\n  }\n";
+
+  @Test
+  void addsToEnumWithoutSemicolon() {
+    var base = "package com.example;\n\npublic enum A {\n  X,\n  Y\n}\n";
+    var frag = "package com.example;\n\npublic enum A {\n  ;\n\n" + ADD_B + "}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.content())
+        .isEqualTo(
+            "package com.example;\n\npublic enum A {\n  X,\n  Y;\n\n  /** B. */\n"
+                + "  public int b() {\n    throw new UnsupportedOperationException();\n  }\n}\n");
+    assertThat(result.added()).containsExactly("b()");
+  }
+
+  @Test
+  void addsToEnumWithTrailingCommaAndComment() {
+    var base = "package com.example;\n\npublic enum A {\n  X,\n  Y, // last\n}\n";
+    var frag = "package com.example;\n\npublic enum A {\n  ;\n" + ADD_B + "}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.content())
+        .startsWith(
+            "package com.example;\n\npublic enum A {\n  X,\n  Y,; // last\n\n  /** B. */\n");
+  }
+
+  @Test
+  void addsToEnumWithSemicolon() {
+    var base = "package com.example;\n\npublic enum A {\n  X,\n  Y;\n}\n";
+    var frag = "package com.example;\n\npublic enum A {\n  ;\n" + ADD_B + "}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.content())
+        .isEqualTo(
+            "package com.example;\n\npublic enum A {\n  X,\n  Y;\n\n  /** B. */\n"
+                + "  public int b() {\n    throw new UnsupportedOperationException();\n  }\n}\n");
+  }
+
+  @Test
+  void addsToEnumWithMembers() {
+    var base =
+        "package com.example;\n\npublic enum A {\n  X;\n\n  /** Old. */\n  public int a() {\n"
+            + "    return 1;\n  }\n}\n";
+    var frag = "package com.example;\n\npublic enum A {\n  ;\n" + ADD_B + "}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.content()).isEqualTo(base.replace("  }\n}\n", "  }\n\n" + ADD_B + "}\n"));
+  }
+
+  @Test
+  void addsToEnumWithoutConstants() {
+    var base = "package com.example;\n\npublic enum A {\n}\n";
+    var frag = "package com.example;\n\npublic enum A {\n  ;\n" + ADD_B + "}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/A.java", base, frag);
+
+    assertThat(result.content())
+        .isEqualTo("package com.example;\n\npublic enum A {;\n\n" + ADD_B + "}\n");
+  }
+
+  @Test
+  void rejectsEnumConstantsInFragment() {
+    var base = "package com.example;\n\npublic enum Csv {\n  X\n}\n";
+    assertRejected(base, "package com.example;\n\npublic enum Csv {\n  X, Z\n}\n", "enum constant");
+  }
+
+  @Test
+  void addsAndChangesRecordMethods() {
+    var base =
+        "package com.example;\n\npublic record P(int x, int y) {\n  /** Old. */\n"
+            + "  public int sum() {\n    return x + y;\n  }\n}\n";
+    var frag =
+        "package com.example;\n\npublic record P(int x, int y) {\n  /** New. */\n"
+            + "  public int sum() {\n    throw new UnsupportedOperationException();\n  }\n"
+            + ADD_B
+            + "}\n";
+
+    var result = StubSplicer.splice("src/main/java/com/example/P.java", base, frag);
+
+    assertThat(result.changed()).containsExactly("sum()");
+    assertThat(result.added()).containsExactly("b()");
+    assertThat(result.content())
+        .isEqualTo(
+            "package com.example;\n\npublic record P(int x, int y) {\n  /** New. */\n"
+                + "  public int sum() {\n    return x + y;\n  }\n\n"
+                + ADD_B
+                + "}\n");
+  }
+
+  @Test
+  void rejectsCompactConstructorByName() {
+    var base = "package com.example;\n\npublic record Csv(int x) {}\n";
+    assertRejected(
+        base,
+        "package com.example;\n\npublic record Csv(int x) {\n  public Csv {\n" + UOE + "  }\n}\n",
+        "a compact constructor");
   }
 
   @Test
