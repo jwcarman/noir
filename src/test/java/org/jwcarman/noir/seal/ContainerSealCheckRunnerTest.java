@@ -51,6 +51,91 @@ class ContainerSealCheckRunnerTest {
         .contains("/work/holdout", "/work/reference");
   }
 
+  /** The host paths mounted at /work/updated-tests, and what each held while the phase ran. */
+  record Staged(Path host, List<String> files) {}
+
+  /**
+   * Only the listed tests the reference contains are staged for prepare, beside the output
+   * directory (never inside it, never in the system temp directory); the staging is gone once
+   * prepare ends, and the check phase does not see it.
+   */
+  @Test
+  void prepareSeesOnlyTheListedUpdatedTests() throws Exception {
+    var in = inputs();
+    var spec = Specs.withModifyAndTests();
+    in =
+        new SealInputs(
+            spec,
+            in.bundle(),
+            in.stubsDir(),
+            in.holdoutDir(),
+            in.referenceDir(),
+            in.targetClasses());
+    var reference = in.referenceDir();
+    for (var path :
+        List.of(
+            "src/test/java/com/example/OldTest.java",
+            "src/test/java/com/example/UnlistedTest.java",
+            "src/main/java/com/example/Old.java")) {
+      Files.createDirectories(reference.resolve(path).getParent());
+      Files.writeString(reference.resolve(path), "class X {}\n");
+    }
+    var staged = new java.util.ArrayList<Staged>();
+    var docker =
+        new FakeContainerPort(s -> {
+          s.mounts().stream()
+              .filter(m -> m.container().equals("/work/updated-tests"))
+              .forEach(m -> {
+                try (var walk = Files.walk(m.host())) {
+                  staged.add(
+                      new Staged(
+                          m.host(),
+                          walk.filter(Files::isRegularFile)
+                              .map(f -> m.host().relativize(f).toString())
+                              .sorted()
+                              .toList()));
+                } catch (java.io.IOException e) {
+                  throw new java.io.UncheckedIOException(e);
+                }
+              });
+          return new ContainerResult(0, "", "", false, "id");
+        });
+    var out = tmp.resolve("attempt/checks");
+
+    new ContainerSealCheckRunner(docker, NoirConfig.defaults()).run(in, out);
+
+    assertThat(staged).hasSize(1);
+    assertThat(staged.getFirst().files()).containsExactly("src/test/java/com/example/OldTest.java");
+    var host = staged.getFirst().host();
+    assertThat(host.getParent()).isEqualTo(out.getParent());
+    assertThat(host).doesNotExist();
+    assertThat(docker.specs().get(1).mounts())
+        .extracting(Mount::container)
+        .doesNotContain("/work/updated-tests");
+  }
+
+  @Test
+  void stagedUpdatedTestsAreRemovedWhenPrepareFails() throws Exception {
+    var in = inputs();
+    var staged = new java.util.ArrayList<Path>();
+    var docker =
+        new FakeContainerPort(s -> {
+          s.mounts().stream()
+              .filter(m -> m.container().equals("/work/updated-tests"))
+              .forEach(m -> staged.add(m.host()));
+          throw new DockerException("docker run failed");
+        });
+    var out = tmp.resolve("attempt/checks");
+    assertThatThrownBy(
+            () -> new ContainerSealCheckRunner(docker, NoirConfig.defaults()).run(in, out))
+        .isInstanceOf(DockerException.class);
+    assertThat(staged).hasSize(1);
+    assertThat(staged.getFirst()).doesNotExist();
+    try (var left = Files.list(out.getParent())) {
+      assertThat(left.map(p -> p.getFileName().toString())).containsExactly("checks");
+    }
+  }
+
   @Test
   void staleOutputIsCleared() throws Exception {
     var out = tmp.resolve("out");

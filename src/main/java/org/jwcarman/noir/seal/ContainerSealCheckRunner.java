@@ -33,6 +33,12 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
   /** Working state the script keeps in the output dir; removed afterwards. */
   static final List<String> SCRATCH = List.of("repo", "m2", "deps", "holdout-classes");
 
+  /**
+   * The updated tests for prepare are staged in a sibling of the output directory with this suffix,
+   * removed as soon as prepare ends.
+   */
+  static final String UPDATED_TESTS_SUFFIX = "-updated-tests";
+
   /** Written by the inventory phase, with the reason, when it lists nothing on purpose. */
   static final String INVENTORY_EMPTY = "inventory-empty.txt";
 
@@ -63,19 +69,23 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
             "EXCLUDE_TESTS", String.join(",", in.spec().testsToUpdate()));
     var log = new StringBuilder();
 
-    var updatedTests = stageUpdatedTests(in);
-    var prepareMounts =
+    var shared =
         List.of(
             Mount.ro(in.bundle(), "/work/base.bundle"),
             Mount.ro(in.stubsDir(), "/work/stubs"),
-            Mount.ro(updatedTests, "/work/updated-tests"),
             Mount.rw(outDir, "/work/out"));
-    var prepare = docker.run(spec("prepare", prepareMounts, env, true));
-    record(log, "prepare", prepare);
-    deleteRecursively(updatedTests);
+    var updatedTests = outDir.resolveSibling(outDir.getFileName() + UPDATED_TESTS_SUFFIX);
+    try {
+      stageUpdatedTests(in, updatedTests);
+      var prepareMounts = new ArrayList<>(shared);
+      prepareMounts.add(Mount.ro(updatedTests, "/work/updated-tests"));
+      var prepare = docker.run(spec("prepare", prepareMounts, env, true));
+      record(log, "prepare", prepare);
+    } finally {
+      deleteRecursively(updatedTests);
+    }
 
-    var checkMounts = new ArrayList<>(prepareMounts);
-    checkMounts.removeIf(m -> m.container().equals("/work/updated-tests"));
+    var checkMounts = new ArrayList<>(shared);
     checkMounts.add(Mount.ro(in.holdoutDir(), "/work/holdout"));
     checkMounts.add(Mount.ro(in.referenceDir(), "/work/reference"));
     var check = docker.run(spec("check", checkMounts, env, false));
@@ -91,13 +101,14 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
   }
 
   /**
-   * Only the reference's updated versions of the spec's tests to update, in a scratch directory:
-   * the online prepare phase compiles them with the repository's tests, but never sees the rest of
-   * the reference.
+   * Stages only the reference's updated versions of the spec's tests to update in {@code staged} (a
+   * fresh directory beside the output directory): the online prepare phase compiles them with the
+   * repository's tests, but never sees the rest of the reference.
    */
-  private static Path stageUpdatedTests(SealInputs in) {
+  private static void stageUpdatedTests(SealInputs in, Path staged) {
     try {
-      var staged = Files.createTempDirectory("noir-updated-tests");
+      deleteRecursively(staged);
+      Files.createDirectories(staged);
       for (var path : in.spec().testsToUpdate()) {
         var source = in.referenceDir().resolve(path).normalize();
         if (path.isEmpty()
@@ -111,7 +122,6 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
         Files.createDirectories(target.getParent());
         Files.copy(source, target);
       }
-      return staged;
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
