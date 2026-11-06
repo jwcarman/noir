@@ -20,6 +20,9 @@ public final class Images {
       List.of(
           "Dockerfile",
           "toolchain/pom.xml",
+          "toolchain/warm/pom.xml",
+          "toolchain/warm/src/main/java/warm/Warm.java",
+          "toolchain/warm/src/test/java/warm/WarmTest.java",
           "seal-check.sh",
           "build-prep.sh",
           "build-post.sh",

@@ -29,6 +29,18 @@ COPY --chown=noir:noir toolchain/pom.xml /tmp/toolchain/pom.xml
 RUN mvn -B -q -f /tmp/toolchain/pom.xml package \
  && rm -rf /tmp/toolchain/target
 
+# A tiny project built once so the cache also holds the default lifecycle plugins, Surefire's
+# JUnit provider, JUnit Jupiter and the help plugin seal-check.sh uses. Seal checks read this cache
+# through maven.repo.local.tail.
+COPY --chown=noir:noir toolchain/warm /tmp/warm
+RUN cd /tmp/warm \
+ && mvn -B -q verify \
+ && mvn -B -q org.apache.maven.plugins:maven-help-plugin:3.5.2:evaluate \
+      -Dexpression=maven.compiler.release -DforceStdout >/dev/null \
+ && mvn -B -q org.apache.maven.plugins:maven-dependency-plugin:3.11.0:copy-dependencies \
+      -DincludeScope=test -DoutputDirectory=/tmp/warm/deps \
+ && rm -rf /tmp/warm
+
 # noir's scripts and scanners. Builder code runs as "noir", so everything under /opt/noir is
 # root-owned and not writable by it.
 COPY --chmod=755 seal-check.sh build-prep.sh build-post.sh measure.sh /opt/noir/bin/

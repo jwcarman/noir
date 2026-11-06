@@ -18,6 +18,8 @@ set -u
 OUT=/work/out
 REPO=/work/out/repo
 M2=/work/out/m2
+# The image's warm cache, read-only underneath $M2, so only what it lacks is downloaded.
+MVN_REPO=(-Dmaven.repo.local="$M2" -Dmaven.repo.local.tail=/home/noir/.m2/repository)
 LAUNCHER=/opt/noir/lib/junit/junit-platform-console-standalone.jar
 DEPENDENCY_PLUGIN=org.apache.maven.plugins:maven-dependency-plugin:3.11.0
 HELP_PLUGIN=org.apache.maven.plugins:maven-help-plugin:3.5.2
@@ -49,12 +51,12 @@ assumptions() {
   fi
   echo yes >"$OUT/pom.txt"
   if grep -q "<modules>" pom.xml; then echo yes >"$OUT/modules.txt"; else echo no >"$OUT/modules.txt"; fi
-  mvn -B -q -Dmaven.repo.local="$M2" "$HELP_PLUGIN:evaluate" -Dexpression=maven.compiler.release -DforceStdout >"$OUT/release.txt"
+  mvn -B -q "${MVN_REPO[@]}" "$HELP_PLUGIN:evaluate" -Dexpression=maven.compiler.release -DforceStdout >"$OUT/release.txt"
 }
 
 stub_build() {
   cp -R /work/stubs/. "$REPO/" && cd "$REPO" \
-    && mvn -B -Dmaven.repo.local="$M2" -DskipTests compile "$DEPENDENCY_PLUGIN:copy-dependencies" \
+    && mvn -B "${MVN_REPO[@]}" -DskipTests compile "$DEPENDENCY_PLUGIN:copy-dependencies" \
       -DincludeScope=runtime -DoutputDirectory="$OUT/deps"
 }
 
@@ -77,7 +79,7 @@ holdout_run() { # holdout_run <reports-dir-name>
 
 ref_build() {
   cp -R /work/reference/. "$REPO/" && cd "$REPO" && rm -rf target/classes \
-    && mvn -B -o -Dmaven.repo.local="$M2" -DskipTests compile
+    && mvn -B -o "${MVN_REPO[@]}" -DskipTests compile
 }
 
 # Restores src/test to the base commit: the stubs and the reference are overlaid on the whole
@@ -108,7 +110,7 @@ exclude_tests() {
 test_deps() {
   restore_tests || return 1
   exclude_tests
-  cd "$REPO" && mvn -B -Dmaven.repo.local="$M2" test \
+  cd "$REPO" && mvn -B "${MVN_REPO[@]}" test \
     '-Dtest=*#noirResolveProvidersOnly' -Dsurefire.failIfNoSpecifiedTests=false
 }
 
@@ -119,7 +121,7 @@ existing_tests() {
   exclude_tests
   cd "$REPO" || return 1
   rm -rf target/surefire-reports
-  mvn -B -o -Dmaven.repo.local="$M2" -Dsurefire.timeout=600 test
+  mvn -B -o "${MVN_REPO[@]}" -Dsurefire.timeout=600 test
   local rc=$?
   if [ -d target/surefire-reports ]; then
     cp -R target/surefire-reports "$OUT/existing-tests"
