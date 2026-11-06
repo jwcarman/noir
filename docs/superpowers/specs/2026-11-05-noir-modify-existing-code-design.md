@@ -140,7 +140,7 @@ repository:
    files listed under `## Tests to update` are excluded. A failure becomes an Examiner problem
    naming the test class and method, and is fed back as usual.
 
-If every Examiner attempt ends with only check-4 problems, the seal is rejected with a **new
+If the final Examiner attempt ends with only check-4 problems, the seal is rejected with a **new
 reason**, `conflicts_with_existing_tests`. The issue comment names the failing test classes. They
 are ordinary repository code, so naming them reveals nothing secret. The comment suggests listing
 them under `## Tests to update`. Otherwise rejections are as in Plan 5: comment, remove
@@ -155,7 +155,9 @@ issue body, which `bodySha256` covers, and the base commit, which `baseSha` cove
 list: the modify targets, the tests to update, and "any new file". The builder prompt states the
 lock rule.
 
-**The lock check** is new and runs after each build attempt, before measurement. On the host,
+**The lock check** is new and runs after each build attempt, before measurement, for every
+spec, including new-file-only ones. That finally enforces constraints like "do not modify
+`Counter`". On the host,
 `LockCheck` compares the attempt bundle with the base commit by name and status, using the
 existing bundle tooling and never running git in the builder's tree. Every path that existed at
 the base commit is locked unless it is a modify target or a listed test. A locked path that was
@@ -209,10 +211,10 @@ The desktop still needs no credential and no Docker.
 
 ## 8. Migration
 
-- **`spec.json` schema version 2.** `apiStubs` entries gain `kind` (`new` or `modify`), and a new
-  `testsToUpdate` list (default empty) is added. Version 1 files read as all-`new` with no tests
-  to update.
-- **New-file-only specs** behave exactly as today.
+- **`spec.json` schema version 2** adds `modifies` (the `apiStubs` paths that are modify targets)
+  and `testsToUpdate`. Both default to empty, and version 1 files read with both empty.
+- **New-file-only specs** parse, render and seal exactly as today. The only change to how they
+  are built is the lock check (§6).
 - `SealRejection` gains `CONFLICTS_WITH_EXISTING_TESTS` (`conflicts_with_existing_tests`).
 - **No new metrics.** Lock-check failures count under the existing `CONTRACT_VIOLATION` category.
 - **The README and the skill** document modify specs.
