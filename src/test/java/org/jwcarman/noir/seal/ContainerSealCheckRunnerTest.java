@@ -1,13 +1,16 @@
 package org.jwcarman.noir.seal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.ContainerResult;
+import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.docker.FakeContainerPort;
 import org.jwcarman.noir.docker.Mount;
 import org.jwcarman.noir.spec.Specs;
@@ -92,5 +95,77 @@ class ContainerSealCheckRunnerTest {
           .containsEntry("EXCLUDE_TESTS", String.join(",", spec.testsToUpdate()));
     }
     assertThat(spec.testsToUpdate()).hasSizeGreaterThan(1);
+  }
+
+  /** Answers the inventory phase as {@code seal-check.sh} would, writing into /work/out. */
+  static ContainerResult inventoryWritten(org.jwcarman.noir.docker.ContainerSpec spec) {
+    var out =
+        spec.mounts().stream()
+            .filter(m -> m.container().equals("/work/out"))
+            .findFirst()
+            .orElseThrow()
+            .host();
+    try {
+      Files.writeString(out.resolve("clone.exit"), "0\n");
+      Files.writeString(out.resolve("inventory.exit"), "0\n");
+      Files.writeString(out.resolve("libraries.txt"), "org.assertj:assertj-core:3.27.3\n");
+      Files.writeString(out.resolve("packages.txt"), "org.assertj.core.api\n");
+      Files.createDirectories(out.resolve("repo"));
+    } catch (java.io.IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
+    return new ContainerResult(0, "", "", false, "id");
+  }
+
+  @Test
+  void inventoryRunsOnlineAgainstTheBaseOnly() throws Exception {
+    var docker = new FakeContainerPort(ContainerSealCheckRunnerTest::inventoryWritten);
+    var out = tmp.resolve("inventory");
+    Files.createDirectories(out);
+    Files.writeString(out.resolve("stale.txt"), "x");
+    Files.writeString(tmp.resolve("base.bundle"), "b");
+
+    var files =
+        new ContainerSealCheckRunner(docker, NoirConfig.defaults())
+            .inventory(tmp.resolve("base.bundle"), "abc123", out);
+
+    assertThat(files)
+        .isEqualTo(
+            new RepoInventoryFiles(
+                List.of("org.assertj:assertj-core:3.27.3"), List.of("org.assertj.core.api")));
+    assertThat(docker.specs()).hasSize(1);
+    var spec = docker.specs().getFirst();
+    assertThat(spec.command()).containsExactly("/opt/noir/bin/seal-check.sh", "inventory");
+    assertThat(spec.network()).isTrue();
+    assertThat(spec.env()).containsEntry("BASE_SHA", "abc123");
+    assertThat(spec.mounts())
+        .extracting(Mount::container)
+        .containsExactlyInAnyOrder("/work/base.bundle", "/work/out");
+    assertThat(out.resolve("stale.txt")).doesNotExist();
+    assertThat(out.resolve("repo")).doesNotExist();
+    assertThat(out.resolve("container.log")).exists();
+  }
+
+  @Test
+  void failedInventoryIsAnInfrastructureFailure() throws Exception {
+    var docker =
+        new FakeContainerPort(spec -> {
+          inventoryWritten(spec);
+          var out = spec.mounts().getLast().host();
+          try {
+            Files.writeString(out.resolve("inventory.exit"), "1\n");
+            Files.writeString(out.resolve("inventory.log"), "Could not resolve dependencies\n");
+          } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+          }
+          return new ContainerResult(0, "", "", false, "id");
+        });
+    Files.writeString(tmp.resolve("base.bundle"), "b");
+
+    assertThatThrownBy(() ->
+            new ContainerSealCheckRunner(docker, NoirConfig.defaults())
+                .inventory(tmp.resolve("base.bundle"), "abc123", tmp.resolve("inventory")))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("Could not resolve dependencies");
   }
 }

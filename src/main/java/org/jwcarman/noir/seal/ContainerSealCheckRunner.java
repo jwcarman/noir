@@ -10,10 +10,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.ContainerPort;
 import org.jwcarman.noir.docker.ContainerResult;
 import org.jwcarman.noir.docker.ContainerSpec;
+import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.docker.Mount;
 import org.jwcarman.noir.spec.ItemId;
 
@@ -22,7 +24,8 @@ import org.jwcarman.noir.spec.ItemId;
  * clone, assumptions, stub build, dependency download) and {@code check} (no network: compile and
  * run the holdout tests, build the reference, mutation testing, and for a modify spec the
  * repository's existing tests against the reference). Holdout tests and the reference never run
- * with network access, matching grading conditions.
+ * with network access, matching grading conditions. A third phase, {@code inventory} (with network,
+ * the base commit only), lists the repository's libraries and their packages.
  */
 public final class ContainerSealCheckRunner implements SealCheckRunner {
   static final int RERUNS = 3;
@@ -78,6 +81,43 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
     }
     SCRATCH.forEach(d -> deleteRecursively(outDir.resolve(d)));
     return new SealArtifacts(outDir);
+  }
+
+  /**
+   * Runs the {@code inventory} phase against the base commit alone (no stubs, no suite). Throws
+   * {@link DockerException} when it did not finish, so the seal is retried or blocked rather than
+   * examined without an inventory.
+   */
+  @Override
+  public RepoInventoryFiles inventory(Path bundle, String baseSha, Path outDir) {
+    deleteRecursively(outDir);
+    try {
+      Files.createDirectories(outDir);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+    var mounts = List.of(Mount.ro(bundle, "/work/base.bundle"), Mount.rw(outDir, "/work/out"));
+    var result = docker.run(spec("inventory", mounts, Map.of("BASE_SHA", baseSha), true));
+    var log = new StringBuilder();
+    record(log, "inventory", result);
+    try {
+      Files.writeString(outDir.resolve("container.log"), log);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+    SCRATCH.forEach(d -> deleteRecursively(outDir.resolve(d)));
+    var artifacts = new SealArtifacts(outDir);
+    for (var step : List.of("clone", "inventory")) {
+      if (!artifacts.exit(step).equals(Optional.of(0))) {
+        throw new DockerException(
+            "repository inventory failed at "
+                + step
+                + (result.timedOut() ? " (timed out)" : "")
+                + ": "
+                + artifacts.logTail(step, 20));
+      }
+    }
+    return RepoInventoryFiles.read(outDir);
   }
 
   private ContainerSpec spec(

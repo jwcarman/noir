@@ -104,6 +104,43 @@ public final class GitCli implements GitPort {
   }
 
   @Override
+  public List<String> listFiles(Path repoDir, String rev, String pathPrefix) {
+    var env = java.util.Map.of("GIT_TERMINAL_PROMPT", "0", "LC_ALL", "C");
+    var resolved =
+        runner.run(
+            Command.of(
+                    List.of("git", "-C", repoDir.toString(), "cat-file", "-e", rev + "^{commit}"))
+                .withEnv(env));
+    if (!resolved.ok()) {
+      throw new GitException(
+          "git ls-tree failed: cannot resolve " + rev + ": " + resolved.tail(20));
+    }
+    var result =
+        runner.run(
+            Command.of(
+                    List.of(
+                        "git",
+                        "-C",
+                        repoDir.toString(),
+                        "ls-tree",
+                        "-r",
+                        "-z",
+                        "--name-only",
+                        "--full-tree",
+                        rev,
+                        "--",
+                        pathPrefix))
+                .withEnv(env));
+    if (!result.ok()) {
+      throw new GitException("git ls-tree failed: " + result.tail(20));
+    }
+    if (result.truncated()) {
+      throw new GitException("git ls-tree output for " + pathPrefix + " was truncated");
+    }
+    return java.util.Arrays.stream(result.stdout().split("\0")).filter(p -> !p.isEmpty()).toList();
+  }
+
+  @Override
   public String diffNoIndex(Path dir, String oldPath, String newPath) {
     var result =
         runner.run(

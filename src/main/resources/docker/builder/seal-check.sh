@@ -6,10 +6,12 @@
 # Usage: seal-check.sh prepare   (network on)  clone, assumptions, stub build, dependencies
 #        seal-check.sh check     (network off) holdout compile/run, reference build/runs, PIT,
 #                                              existing tests against the reference
+#        seal-check.sh inventory (network on)  the base commit's libraries and their packages:
+#                                              libraries.txt and packages.txt
 # State shared between phases lives in /work/out (repo, Maven cache, dependency jars).
 #
 # Inputs (read-only mounts): /work/base.bundle, /work/stubs, and for "check" also
-# /work/holdout and /work/reference.
+# /work/holdout and /work/reference. "inventory" reads only /work/base.bundle.
 # Env: BASE_SHA, HOLDOUT_PKG, TARGET_CLASSES (comma-separated), TEST_TIMEOUT (e.g. 10s), RERUNS,
 #      EXISTING_TESTS (yes|no: run the repository's tests against the reference) and
 #      EXCLUDE_TESTS (comma-separated repository paths of test files left out of that run)
@@ -68,6 +70,40 @@ stub_build() {
 # supplies JUnit.
 drop_junit_jars() {
   mkdir -p "$1" && rm -f -- "$1"/junit-*.jar "$1"/opentest4j-*.jar "$1"/apiguardian-api-*.jar
+}
+
+# The repository's runtime and test-scope libraries at the base commit, without the stubs:
+# libraries.txt (group:artifact:version, sorted) and packages.txt (the package of every class in
+# their jars, sorted), both without JUnit's own jars. A repository without a pom has neither.
+inventory() {
+  : >"$OUT/libraries.txt" && : >"$OUT/packages.txt" && cd "$REPO" || return 1
+  [ -f pom.xml ] || return 0
+  local listing=/tmp/noir-dependencies.txt scope jar
+  rm -f "$listing"
+  for scope in runtime test; do
+    mvn -B "${MVN_REPO[@]}" "$DEPENDENCY_PLUGIN:list" -DincludeScope="$scope" \
+      -DoutputFile="$listing" -DappendOutput=true || return 1
+    mvn -B "${MVN_REPO[@]}" "$DEPENDENCY_PLUGIN:copy-dependencies" -DincludeScope="$scope" \
+      -DoutputDirectory="$OUT/deps" || return 1
+  done
+  drop_junit_jars "$OUT/deps" || return 1
+  # Lines look like "   group:artifact:type[:classifier]:version:scope[ -- module ...]"; the
+  # artifact and version name the jar, so JUnit's are dropped by the same file-name patterns.
+  sed -e 's/ -- .*//' -e 's/^[[:space:]]*//' "$listing" \
+    | awk -F: 'NF >= 5 { print $1 ":" $2 ":" $(NF - 1) }' \
+    | awk -F: '{ jar = $2 "-" $3 ".jar" }
+        jar !~ /^(junit-|opentest4j-|apiguardian-api-)/ { print }' \
+    | LC_ALL=C sort -u >"$OUT/libraries.txt" || return 1
+  local entries=/tmp/noir-jar-entries.txt
+  : >"$entries"
+  for jar in "$OUT"/deps/*.jar; do
+    [ -f "$jar" ] || continue
+    jar tf "$jar" >>"$entries" || return 1
+  done
+  # A class's package is its entry's directory (a multi-release jar's versions/N/ prefix dropped);
+  # entries without one (module-info, the default package) have none.
+  sed -nE '/\.class$/ { s#^META-INF/versions/[0-9]+/##; /\//! d; s#/[^/]*$##; s#/#.#g; p; }' \
+    "$entries" | LC_ALL=C sort -u >"$OUT/packages.txt"
 }
 
 holdout_compile() {
@@ -169,8 +205,15 @@ prepare_phase() {
   exit 0
 }
 
+inventory_phase() {
+  run clone clone || exit 0
+  run inventory inventory
+  exit 0
+}
+
 [ "${1:-}" = prepare ] && prepare_phase
-[ "${1:-}" = check ] || { echo "usage: seal-check.sh prepare|check" >&2; exit 2; }
+[ "${1:-}" = inventory ] && inventory_phase
+[ "${1:-}" = check ] || { echo "usage: seal-check.sh prepare|check|inventory" >&2; exit 2; }
 [ "$(cat "$OUT/stub-build.exit" 2>/dev/null)" = 0 ] || exit 0
 
 run holdout-compile holdout_compile || exit 0

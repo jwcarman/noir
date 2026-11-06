@@ -26,7 +26,9 @@ import org.jwcarman.noir.NoirHome;
 import org.jwcarman.noir.agent.ScriptedAgent;
 import org.jwcarman.noir.commit.Commitments;
 import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
+import org.jwcarman.noir.factory.InfraFailure;
 import org.jwcarman.noir.factory.Retry;
 import org.jwcarman.noir.git.GitCli;
 import org.jwcarman.noir.git.GitFixtures;
@@ -73,6 +75,9 @@ class ApprovalSealerTest {
   Path origin;
   List<String> clones;
   Deque<BiFunction<SealInputs, Path, SealArtifacts>> checkResults;
+  List<String> inventoryCalls;
+  List<Integer> inventoryCallsSeenByExaminer;
+  RuntimeException inventoryFailure;
   ScriptedAgent agent;
   ApprovalSealer sealer;
   int issue;
@@ -87,16 +92,35 @@ class ApprovalSealerTest {
     origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), REPO);
     clones = new ArrayList<>();
     checkResults = new ArrayDeque<>();
+    inventoryCalls = new ArrayList<>();
+    inventoryCallsSeenByExaminer = new ArrayList<>();
     agent =
         new ScriptedAgent((n, work) -> {
+          inventoryCallsSeenByExaminer.add(inventoryCalls.size());
           write(work.resolve("out/holdout/noir/holdout/T.java"), GOOD_TEST);
           write(work.resolve("out/reference/" + referencePath), referenceSource);
         });
-    SealCheckRunner checks =
-        (inputs, out) ->
+    var fixture =
+        SealArtifactsFixture.checks((inputs, out) ->
             checkResults.isEmpty()
                 ? SealArtifactsFixture.good(out)
-                : checkResults.pop().apply(inputs, out);
+                : checkResults.pop().apply(inputs, out));
+    SealCheckRunner checks =
+        new SealCheckRunner() {
+          @Override
+          public SealArtifacts run(SealInputs inputs, Path out) {
+            return fixture.run(inputs, out);
+          }
+
+          @Override
+          public RepoInventoryFiles inventory(Path bundle, String baseSha, Path out) {
+            inventoryCalls.add(baseSha + " " + bundle.getFileName() + " " + out);
+            if (inventoryFailure != null) {
+              throw inventoryFailure;
+            }
+            return fixture.inventory(bundle, baseSha, out);
+          }
+        };
     var clock = Clock.fixed(Instant.parse("2026-11-04T12:00:00Z"), ZoneOffset.UTC);
     var config = NoirConfig.defaults();
     var git = new LocalGit();
@@ -152,6 +176,11 @@ class ApprovalSealerTest {
     @Override
     public java.util.Optional<String> show(Path repoDir, String rev, String path) {
       return gitCli.show(repoDir, rev, path);
+    }
+
+    @Override
+    public List<String> listFiles(Path repoDir, String rev, String pathPrefix) {
+      return gitCli.listFiles(repoDir, rev, pathPrefix);
     }
 
     @Override
@@ -288,6 +317,29 @@ class ApprovalSealerTest {
         .hasContent(Specs.stubsFor(Specs.valid()).getFirst().content());
     assertThat(home.repos().resolve("jwcarman/demo/.git")).isDirectory();
     assertThat(clones).containsExactly(REPO);
+  }
+
+  @Test
+  void inventoryIsListedOnceFromTheBaseBeforeTheExaminer() {
+    assertThat(sealer.seal(item)).isInstanceOf(SealOutcome.Passed.class);
+
+    assertThat(inventoryCallsSeenByExaminer).containsExactly(1);
+
+    assertThat(inventoryCalls)
+        .containsExactly(originHead() + " base.bundle " + itemDir().resolve("inventory"));
+    assertThat(itemDir().resolve("inventory/libraries.txt")).exists();
+    assertThat(itemDir().resolve("inventory/packages.txt")).exists();
+  }
+
+  @Test
+  void failedInventoryIsAnInfrastructureFailure() {
+    inventoryFailure = new DockerException("no network");
+
+    assertThatThrownBy(() -> sealer.seal(item)).isInstanceOf(InfraFailure.class);
+
+    assertThat(eventTypes()).containsExactly("approved");
+    assertThat(itemDir().resolve("commitment.json")).doesNotExist();
+    assertThat(inventoryCalls).hasSize(NoirConfig.defaults().infraRetries() + 1);
   }
 
   @Test

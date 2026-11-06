@@ -39,6 +39,9 @@ public final class SuiteSealer {
   /** Prefix of the problem for a reference file outside the API stub paths. */
   static final String STRAY_REFERENCE = "reference file not at an API stub path: ";
 
+  /** Where the repository inventory is listed, under the item dir. */
+  static final String INVENTORY_DIR = "inventory";
+
   private static final String BASE_FILE = "base.java";
   private static final String REFERENCE_FILE = "reference.java";
 
@@ -81,9 +84,27 @@ public final class SuiteSealer {
   }
 
   /**
+   * The repository inventory at the spec's base commit, listed into {@code itemDir/inventory/}:
+   * {@code contract} is the issue view of the API stubs and {@code mainSources} the base commit's
+   * {@code src/main/java} sources, keyed by path. A failed listing is retried as an infrastructure
+   * failure, then thrown as {@link org.jwcarman.noir.factory.InfraFailure}.
+   */
+  public RepoInventory inventory(
+      Spec spec,
+      List<StubSource> contract,
+      Map<String, String> mainSources,
+      Path itemDir,
+      Path bundle) {
+    var files =
+        retry.call(() -> checks.inventory(bundle, spec.baseSha(), itemDir.resolve(INVENTORY_DIR)));
+    return RepoInventory.of(files, mainSources, spec, contract);
+  }
+
+  /**
    * Examines the spec: {@code contract} is the issue view (fragments for modify targets) shown to
-   * the Examiner, {@code stubs} the complete files, and {@code baseSources} each modify target's
-   * content at the base commit, keyed by path (empty for a spec that modifies nothing).
+   * the Examiner, {@code stubs} the complete files, {@code baseSources} each modify target's
+   * content at the base commit, keyed by path (empty for a spec that modifies nothing), and {@code
+   * inventory} what the repository offers hidden tests.
    */
   public Examination examine(
       Spec spec,
@@ -91,7 +112,8 @@ public final class SuiteSealer {
       List<StubSource> stubs,
       Map<String, String> baseSources,
       Path itemDir,
-      Path bundle) {
+      Path bundle,
+      RepoInventory inventory) {
     var stubPackages = stubPackages(stubs);
     List<String> problems = List.of();
     for (int attempt = 1; attempt <= config.examiner().attempts(); attempt++) {

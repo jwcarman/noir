@@ -4,10 +4,38 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.BiFunction;
 
 /** Writes seal-check artifacts as {@code seal-check.sh} would, for tests. */
 public final class SealArtifactsFixture {
   private SealArtifactsFixture() {}
+
+  /** The inventory of a repository with no libraries and no main sources. */
+  public static final RepoInventory EMPTY_INVENTORY =
+      new RepoInventory(List.of(), Set.of(), Set.of(), Optional.empty(), "");
+
+  /**
+   * A runner whose checks are {@code run} and whose inventory lists no libraries (writing the empty
+   * listing files, as {@code seal-check.sh inventory} does for such a repository).
+   */
+  public static SealCheckRunner checks(BiFunction<SealInputs, Path, SealArtifacts> run) {
+    return new SealCheckRunner() {
+      @Override
+      public SealArtifacts run(SealInputs inputs, Path outDir) {
+        return run.apply(inputs, outDir);
+      }
+
+      @Override
+      public RepoInventoryFiles inventory(Path bundle, String baseSha, Path outDir) {
+        write(outDir, RepoInventoryFiles.LIBRARIES, "");
+        write(outDir, RepoInventoryFiles.PACKAGES, "");
+        return RepoInventoryFiles.read(outDir);
+      }
+    };
+  }
 
   /** A fully passing run. */
   public static SealArtifacts good(Path out) {

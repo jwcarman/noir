@@ -101,6 +101,55 @@ class GitCliTest {
   }
 
   @Test
+  void listFilesListsEveryFileUnderThePrefixAtRevision(@TempDir Path tmp) throws Exception {
+    var origin =
+        GitFixtures.originWithFiles(
+            tmp.resolve("remotes"),
+            "jwcarman/demo",
+            java.util.Map.of(
+                "src/main/java/com/example/A.java", "a",
+                "src/main/java/com/example/deep/B.java", "b",
+                "src/main/java/odd name.java", "c",
+                "src/test/java/com/example/ATest.java", "t",
+                "README.md", "r"));
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("clone"));
+    var sha = gitPort.revParse(clone, "origin/main");
+    Files.writeString(clone.resolve("src/main/java/Later.java"), "later");
+    git(clone, "add", ".");
+    git(clone, "commit", "-qm", "later");
+
+    assertThat(gitPort.listFiles(clone, sha, "src/main/java/"))
+        .containsExactly(
+            "src/main/java/com/example/A.java",
+            "src/main/java/com/example/deep/B.java",
+            "src/main/java/odd name.java");
+    assertThat(gitPort.listFiles(clone, sha, "src/nope/")).isEmpty();
+  }
+
+  @Test
+  void listFilesOfABogusRevisionThrows(@TempDir Path tmp) throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), "jwcarman/demo");
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("clone"));
+    assertThatThrownBy(() -> gitPort.listFiles(clone, "no-such-rev", "src/"))
+        .isInstanceOf(GitException.class);
+  }
+
+  @Test
+  void listFilesTruncatedOutputThrows() {
+    var runner =
+        new org.jwcarman.noir.exec.FakeCommandRunner()
+            .whenArgvStartsWith(
+                java.util.List.of("git", "-C", "/r", "cat-file"),
+                new org.jwcarman.noir.exec.CommandResult(0, "", "", false, false))
+            .whenArgvStartsWith(
+                java.util.List.of("git", "-C", "/r", "ls-tree"),
+                new org.jwcarman.noir.exec.CommandResult(0, "a.java", "", false, true));
+    assertThatThrownBy(() -> new GitCli(runner).listFiles(Path.of("/r"), "HEAD", "src/"))
+        .isInstanceOf(GitException.class)
+        .hasMessageContaining("truncated");
+  }
+
+  @Test
   void neverPromptsForCredentials() {
     var runner =
         new org.jwcarman.noir.exec.FakeCommandRunner()

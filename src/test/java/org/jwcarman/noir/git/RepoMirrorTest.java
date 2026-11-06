@@ -54,6 +54,11 @@ class RepoMirrorTest {
     }
 
     @Override
+    public java.util.List<String> listFiles(Path repoDir, String rev, String pathPrefix) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean exists(Path repoDir, String sha, String path) {
       throw new UnsupportedOperationException();
     }

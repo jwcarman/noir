@@ -34,8 +34,9 @@ import org.jwcarman.noir.store.WorkItem;
 
 /**
  * The {@code SEALING} phase: seals the issue a human approved with {@code noir:ready}. Checks the
- * approval still covers the current text, parses the issue as a spec, pins the base commit,
- * examines a holdout suite and posts the commitment. Infrastructure exceptions propagate.
+ * approval still covers the current text, parses the issue as a spec, pins the base commit, lists
+ * the repository inventory, examines a holdout suite and posts the commitment. Infrastructure
+ * exceptions propagate.
  */
 public final class ApprovalSealer implements ApprovalSealing {
   /**
@@ -50,9 +51,12 @@ public final class ApprovalSealer implements ApprovalSealing {
           "stubs",
           "fragments",
           "base.bundle",
+          SuiteSealer.INVENTORY_DIR,
           "holdout",
           "reference",
           "commitment.json");
+
+  private static final String MAIN_JAVA = "src/main/java/";
 
   private final Store store;
   private final GitHubPort gh;
@@ -191,8 +195,10 @@ public final class ApprovalSealer implements ApprovalSealing {
     var bundle = itemDir.resolve("base.bundle");
     git.bundle(repoDir, baseSha, bundle);
 
+    var inventory =
+        suiteSealer.inventory(spec, parsed.stubs(), mainSources(repoDir, baseSha), itemDir, bundle);
     var examination =
-        suiteSealer.examine(spec, parsed.stubs(), stubs, baseSources, itemDir, bundle);
+        suiteSealer.examine(spec, parsed.stubs(), stubs, baseSources, itemDir, bundle, inventory);
     if (examination.problems() != null && !examination.conflictingTests().isEmpty()) {
       return reject(
           item,
@@ -213,6 +219,17 @@ public final class ApprovalSealer implements ApprovalSealing {
     Commitments.write(
         Commitments.create(spec, itemDir, examination.model(), bodySha), commitmentFile);
     return publish(item, commitmentFile);
+  }
+
+  /** The base commit's {@code src/main/java} Java sources, keyed by path. */
+  private Map<String, String> mainSources(Path repoDir, String baseSha) {
+    var sources = new LinkedHashMap<String, String>();
+    for (var path : git.listFiles(repoDir, baseSha, MAIN_JAVA)) {
+      if (path.endsWith(".java")) {
+        git.show(repoDir, baseSha, path).ifPresent(content -> sources.put(path, content));
+      }
+    }
+    return sources;
   }
 
   private void recordApproval(

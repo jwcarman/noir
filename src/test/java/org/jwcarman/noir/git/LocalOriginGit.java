@@ -30,6 +30,11 @@ public record LocalOriginGit(GitCli cli, Path origin) implements GitPort {
   }
 
   @Override
+  public java.util.List<String> listFiles(Path repoDir, String rev, String pathPrefix) {
+    return cli.listFiles(repoDir, rev, pathPrefix);
+  }
+
+  @Override
   public boolean exists(Path repoDir, String sha, String path) {
     return cli.exists(repoDir, sha, path);
   }

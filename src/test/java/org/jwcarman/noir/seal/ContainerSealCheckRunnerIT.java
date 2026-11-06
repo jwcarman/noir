@@ -304,9 +304,8 @@ class ContainerSealCheckRunnerIT {
         .doesNotExist();
   }
 
-  /** The repository's test-scope libraries (AssertJ here) are on the hidden tests' classpath. */
-  @Test
-  void holdoutSeesTestScopeDependencies(@TempDir Path tmp) throws Exception {
+  /** A one-commit repository whose test scope adds AssertJ to JUnit. */
+  static Path assertjBundle(Path tmp) {
     var pom =
         BuildFixtures.POM_WITH_JUNIT
             .formatted(
@@ -334,9 +333,16 @@ class ContainerSealCheckRunnerIT {
                 "src/main/java/com/example/api/Placeholder.java",
                 "package com.example.api;\n\npublic final class Placeholder {}\n"));
     var clone = GitFixtures.cloneOf(origin, tmp.resolve("assertj-clone"));
-    var head = git.revParse(clone, "origin/main");
     var b = tmp.resolve("assertj.bundle");
-    git.bundle(clone, head, b);
+    git.bundle(clone, git.revParse(clone, "origin/main"), b);
+    return b;
+  }
+
+  /** The repository's test-scope libraries (AssertJ here) are on the hidden tests' classpath. */
+  @Test
+  void holdoutSeesTestScopeDependencies(@TempDir Path tmp) throws Exception {
+    var b = assertjBundle(tmp);
+    var head = git.revParse(tmp.resolve("assertj-clone"), "origin/main");
     var inputs =
         SealInputs.of(
             Specs.valid().withBaseSha(head),
@@ -362,5 +368,61 @@ class ContainerSealCheckRunnerIT {
     assertThat(judge("holdout-good")).isEmpty();
     assertThat(out.resolve("test-deps.exit")).doesNotExist();
     assertThat(out.resolve("existing-tests.exit")).doesNotExist();
+  }
+
+  @Test
+  void inventoryListsLibrariesAndPackages(@TempDir Path tmp) throws Exception {
+    var b = assertjBundle(tmp);
+    var head = git.revParse(tmp.resolve("assertj-clone"), "origin/main");
+
+    var files = new ContainerSealCheckRunner(docker, config).inventory(b, head, out);
+
+    assertThat(files.libraries())
+        .as(new SealArtifacts(out).logTail("inventory", 40))
+        .contains("org.assertj:assertj-core:3.27.3")
+        .noneMatch(
+            l -> l.contains("junit") || l.contains("opentest4j") || l.contains("apiguardian"));
+    assertThat(files.packages())
+        .contains("org.assertj.core.api")
+        .noneMatch(p ->
+            p.startsWith("org.junit")
+                || p.startsWith("org.opentest4j")
+                || p.startsWith("org.apiguardian"));
+    assertThat(out.resolve(RepoInventoryFiles.LIBRARIES)).exists();
+    assertThat(out.resolve(RepoInventoryFiles.PACKAGES)).exists();
+    assertThat(out.resolve("repo")).doesNotExist();
+  }
+
+  /** JUnit's own artifacts are never listed, though what they depend on (jspecify) is. */
+  @Test
+  void inventoryLeavesOutJUnitsOwnArtifacts() throws Exception {
+    var files = new ContainerSealCheckRunner(docker, config).inventory(bundle, sha, out);
+    assertThat(files.libraries())
+        .as(new SealArtifacts(out).logTail("inventory", 40))
+        .contains("org.jspecify:jspecify:1.0.0")
+        .noneMatch(l ->
+            l.startsWith("org.junit")
+                || l.startsWith("org.opentest4j")
+                || l.startsWith("org.apiguardian"));
+    assertThat(files.packages())
+        .contains("org.jspecify.annotations")
+        .noneMatch(p ->
+            p.startsWith("org.junit")
+                || p.startsWith("org.opentest4j")
+                || p.startsWith("org.apiguardian"));
+  }
+
+  @Test
+  void inventoryOfARepositoryWithoutAPomIsEmpty(@TempDir Path tmp) throws Exception {
+    var origin =
+        GitFixtures.originWithFiles(
+            tmp.resolve("remotes"), "jwcarman/nopom", java.util.Map.of("README.md", "hi\n"));
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("nopom-clone"));
+    var head = git.revParse(clone, "origin/main");
+    var b = tmp.resolve("nopom.bundle");
+    git.bundle(clone, head, b);
+
+    var files = new ContainerSealCheckRunner(docker, config).inventory(b, head, out);
+    assertThat(files).isEqualTo(new RepoInventoryFiles(List.of(), List.of()));
   }
 }

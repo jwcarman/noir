@@ -123,7 +123,14 @@ class SuiteSealerTest {
   }
 
   SuiteSealer.Examination examine() {
-    return suiteSealer.examine(spec, List.of(STUB), List.of(STUB), Map.of(), itemDir, bundle);
+    return suiteSealer.examine(
+        spec,
+        List.of(STUB),
+        List.of(STUB),
+        Map.of(),
+        itemDir,
+        bundle,
+        SealArtifactsFixture.EMPTY_INVENTORY);
   }
 
   @Test
@@ -206,7 +213,15 @@ class SuiteSealerTest {
             NoirConfig.defaults(),
             clock,
             retry());
-    var e = s.examine(spec, List.of(STUB), List.of(STUB), Map.of(), itemDir, bundle);
+    var e =
+        s.examine(
+            spec,
+            List.of(STUB),
+            List.of(STUB),
+            Map.of(),
+            itemDir,
+            bundle,
+            SealArtifactsFixture.EMPTY_INVENTORY);
     assertThat(e.problems()).isNull();
     assertThat(flaky.calls).isEqualTo(2);
     assertThat(store.readEvents(itemDir))
@@ -265,8 +280,15 @@ class SuiteSealerTest {
             NoirConfig.defaults(),
             Clock.systemUTC(),
             retry());
-    assertThatThrownBy(
-            () -> s.examine(spec, List.of(STUB), List.of(STUB), Map.of(), itemDir, bundle))
+    assertThatThrownBy(() ->
+            s.examine(
+                spec,
+                List.of(STUB),
+                List.of(STUB),
+                Map.of(),
+                itemDir,
+                bundle,
+                SealArtifactsFixture.EMPTY_INVENTORY))
         .isInstanceOf(ExaminerFailedException.class)
         .hasMessage("Examiner agent failed: Invalid API key · Fix external API key");
     assertThat(failing.calls).isEqualTo(1);
@@ -299,7 +321,15 @@ class SuiteSealerTest {
             clock,
             retry());
 
-    var e = s.examine(spec, List.of(STUB), List.of(STUB), Map.of(), itemDir, bundle);
+    var e =
+        s.examine(
+            spec,
+            List.of(STUB),
+            List.of(STUB),
+            Map.of(),
+            itemDir,
+            bundle,
+            SealArtifactsFixture.EMPTY_INVENTORY);
 
     assertThat(e.problems()).isNull();
     assertThat(a.requests()).hasSize(2);
@@ -360,7 +390,13 @@ class SuiteSealerTest {
             retry());
     var modifySpec = spec.withModifies(List.of(STUB.path()));
     return s.examine(
-        modifySpec, List.of(STUB), List.of(STUB), Map.of(STUB.path(), FOO_BASE), itemDir, bundle);
+        modifySpec,
+        List.of(STUB),
+        List.of(STUB),
+        Map.of(STUB.path(), FOO_BASE),
+        itemDir,
+        bundle,
+        SealArtifactsFixture.EMPTY_INVENTORY);
   }
 
   @Test

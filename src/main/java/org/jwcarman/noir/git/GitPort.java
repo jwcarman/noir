@@ -1,6 +1,7 @@
 package org.jwcarman.noir.git;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 /** The git operations noir needs on a local clone of the target repository. */
@@ -24,6 +25,12 @@ public interface GitPort {
 
   /** The content of {@code path} at {@code rev}, or empty when the path does not exist there. */
   Optional<String> show(Path repoDir, String rev, String path);
+
+  /**
+   * The paths of every file under {@code pathPrefix} (a directory, such as {@code src/main/java/})
+   * in the tree of {@code rev}, sorted; empty when there are none.
+   */
+  List<String> listFiles(Path repoDir, String rev, String pathPrefix);
 
   /**
    * {@code git diff --no-index -U0} of two files under {@code dir} (paths relative to it), with

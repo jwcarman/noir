@@ -86,7 +86,8 @@ class ReapprovalFlowTest {
               work.resolve("out/reference/src/main/java/com/example/api/Foo.java"),
               "package com.example.api;\npublic interface Foo {}\n");
         });
-    SealCheckRunner checks = (inputs, out) -> SealArtifactsFixture.good(out);
+    SealCheckRunner checks =
+        SealArtifactsFixture.checks((inputs, out) -> SealArtifactsFixture.good(out));
     var sealer =
         new ApprovalSealer(
             store,
