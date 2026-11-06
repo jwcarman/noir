@@ -146,26 +146,61 @@ class ContainerSealCheckRunnerTest {
     assertThat(out.resolve("container.log")).exists();
   }
 
-  @Test
-  void failedInventoryIsAnInfrastructureFailure() throws Exception {
-    var docker =
-        new FakeContainerPort(spec -> {
-          inventoryWritten(spec);
-          var out = spec.mounts().getLast().host();
-          try {
-            Files.writeString(out.resolve("inventory.exit"), "1\n");
-            Files.writeString(out.resolve("inventory.log"), "Could not resolve dependencies\n");
-          } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
-          }
-          return new ContainerResult(0, "", "", false, "id");
-        });
-    Files.writeString(tmp.resolve("base.bundle"), "b");
+  /** Answers the inventory phase, then overwrites {@code file} with {@code content}. */
+  static FakeContainerPort inventoryWith(String file, String content, boolean timedOut) {
+    return new FakeContainerPort(spec -> {
+      inventoryWritten(spec);
+      var out = spec.mounts().getLast().host();
+      try {
+        if (content == null) {
+          Files.delete(out.resolve(file));
+        } else {
+          Files.writeString(out.resolve(file), content);
+        }
+      } catch (java.io.IOException e) {
+        throw new java.io.UncheckedIOException(e);
+      }
+      return new ContainerResult(timedOut ? -1 : 0, "", "", timedOut, "id");
+    });
+  }
 
-    assertThatThrownBy(() ->
-            new ContainerSealCheckRunner(docker, NoirConfig.defaults())
-                .inventory(tmp.resolve("base.bundle"), "abc123", tmp.resolve("inventory")))
+  RepoInventoryFiles inventory(FakeContainerPort docker) throws Exception {
+    Files.writeString(tmp.resolve("base.bundle"), "b");
+    return new ContainerSealCheckRunner(docker, NoirConfig.defaults())
+        .inventory(tmp.resolve("base.bundle"), "abc123", tmp.resolve("inventory"));
+  }
+
+  /**
+   * A listing Maven could not produce (a broken or multi-module pom) is the repository's problem,
+   * which the seal checks reject later: the inventory is empty and its log kept.
+   */
+  @Test
+  void failedListingIsAnEmptyInventory() throws Exception {
+    var docker = inventoryWith("inventory.exit", "1\n", false);
+    var files = inventory(docker);
+    assertThat(files).isEqualTo(new RepoInventoryFiles(List.of(), List.of()));
+    assertThat(tmp.resolve("inventory/inventory.exit")).hasContent("1");
+  }
+
+  @Test
+  void failedCloneIsAnInfrastructureFailure() throws Exception {
+    var docker = inventoryWith("clone.exit", "128\n", false);
+    assertThatThrownBy(() -> inventory(docker))
         .isInstanceOf(DockerException.class)
-        .hasMessageContaining("Could not resolve dependencies");
+        .hasMessageContaining("clone");
+  }
+
+  @Test
+  void containerThatNeverFinishedTheListingIsAnInfrastructureFailure() throws Exception {
+    var docker = inventoryWith("inventory.exit", null, false);
+    assertThatThrownBy(() -> inventory(docker)).isInstanceOf(DockerException.class);
+  }
+
+  @Test
+  void timedOutInventoryIsAnInfrastructureFailure() throws Exception {
+    var docker = inventoryWith("inventory.exit", "1\n", true);
+    assertThatThrownBy(() -> inventory(docker))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("timed out");
   }
 }

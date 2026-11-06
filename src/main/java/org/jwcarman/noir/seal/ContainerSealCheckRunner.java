@@ -85,8 +85,9 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
 
   /**
    * Runs the {@code inventory} phase against the base commit alone (no stubs, no suite). Throws
-   * {@link DockerException} when it did not finish, so the seal is retried or blocked rather than
-   * examined without an inventory.
+   * {@link DockerException} when the container timed out, the clone failed or the listing never
+   * finished, so the seal is retried or blocked. A listing Maven failed (a broken or multi-module
+   * pom) is an empty inventory: the seal checks reject such a repository as before.
    */
   @Override
   public RepoInventoryFiles inventory(Path bundle, String baseSha, Path outDir) {
@@ -107,17 +108,34 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
     }
     SCRATCH.forEach(d -> deleteRecursively(outDir.resolve(d)));
     var artifacts = new SealArtifacts(outDir);
-    for (var step : List.of("clone", "inventory")) {
-      if (!artifacts.exit(step).equals(Optional.of(0))) {
-        throw new DockerException(
-            "repository inventory failed at "
-                + step
-                + (result.timedOut() ? " (timed out)" : "")
-                + ": "
-                + artifacts.logTail(step, 20));
+    if (result.timedOut()) {
+      throw inventoryFailed("the container timed out", artifacts, "inventory");
+    }
+    if (!artifacts.exit("clone").equals(Optional.of(0))) {
+      throw inventoryFailed("clone failed", artifacts, "clone");
+    }
+    var listed = artifacts.exit("inventory");
+    if (listed.isEmpty()) {
+      throw inventoryFailed("the listing never finished", artifacts, "inventory");
+    }
+    if (listed.get() != 0) {
+      // Maven could not list the repository's dependencies (a broken or multi-module pom): the
+      // seal checks reject that as they always have, so the inventory is just empty. Its log stays.
+      try {
+        Files.writeString(outDir.resolve(RepoInventoryFiles.LIBRARIES), "");
+        Files.writeString(outDir.resolve(RepoInventoryFiles.PACKAGES), "");
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
       }
+      return new RepoInventoryFiles(List.of(), List.of());
     }
     return RepoInventoryFiles.read(outDir);
+  }
+
+  private static DockerException inventoryFailed(
+      String reason, SealArtifacts artifacts, String step) {
+    return new DockerException(
+        "repository inventory failed: " + reason + ": " + artifacts.logTail(step, 20));
   }
 
   private ContainerSpec spec(

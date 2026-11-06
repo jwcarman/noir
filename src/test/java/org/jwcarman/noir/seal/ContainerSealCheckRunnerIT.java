@@ -425,4 +425,49 @@ class ContainerSealCheckRunnerIT {
     var files = new ContainerSealCheckRunner(docker, config).inventory(b, head, out);
     assertThat(files).isEqualTo(new RepoInventoryFiles(List.of(), List.of()));
   }
+
+  /**
+   * A pom whose dependencies cannot be resolved is the repository's problem: the inventory is empty
+   * (its log kept) and the seal checks go on to reject it as they always have.
+   */
+  @Test
+  void unresolvablePomGivesAnEmptyInventoryAndTheChecksReject(@TempDir Path tmp) throws Exception {
+    var pom =
+        BuildFixtures.POM_WITH_JUNIT
+            .formatted("")
+            .replace(
+                "</dependencies>",
+                """
+                  <dependency>
+                    <groupId>com.example.noir</groupId>
+                    <artifactId>does-not-exist</artifactId>
+                    <version>1.0.0</version>
+                  </dependency>
+                </dependencies>
+                """);
+    var origin =
+        GitFixtures.originWithFiles(
+            tmp.resolve("remotes"), "jwcarman/broken", java.util.Map.of("pom.xml", pom));
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("broken-clone"));
+    var head = git.revParse(clone, "origin/main");
+    var b = tmp.resolve("broken.bundle");
+    git.bundle(clone, head, b);
+    var runner = new ContainerSealCheckRunner(docker, config);
+
+    var inventoryDir = tmp.resolve("inventory");
+    var files = runner.inventory(b, head, inventoryDir);
+
+    assertThat(files).isEqualTo(new RepoInventoryFiles(List.of(), List.of()));
+    assertThat(new SealArtifacts(inventoryDir).exit("inventory")).isPresent().get().isNotEqualTo(0);
+    assertThat(new SealArtifacts(inventoryDir).logTail("inventory", 40)).contains("does-not-exist");
+
+    var inputs =
+        SealInputs.of(
+            Specs.valid().withBaseSha(head),
+            b,
+            fixture("stubs"),
+            fixture("holdout-good"),
+            fixture("reference"));
+    assertThat(SealJudge.judge(runner.run(inputs, out), config.sealDiscrimination())).isNotEmpty();
+  }
 }
