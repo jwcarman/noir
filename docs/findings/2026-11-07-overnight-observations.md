@@ -113,7 +113,7 @@ Wall clock is seal start to PR (excluding time queued behind other items).
    starting with `=`, `+`, `-`, `@` opens as a formula in a spreadsheet; #18 is "back up to a
    spreadsheet" and does not guard it). Same family: whether returned collections must be
    unmodifiable (`WordWrap` returns a mutable `ArrayList`; the spec was silent).
-6. **The builder resolves spec contradictions silently.** By accident, #66 had a wrong example
+6. **The builder resolves spec contradictions silently.** *Addressed on branch `plan-10-spec-problems` (spec-problem reports; "Why it failed").* By accident, #66 had a wrong example
    (after `get("a")` and `resize(2)`, the next `put` evicts `d`, not `a` as the example said). The
    builder followed the Javadoc contract, which was right, and wrote a test comment explaining why,
    but nothing reached a human: the PR body is silent and the issue still carries the wrong example.
@@ -156,7 +156,7 @@ Wall clock is seal start to PR (excluding time queued behind other items).
    picked up next poll, but because items are driven one at a time that poll only comes after the
    whole current item finishes. Cheap fix: none needed beyond the concurrency change in
    Improvements 1.
-9. **A failed item does not tell the human what went wrong.** #75's draft PR and the issue say
+9. **A failed item does not tell the human what went wrong.** *Addressed on branch `plan-10-spec-problems` (spec-problem reports; "Why it failed").* #75's draft PR and the issue say
    only "noir could not satisfy every requirement within 4 attempts", with every metric `n/a`. The
    actual cause is simple and fixable by the author: `RomanNumeralsTest.toRomanRejectsOutOfRange`
    asserts that 4000 throws, and it is not under Tests to update. Proposals: put the last
@@ -164,7 +164,7 @@ Wall clock is seal start to PR (excluding time queued behind other items).
    RomanNumeralsTest.toRomanRejectsOutOfRange`, `CONTRACT_VIOLATION: added ...`; these are the
    repo's own tests, nothing secret); and when a pre-existing test fails, say "add it under
    `## Tests to update` and approve again".
-10. **NO_OUTPUT attempts are wasted and silent.** Attempts 2 and 3 committed nothing: the builder
+10. **NO_OUTPUT attempts are wasted and silent.** *Addressed on branch `plan-10-spec-problems` (spec-problem reports; "Why it failed").* Attempts 2 and 3 committed nothing: the builder
     had evidently concluded it could not pass without editing a locked test, which was correct.
     Its reasoning is lost and the next attempt's feedback only says "produced no commits". If the
     builder could say "blocked: the spec conflicts with locked test X" (the spec-notes channel
@@ -182,7 +182,7 @@ Wall clock is seal start to PR (excluding time queued behind other items).
     artifacts were downloaded under. The real failure still fitted, but a longer log would push it
     out. Fix: give the mirror the id `central` in the generated settings.xml, or drop `[INFO]
     Artifact`/`Downloading`/`Downloaded` lines from feedback tails.
-13. **The builder prompt always promises hidden tests** (minor, found 2026-11-07 while designing
+13. **The builder prompt always promises hidden tests** *Addressed on branch `plan-10-spec-problems` (spec-problem reports; "Why it failed").* (minor, found 2026-11-07 while designing
     the spec-problems channel). `builder-system.md`'s "Acceptance" section says hidden acceptance
     tests will check every requirement, even for items sealed with hidden tests off (the default).
     The builder works toward a gate that doesn't exist and isn't told that the quality bar and the

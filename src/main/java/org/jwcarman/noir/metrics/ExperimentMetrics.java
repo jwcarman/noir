@@ -44,6 +44,7 @@ public final class ExperimentMetrics {
     int modified = 0;
     int rejected = 0;
     int holdoutDefects = 0;
+    int specProblemItems = 0;
 
     for (var h : items) {
       var state = h.item().state();
@@ -101,6 +102,9 @@ public final class ExperimentMetrics {
           rejections.merge(String.valueOf(e.data().get("reason")), 1, Integer::sum);
         }
       }
+      if (events.stream().anyMatch(e -> e.type().equals("spec_problems"))) {
+        specProblemItems++;
+      }
 
       var latestByPr = new HashMap<String, Event>();
       for (var e : events) {
@@ -157,6 +161,7 @@ public final class ExperimentMetrics {
         median(approval),
         median(sealTime),
         sealRejections(rejections),
+        specProblemItems,
         accepted,
         modified,
         rejected,

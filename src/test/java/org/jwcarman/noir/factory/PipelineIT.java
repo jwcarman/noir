@@ -800,6 +800,74 @@ class PipelineIT {
   }
 
   /**
+   * The builder reports that R1 conflicts with the locked CounterTest instead of building: the item
+   * goes back to draft with a comment quoting the report, and nothing is measured or delivered.
+   */
+  @Test
+  void builderSpecProblemSendsIssueToDraft() {
+    var a =
+        approveModify(
+            modifyBody("three", List.of()),
+            "examiner-cap",
+            (n, work) -> {
+              try {
+                Files.writeString(
+                    work.resolve("SPEC-PROBLEMS.json"),
+                    "{\"problems\":[{\"requirement\":\"R1\",\"files\":[\""
+                        + COUNTER_TEST_PATH
+                        + "\"],\"explanation\":\"R1 caps the count, but CounterTest is locked.\"}]}");
+              } catch (IOException e) {
+                throw new UncheckedIOException(e);
+              }
+            },
+            config.examiner().attempts());
+
+    assertThat(a.path())
+        .as(String.valueOf(a.github().comments(a.issue())))
+        .isEqualTo("SEALING > SEALED > BUILDING > DRAFT");
+    assertThat(a.github().comments(a.issue()))
+        .last()
+        .asString()
+        .startsWith("noir stopped work on this issue: the builder reports")
+        .contains(
+            "- **R1** (`"
+                + COUNTER_TEST_PATH
+                + "`): R1 caps the count, but CounterTest is locked.");
+    assertThat(a.github().issue(a.issue()).labels())
+        .contains("noir:draft")
+        .doesNotContain("noir:ready");
+    assertThat(a.github().pullRequests()).isEmpty();
+  }
+
+  /**
+   * Attempt 1 caps the count at one, breaking the locked CounterTest.incrementTwice; attempts 2-4
+   * stop without changes. The draft pull request says why, naming the locked test and its file.
+   */
+  @Test
+  void failedItemNamesTheLockedTest() {
+    var a =
+        approveModify(
+            modifyBody("three", List.of()),
+            "examiner-cap",
+            (n, work) -> {
+              if (n == 1) {
+                copying(modifyFixture("builders/breaks-locked-test/attempt-1")).accept(n, work);
+              }
+            },
+            config.examiner().attempts());
+
+    assertThat(a.store().readWorkItem(a.itemId()).state()).as(a.path()).isEqualTo(State.FAILED);
+    assertThat(a.github().pullRequests())
+        .singleElement()
+        .satisfies(pr ->
+            assertThat(pr.body())
+                .contains("### Why it failed")
+                .contains("- Attempt 1: the build failed.")
+                .contains("Existing tests that failed: `com.example.api.CounterTest#incrementTwice")
+                .contains("list `" + COUNTER_TEST_PATH + "` under `## Tests to update`"));
+  }
+
+  /**
    * Attempt 1 leaves every file the spec locks untouched but makes Counter.increment() throw
    * JUnit's abort exception by reflection, so the locked CounterTest cases that call it report as
    * skipped and the build passes. Sealing recorded which base tests pass; measurement finds two of

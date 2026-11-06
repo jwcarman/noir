@@ -416,6 +416,7 @@ class ExperimentMetricsTest {
               Rework cycles          0.0 per item
               Failure categories     none
               Seal rejections        none
+              Spec problems          0 reported by the builder
               Cost                   $0.24 total, $0.24 per item
               Wall time (median)     1m 13s
               Approval time (median) n/a
@@ -424,5 +425,22 @@ class ExperimentMetricsTest {
               Holdout defects        0
               Auto-merge             not eligible: 0/20 completed items
             """);
+  }
+
+  @Test
+  void builderSpecProblemReportsAreCountedOncePerItem() {
+    var report = Map.<String, Object>of("problems", List.of());
+    var r =
+        ExperimentMetrics.compute(
+            List.of(
+                item(
+                    "a",
+                    State.DRAFT,
+                    0,
+                    ev("a", 1, "spec_problems", 1, report),
+                    ev("a", 2, "spec_problems", 1, report)),
+                item("b", State.PR_OPEN, 0, grade("b", 1, "passed"))));
+    assertThat(r.specProblemItems()).isEqualTo(1);
+    assertThat(r.render()).contains("Spec problems          1 reported by the builder");
   }
 }

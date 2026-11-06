@@ -47,7 +47,10 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    branch, runs the repository's existing tests on the base commit to record
    which ones pass, and posts a SHA-256 commitment to the issue text, base
    commit and stubs. A default branch whose tests fail is rejected
-   (`base_tests_fail`): fix it first. **Hidden tests are off by default**; turn them on for one issue with
+   (`base_tests_fail`): fix it first. If the Examiner finds that the spec
+   contradicts itself or a locked test, it reports the problem instead of
+   working around it, and the seal is rejected (`spec_problem`) with the
+   report quoted on the issue. **Hidden tests are off by default**; turn them on for one issue with
    the `noir:hidden-tests` label, or for every issue with `hiddenTests: true`
    in `config.yaml`. With hidden tests on, the server also asks a separate
    *Examiner* agent to write a **holdout acceptance suite** and a reference
@@ -61,7 +64,12 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    body was edited after `noir:ready` was added is rejected the same way, and
    edits after sealing never affect the build (noir comments once to say so).
 4. **Build.** The server runs Claude Code headlessly in a locked-down Docker
-   container against the spec.
+   container against the spec. If the builder finds that no implementation can
+   meet the spec as written (for example, a requirement contradicts an existing
+   test the spec doesn't list under `## Tests to update`), it writes a report
+   instead. noir stops the item, quotes the report on the issue, and sends the
+   issue back to `noir:draft`; revise the spec and add `noir:ready` again, and
+   the item starts over from a fresh seal.
 5. **Measure.** In fresh containers noir measures line coverage (JaCoCo),
    mutation score (PIT), CRAP score, and API conformance of the changed
    classes. Falling short of the spec's quality bar (by default line coverage
@@ -80,7 +88,10 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    metrics, holdout results (or a note that hidden tests were off), provenance (base SHA, commitment, models, image
    digests) and cost (builder and Examiner, as reported by Claude Code). Each attempt is one commit titled after the issue, e.g.
    `Add a Counter (#12)` (`…, attempt 2` for rework). When attempts run out it
-   opens a draft PR instead.
+   opens a draft PR instead (or comments, if no attempt has commits), with a
+   **Why it failed** section: what went wrong in each attempt, and any existing
+   tests that failed but that the spec doesn't let change, with the file to list
+   under `## Tests to update`.
 
 Work items move through `DRAFT → SEALING → SEALED → BUILDING → MEASURING →
 GRADING → PR_OPEN`, with `REWORK`, `FAILED`, `BLOCKED`, and `CANCELLED` along

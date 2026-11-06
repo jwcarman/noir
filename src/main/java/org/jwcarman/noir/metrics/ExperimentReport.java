@@ -24,6 +24,7 @@ public record ExperimentReport(
     Duration medianApprovalTime,
     Duration medianSealTime,
     Map<String, Integer> sealRejections,
+    int specProblemItems,
     int accepted,
     int modified,
     int rejected,
@@ -60,6 +61,7 @@ public record ExperimentReport(
         meanReworkCycles == null ? "n/a" : String.format("%.1f per item", meanReworkCycles));
     line(sb, "Failure categories", failureCategories.isEmpty() ? "none" : categoriesText());
     line(sb, "Seal rejections", sealRejections.isEmpty() ? "none" : rejectionsText());
+    line(sb, "Spec problems", specProblemItems + " reported by the builder");
     line(
         sb,
         "Cost",
@@ -169,6 +171,7 @@ public record ExperimentReport(
     m.put("medianApprovalTime", medianApprovalTime == null ? null : medianApprovalTime.toString());
     m.put("medianSealTime", medianSealTime == null ? null : medianSealTime.toString());
     m.put("sealRejections", sealRejections);
+    m.put("specProblemItems", specProblemItems);
     m.put("accepted", accepted);
     m.put("modified", modified);
     m.put("rejected", rejected);
