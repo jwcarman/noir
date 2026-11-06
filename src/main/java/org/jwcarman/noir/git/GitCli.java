@@ -117,6 +117,8 @@ public final class GitCli implements GitPort {
                         "--no-color",
                         "--no-ext-diff",
                         "--no-textconv",
+                        // A CRLF base against an LF reference is not a change on every line.
+                        "--ignore-cr-at-eol",
                         "-U0",
                         "--src-prefix=a/",
                         "--dst-prefix=b/",

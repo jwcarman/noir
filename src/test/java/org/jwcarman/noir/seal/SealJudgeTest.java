@@ -236,7 +236,23 @@ class SealJudgeTest {
     assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of()))).isEmpty();
 
     pitMutants(mutant(COUNTER, 5, false));
-    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of())))
+    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of()))).isEmpty();
+  }
+
+  /**
+   * A change PIT cannot mutate (a constant, a static initializer, Javadoc) leaves no mutant on the
+   * changed lines. PIT did run and mutate the class, so there is nothing to score, not a failure.
+   */
+  @Test
+  void changedLinesWithNoMutantsPass() {
+    pitMutants(mutant(COUNTER, 5, false), mutant(COUNTER, 6, false));
+    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of(3)))).isEmpty();
+  }
+
+  @Test
+  void emptyReportStillFailsForModifyTargets() {
+    pitMutants();
+    assertThat(judge(java.util.Map.of(COUNTER, java.util.Set.of(3))))
         .containsExactly("mutation testing produced no mutants");
   }
 

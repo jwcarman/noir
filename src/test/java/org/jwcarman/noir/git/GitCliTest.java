@@ -201,6 +201,19 @@ class GitCliTest {
         .containsEntry("reference.java", java.util.Set.of(2, 4));
   }
 
+  /** A CRLF base and an LF reference differ only in line endings, which are not changes. */
+  @Test
+  void diffNoIndexIgnoresLineEndings(@TempDir Path tmp) throws Exception {
+    Files.writeString(tmp.resolve("base.java"), "a\r\nb\r\nc\r\n");
+    Files.writeString(tmp.resolve("reference.java"), "a\nB\nc\n");
+    var diff = gitPort.diffNoIndex(tmp, "base.java", "reference.java");
+    assertThat(org.jwcarman.noir.measure.DiffLines.added(diff, java.util.Set.of("reference.java")))
+        .containsEntry("reference.java", java.util.Set.of(2));
+
+    Files.writeString(tmp.resolve("reference.java"), "a\nb\nc\n");
+    assertThat(gitPort.diffNoIndex(tmp, "base.java", "reference.java")).isEmpty();
+  }
+
   @Test
   void diffNoIndexOfEqualFilesIsEmpty(@TempDir Path tmp) throws Exception {
     Files.writeString(tmp.resolve("base.java"), "a\n");
@@ -235,6 +248,7 @@ class GitCliTest {
             "--no-color",
             "--no-ext-diff",
             "--no-textconv",
+            "--ignore-cr-at-eol",
             "-U0",
             "--src-prefix=a/",
             "--dst-prefix=b/",

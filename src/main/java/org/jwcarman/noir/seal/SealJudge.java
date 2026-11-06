@@ -178,13 +178,19 @@ public final class SealJudge {
       problems.add("mutation testing produced no mutants" + (tail.isBlank() ? "" : ":\n" + tail));
       return;
     }
-    var summary =
-        changedLinesByClass.isEmpty()
-            ? PitMutations.parse(xml)
-            : changedLineSummary(xml, changedLinesByClass);
-    if (summary.total() == 0) {
+    var whole = PitMutations.parse(xml);
+    if (whole.total() == 0) {
       problems.add("mutation testing produced no mutants");
-    } else if (summary.score() < threshold) {
+      return;
+    }
+    var summary =
+        changedLinesByClass.isEmpty() ? whole : changedLineSummary(xml, whole, changedLinesByClass);
+    // PIT mutated the code, but none of it on the changed lines (a constant, a static initializer
+    // or Javadoc changed): there is nothing to score.
+    if (summary.total() == 0) {
+      return;
+    }
+    if (summary.score() < threshold) {
       problems.add(
           String.format(
               Locale.ROOT,
@@ -203,8 +209,7 @@ public final class SealJudge {
    * including one PIT names no class for, is counted.
    */
   private static PitSummary changedLineSummary(
-      Path xml, Map<String, Set<Integer>> changedLinesByClass) {
-    var whole = PitMutations.parse(xml);
+      Path xml, PitSummary whole, Map<String, Set<Integer>> changedLinesByClass) {
     int total = whole.total();
     int detected = whole.detected();
     for (var entry : PitByClass.parseLines(xml).entrySet()) {
