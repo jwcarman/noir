@@ -95,7 +95,10 @@ class ContainerGradeRunnerIT {
   }
 
   Graded grade(Path classes, Path deps) throws Exception {
-    var holdout = fixture("holdout-good");
+    return grade(classes, deps, fixture("holdout-good"));
+  }
+
+  Graded grade(Path classes, Path deps, Path holdout) throws Exception {
     var tags =
         TagIndex.of(HoldoutAnalyzer.analyze(Specs.valid(), holdout, Set.of("com.example.api")));
     var recording = new Recording();
@@ -156,54 +159,6 @@ class ContainerGradeRunnerIT {
   }
 
   @Test
-  void cheatingCounterCannotForgeTheResult() throws Exception {
-    var src = Files.createDirectories(tmp.resolve("cheat-src/com/example/api"));
-    Files.writeString(
-        src.resolve("Counter.java"),
-        """
-        package com.example.api;
-
-        public class Counter {
-          static {
-            try {
-              java.nio.file.Files.writeString(
-                  java.nio.file.Path.of("/work/out/run-1/TEST-junit-jupiter.xml"), "<testsuite/>");
-            } catch (Throwable t) {
-              // denied by the security manager
-            }
-            try {
-              Runtime.getRuntime().addShutdownHook(new Thread(() -> {}));
-            } catch (Throwable t) {
-              // denied by the security manager
-            }
-            try {
-              Runtime.getRuntime().halt(0);
-            } catch (Throwable t) {
-              // denied by the security manager
-            }
-          }
-
-          private int count;
-
-          public void increment() {
-            count += 2;
-          }
-
-          public int get() {
-            return count;
-          }
-
-          public void reset() {
-            count = 1;
-          }
-        }
-        """);
-    var classes = tmp.resolve("classes");
-    javac(classes, javaFiles(tmp.resolve("cheat-src")));
-    assertThat(grade(classes).outcome()).isInstanceOf(GradeOutcome.Failed.class);
-  }
-
-  @Test
   void builderAnnotationProcessorDoesNotAffectHoldoutCompilation() throws Exception {
     var src = Files.createDirectories(tmp.resolve("proc-src/com/example/evil"));
     Files.writeString(
@@ -258,58 +213,58 @@ class ContainerGradeRunnerIT {
   }
 
   @Test
-  void correctCounterWithForbiddenActionsStillPassesAndIsDenied() throws Exception {
-    var src = Files.createDirectories(tmp.resolve("sneaky-src/com/example/api"));
+  void gradesWithoutASecurityManager() throws Exception {
+    var src = Files.createDirectories(tmp.resolve("probe-src/com/example/api"));
     Files.writeString(
-        src.resolve("Counter.java"),
+        src.resolve("SecurityManagerProbe.java"),
         """
         package com.example.api;
 
-        public class Counter {
-          static {
-            try {
-              java.nio.file.Files.writeString(
-                  java.nio.file.Path.of("/work/out/run-1/TEST-junit-jupiter.xml"), "<testsuite/>");
-            } catch (Throwable t) {
-              t.printStackTrace();
-            }
-            try {
-              Runtime.getRuntime().addShutdownHook(new Thread(() -> {}));
-            } catch (Throwable t) {
-              t.printStackTrace();
-            }
-            try {
-              Runtime.getRuntime().halt(0);
-            } catch (Throwable t) {
-              t.printStackTrace();
-            }
-          }
-
-          private int count;
-
-          public void increment() {
-            count++;
-          }
-
-          public int get() {
-            return count;
-          }
-
-          public void reset() {
-            count = 0;
+        public class SecurityManagerProbe {
+          @SuppressWarnings("removal")
+          public static Object installed() {
+            return System.getSecurityManager();
           }
         }
         """);
+    var sources = new ArrayList<>(javaFiles(fixture("reference")));
+    sources.addAll(javaFiles(tmp.resolve("probe-src")));
     var classes = tmp.resolve("classes");
-    javac(classes, javaFiles(tmp.resolve("sneaky-src")));
-    var g = grade(classes);
+    javac(classes, sources);
+
+    var holdout = tmp.resolve("holdout");
+    var pkg = ItemId.holdoutPackage(Specs.ID).substring("noir.holdout.".length());
+    var holdoutDir = Files.createDirectories(holdout.resolve("noir/holdout/" + pkg));
+    Files.copy(
+        fixture("holdout-good").resolve("noir/holdout/" + pkg + "/CounterTest.java"),
+        holdoutDir.resolve("CounterTest.java"));
+    Files.writeString(
+        holdoutDir.resolve("ProbeTest.java"),
+        """
+        package noir.holdout.%s;
+
+        import static org.junit.jupiter.api.Assertions.assertNull;
+
+        import com.example.api.SecurityManagerProbe;
+        import org.junit.jupiter.api.Tag;
+        import org.junit.jupiter.api.Test;
+
+        class ProbeTest {
+          /** R1: the grader installs no security manager. */
+          @Test
+          @Tag("R1")
+          void noSecurityManager() {
+            assertNull(SecurityManagerProbe.installed());
+          }
+        }
+        """
+            .formatted(pkg));
+
+    var g = grade(classes, Files.createDirectories(tmp.resolve("deps")), holdout);
     assertThat(g.outcome())
         .isEqualTo(
             new GradeOutcome.Passed(
-                List.of(new RequirementResult("R1", 3, 3), new RequirementResult("R2", 1, 1))));
-    var artifacts = new GradeArtifacts(tmp.resolve("out"));
-    assertThat(artifacts.read("run-1.log")).contains("AccessControlException");
-    assertThat(artifacts.outcomes("run-1")).hasSize(4);
+                List.of(new RequirementResult("R1", 4, 4), new RequirementResult("R2", 1, 1))));
   }
 
   @Test

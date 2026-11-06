@@ -30,8 +30,7 @@ public final class Images {
           "ClassScan.java",
           GRADER_ROOT + "ForbiddenScan.java");
 
-  static final List<String> GRADER_FILES =
-      List.of("Dockerfile", "grade.sh", "grader.policy", "ForbiddenScan.java");
+  static final List<String> GRADER_FILES = List.of("Dockerfile", "grade.sh", "ForbiddenScan.java");
 
   private Images() {}
 

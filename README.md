@@ -52,10 +52,10 @@ seals and builds the spec in that issue. The **desktop** only writes specs
 5. **Measure.** In fresh containers noir measures line coverage (JaCoCo),
    mutation score (PIT), CRAP score, and API conformance of the changed
    classes. These guide rework; they are not the gate.
-6. **Grade.** The sealed holdout suite runs in a grader with no network
-   under a Java Security Manager. Failures go back to the builder as
-   per-requirement pass counts only — never test code — so the agent can't
-   overfit to the test.
+6. **Grade.** The sealed holdout suite runs in a grader container with no
+   network and read-only mounts. noir does not sandbox the test JVM itself.
+   Failures go back to the builder as per-requirement pass counts only —
+   never test code — so the agent can't overfit to the test.
 7. **Deliver.** On a pass noir pushes a branch and opens a PR with the
    metrics, holdout results, provenance (base SHA, commitment, models, image
    digests) and cost (builder and Examiner, as reported by Claude Code). Each attempt is one commit titled after the issue, e.g.

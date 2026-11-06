@@ -6,13 +6,12 @@
 # Mounts: /work/classes (ro), /work/deps (ro), /work/holdout (ro), /work/out (rw).
 # Env: HOLDOUT_PKG, TEST_TIMEOUT (e.g. 10s), SUITE_TIMEOUT (e.g. 600s)
 #
-# Builder code is untrusted and runs in the test JVM, so that JVM runs under a SecurityManager
-# with /opt/noir/grader.policy (builder code cannot write /work/out, exit, or add shutdown hooks).
+# The container is the sandbox: no network, read-only mounts, unprivileged user. The test JVM itself
+# is not sandboxed (the Security Manager is deprecated and Spring cannot run under a usable policy).
 set -u
 
 OUT=/work/out
 LAUNCHER=/opt/noir/lib/junit-platform-console-standalone.jar
-POLICY=/opt/noir/grader.policy
 HOLDOUT_CLASSES=$OUT/holdout-classes
 mkdir -p "$OUT"
 
@@ -46,8 +45,7 @@ compile_classpath() {
 
 # Test classpath, handed to the launcher's own class loader: holdout classes, builder classes,
 # dependencies. Holdout classes come before builder classes so a builder class cannot shadow a
-# sealed test. It must not be the JVM classpath: the application class loader grants every class it
-# loads RuntimePermission("exitVM"), which would let builder code halt the JVM.
+# sealed test.
 test_classpath() {
   local cp="$HOLDOUT_CLASSES:/work/classes"
   local d
@@ -80,7 +78,6 @@ holdout_compile() {
 
 holdout_run() { # holdout_run <reports-dir-name>
   timeout "$SUITE_TIMEOUT" java \
-    -Djava.security.manager=default -Djava.security.policy==$POLICY \
     -cp "$LAUNCHER" \
     org.junit.platform.console.ConsoleLauncher execute --disable-banner --details=none \
     --class-path "$(test_classpath)" \

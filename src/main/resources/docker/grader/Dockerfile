@@ -12,7 +12,6 @@ RUN (userdel -r ubuntu 2>/dev/null || true) \
 ADD --chmod=644 --checksum=sha256:e62b96ac475dbcde8599ea905d088f65d90778f86e259b856a49fa5c4ea256ec https://repo1.maven.org/maven2/org/junit/platform/junit-platform-console-standalone/6.1.3/junit-platform-console-standalone-6.1.3.jar /opt/noir/lib/junit-platform-console-standalone.jar
 
 COPY --chmod=755 grade.sh /opt/noir/bin/grade.sh
-COPY --chmod=644 grader.policy /opt/noir/grader.policy
 COPY --chmod=644 ForbiddenScan.java /opt/noir/bin/ForbiddenScan.java
 RUN chown -R root:root /opt/noir && chmod -R go-w /opt/noir
 
