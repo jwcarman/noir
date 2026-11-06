@@ -41,6 +41,27 @@ class HoldoutAnalyzerTest {
             Map.of(pkg + ".ValidTest#a", Set.of("R1"), pkg + ".ValidTest#b", Set.of("R1", "R2")));
   }
 
+  /** The workarounds the Examiner prompt recommends must themselves pass the analyzer. */
+  @Test
+  void examinerPromptWorkaroundsPass() {
+    source(
+        "ClockTest",
+        """
+        import org.junit.jupiter.api.*; import java.util.function.LongSupplier;
+        import java.time.Instant; import java.util.Random;
+        class ClockTest {
+          @Test @Tag("R1") @Tag("R2") void a() {
+            long[] now = {0};
+            LongSupplier clock = () -> now[0];
+            now[0] += 5;
+            Instant t = Instant.parse("2026-01-01T00:00:00Z");
+            int r = new Random(42).nextInt();
+          }
+        }\
+        """);
+    assertThat(analyze().problems()).isEmpty();
+  }
+
   @Test
   void repeatedAndFactoryNeedTags() {
     source(

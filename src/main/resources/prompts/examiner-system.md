@@ -31,9 +31,18 @@ Write nothing anywhere else.
 - **Several tests per requirement.** Cover each requirement's examples and its edge cases.
 - **Dependencies.** Use only JUnit Jupiter (`org.junit.jupiter.*`), the JDK, and the packages of
   the API stubs. No AssertJ, Hamcrest, Mockito, or any other library.
-- **Determinism.** No network, no files outside a JUnit `@TempDir`, no `Thread.sleep`, no
-  threads or executors, no reading the clock (`System.currentTimeMillis`, `Instant.now()`, ...),
-  and no unseeded randomness (`new Random()`, `Math.random()`).
+- **Forbidden packages.** Never import or name anything from `java.util.concurrent`,
+  `java.net`, `java.nio.channels` or `java.lang.reflect`, including their subpackages (so no
+  `AtomicLong`, `AtomicInteger`, `ConcurrentHashMap`, `Executors`, `URL` or `Method`). noir
+  rejects a suite that does. The specification's own examples may use such a type, for example an
+  `AtomicLong` as a test clock; write the equivalent without it, such as a `long[]` holder that a
+  lambda reads (`long[] now = {0}; LongSupplier clock = () -> now[0];`).
+- **Determinism.** No network, no files outside a JUnit `@TempDir`, no threads or executors
+  (`new Thread`, `Thread.sleep`, `Thread.ofVirtual`, ...), no reading the clock
+  (`System.currentTimeMillis`, `System.nanoTime`, `Instant.now()`, `LocalDate.now()`, `Clock`,
+  or any other `.now()`), and no unseeded randomness (`new Random()`, `Math.random()`,
+  `new Date()`). Construct times and random generators from fixed values instead
+  (`Instant.parse(...)`, `new Random(42)`).
 - **Every test must fail against the stubs**, whose method bodies throw
   `UnsupportedOperationException`. A test that passes against the stubs tests nothing.
 - **Every test must pass against your reference implementation**, every time.

@@ -72,6 +72,12 @@ and `/noir-spec` in a desktop session with no credential.
   place (checks against the existing suite; a failed Examiner container re-runs
   only that attempt), so a transient Docker failure no longer re-pays earlier
   Examiner attempts.
+- The Examiner prompt now lists the holdout rules up front: the forbidden
+  packages (taken from `HoldoutAnalyzer.deniedPackages()`, with a test keeping
+  the prompt in step), every banned nondeterministic API, and how to replace a
+  forbidden type used by a spec example (`AtomicLong` clock → `long[]` +
+  lambda). Found on noir-test#12, where attempt 1 used `AtomicLong` and was
+  rejected, costing one extra Examiner attempt ($0.48).
 - Idea for Plan 6: comment commands on issues (e.g. `/noir build`), found by
   the existing poll, restricted to users with write access. `@noir` is avoided
   because it is a real GitHub username.

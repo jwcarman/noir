@@ -65,6 +65,14 @@ public final class HoldoutAnalyzer {
 
   private HoldoutAnalyzer() {}
 
+  /**
+   * The packages a holdout suite may not use at all, by import or by name. The Examiner prompt
+   * lists them, and a test keeps the two in step.
+   */
+  public static List<String> deniedPackages() {
+    return DENIED_PREFIXES;
+  }
+
   public static HoldoutReport analyze(Spec spec, Path holdoutDir, Set<String> stubPackages) {
     var problems = new ArrayList<String>();
     var counts = new LinkedHashMap<String, Integer>();
