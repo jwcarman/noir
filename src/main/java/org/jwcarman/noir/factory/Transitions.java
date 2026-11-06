@@ -65,12 +65,16 @@ public final class Transitions {
   }
 
   /**
-   * Moves {@code itemDir/attempts} to {@code itemDir/runs/<n>/attempts}, {@code n} the first unused
-   * run number, and returns {@code n}; 0 (nothing moved) when there is no {@code attempts}.
+   * Moves {@code itemDir/attempts} and {@code itemDir/commitment.json} to {@code
+   * itemDir/runs/<n>/}, {@code n} the first unused run number, and returns {@code n}; 0 when there
+   * is neither. Without its old commitment the reseal starts from scratch (a committed suite is
+   * otherwise reused).
    */
-  static int archiveAttempts(Path itemDir) {
+  public static int archiveAttempts(Path itemDir) {
     var attempts = itemDir.resolve("attempts");
-    if (!Files.exists(attempts, LinkOption.NOFOLLOW_LINKS)) {
+    var commitment = itemDir.resolve("commitment.json");
+    if (!Files.exists(attempts, LinkOption.NOFOLLOW_LINKS)
+        && !Files.exists(commitment, LinkOption.NOFOLLOW_LINKS)) {
       return 0;
     }
     int n = 1;
@@ -81,7 +85,12 @@ public final class Transitions {
     var run = itemDir.resolve("runs").resolve(Integer.toString(n));
     try {
       Files.createDirectories(run);
-      Files.move(attempts, run.resolve("attempts"));
+      if (Files.exists(attempts, LinkOption.NOFOLLOW_LINKS)) {
+        Files.move(attempts, run.resolve("attempts"));
+      }
+      if (Files.exists(commitment, LinkOption.NOFOLLOW_LINKS)) {
+        Files.move(commitment, run.resolve("commitment.json"));
+      }
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }

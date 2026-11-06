@@ -336,16 +336,39 @@ class FactoryTest {
   }
 
   @Test
-  void reportWithASecretBlocksAndPostsNothing() {
+  void reportWithASecretIsMaskedAndPosted() {
     build.report =
         n -> "{\"problems\":[{\"requirement\":\"R1\",\"explanation\":\"key " + SECRET + "\"}]}";
 
     var item = drive();
 
-    assertThat(item.state()).isEqualTo(State.BLOCKED);
-    assertThat(item.blockReason()).isEqualTo(BlockReason.SECRET_FOUND);
-    assertThat(gh.comments(1)).isEmpty();
+    assertThat(item.state()).isEqualTo(State.DRAFT);
+    assertThat(gh.comments(1)).singleElement().asString().contains("key ").doesNotContain(SECRET);
     assertThat(store.readEvents(Specs.ID).toString()).doesNotContain(SECRET);
+  }
+
+  @Test
+  void aSecretCutByTheExplanationCapLeavesNoFragment() {
+    var explanation = "y".repeat(SpecProblems.MAX_EXPLANATION - 10) + SECRET;
+    build.report =
+        n -> "{\"problems\":[{\"requirement\":\"R1\",\"explanation\":\"" + explanation + "\"}]}";
+
+    drive();
+
+    assertThat(gh.comments(1)).singleElement().asString().doesNotContain(SECRET.substring(0, 10));
+  }
+
+  @Test
+  void aSecretCutByTheLastMessageCapLeavesNoFragment() {
+    build.produces = n -> n > 1;
+    var text = SECRET + "b".repeat(Factory.LAST_MESSAGE_CHARS - 10);
+    build.agent =
+        n -> new AgentResult(0, false, false, new BigDecimal("0.10"), 3, "m", text, "sha256:b");
+
+    drive();
+
+    assertThat((String) firstEvent("build_attempt", 1).data().get("lastMessage"))
+        .doesNotContain(SECRET.substring(SECRET.length() - 10));
   }
 
   @Test
@@ -356,6 +379,7 @@ class FactoryTest {
 
     Transitions.applyExternal(
         store, clock, (i, s) -> {}, drafted, new org.jwcarman.noir.lifecycle.Trigger.Approved());
+    recommit(); // what the (faked) reseal writes
     var item = drive();
 
     assertThat(item.state()).isEqualTo(State.PR_OPEN);
@@ -364,6 +388,31 @@ class FactoryTest {
     assertThat(build.calls.get(1).inputBundle()).isEqualTo(itemDir.resolve("base.bundle"));
     assertThat(build.calls.get(1).feedback()).isEmpty();
     assertThat(itemDir.resolve("runs/1/attempts/1")).isDirectory();
+  }
+
+  @Test
+  void aRestartedItemsFailureIgnoresTheEarlierRun() {
+    // Run 1: attempt 1 commits and falls short; attempt 2 reports a spec problem.
+    measure.modes = n -> MeasureMode.SHORTFALL;
+    build.report = n -> n == 2 ? R1_REPORT : null;
+    var drafted = drive();
+    assertThat(drafted.state()).isEqualTo(State.DRAFT);
+    Transitions.applyExternal(
+        store, clock, (i, s) -> {}, drafted, new org.jwcarman.noir.lifecycle.Trigger.Approved());
+    recommit(); // what the (faked) reseal writes
+
+    // Run 2: no attempt commits.
+    build.report = n -> null;
+    build.produces = n -> false;
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.FAILED);
+    assertThat(gh.pullRequests()).as("run 1's commits are not delivered").isEmpty();
+    assertThat(gh.comments(1))
+        .last()
+        .asString()
+        .contains("- Attempts 1\u20134: no commits")
+        .doesNotContain("quality shortfall");
   }
 
   @Test
@@ -499,6 +548,13 @@ class FactoryTest {
         .asString()
         .contains("### Why it failed")
         .contains("- Attempts 1\u20134: no commits");
+  }
+
+  /** The commitment a reseal writes (the fake sealer writes none). */
+  void recommit() {
+    Commitments.write(
+        Commitments.create(spec, itemDir, "examiner-model", "body"),
+        itemDir.resolve("commitment.json"));
   }
 
   Event firstEvent(String type, int attempt) {

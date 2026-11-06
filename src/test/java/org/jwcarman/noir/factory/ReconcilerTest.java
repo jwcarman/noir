@@ -257,4 +257,20 @@ class ReconcilerTest {
     assertThat(store.readWorkItem(A).state()).isEqualTo(State.CANCELLED);
     assertThat(gh.labels(n)).isEmpty();
   }
+
+  @Test
+  void editAfterARestartIsJudgedAgainstTheNewSeal() {
+    int n = issue("noir:ready", "noir:building");
+    item(A, n, State.BUILDING);
+    var t0 = clock.instant();
+    sealedEvent(A, t0);
+    store.appendEvent(Event.of(clock, A, "restarted", 1, Map.of("run", 1)));
+    // The human revised the spec, re-approved, and the reseal read that revision.
+    gh.editIssue(n, "t", "revised", t0.plus(Duration.ofHours(1)));
+    sealedEvent(A, t0.plus(Duration.ofHours(1)));
+
+    reconciler.reconcile();
+
+    assertThat(gh.comments(n)).doesNotContain(EDIT_NOTICE);
+  }
 }

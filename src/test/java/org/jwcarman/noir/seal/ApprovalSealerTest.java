@@ -940,4 +940,18 @@ class ApprovalSealerTest {
         outcome, SealRejection.SPEC_PROBLEM, SpecProblemComment.render("Examiner", report), 1);
     assertThat(agent.requests()).hasSize(1);
   }
+
+  @Test
+  void resealAfterARestartPostsANewCommitment() {
+    sealer = newSealer(NoirConfig.defaults());
+    assertThat(sealer.seal(item)).isInstanceOf(SealOutcome.Passed.class);
+    org.jwcarman.noir.factory.Transitions.archiveAttempts(itemDir());
+    store.appendEvent(Event.of(Clock.systemUTC(), ID, "restarted", 1, Map.of("run", 1)));
+
+    assertThat(sealer.seal(item)).isInstanceOf(SealOutcome.Passed.class);
+
+    assertThat(github.comments(issue)).hasSize(2);
+    assertThat(eventTypes()).filteredOn("sealed"::equals).hasSize(2);
+    assertThat(baselineCalls).hasSize(2);
+  }
 }

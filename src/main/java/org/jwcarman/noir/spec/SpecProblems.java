@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 import org.jwcarman.noir.json.Json;
 
 /**
@@ -50,6 +51,14 @@ public record SpecProblems(List<Problem> problems) {
    * not a regular file, larger than {@value #MAX_BYTES} bytes, or fails {@link #parse}.
    */
   public static Read read(Path file, Spec spec, Set<String> baseFiles) {
+    return read(file, spec, baseFiles, UnaryOperator.identity());
+  }
+
+  /**
+   * {@link #read}, applying {@code mask} to the whole report text before parsing, so a secret is
+   * masked before any field is cut to its cap (a cut secret would leave a fragment no mask finds).
+   */
+  public static Read read(Path file, Spec spec, Set<String> baseFiles, UnaryOperator<String> mask) {
     if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
       return new Absent();
     }
@@ -60,7 +69,7 @@ public record SpecProblems(List<Problem> problems) {
       if (Files.size(file) > MAX_BYTES) {
         return new Invalid("the report is larger than 64 KiB");
       }
-      return parse(Files.readString(file, StandardCharsets.UTF_8), spec, baseFiles);
+      return parse(mask.apply(Files.readString(file, StandardCharsets.UTF_8)), spec, baseFiles);
     } catch (IOException e) {
       return new Invalid("the report could not be read: " + e.getMessage());
     }

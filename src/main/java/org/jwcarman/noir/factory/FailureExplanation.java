@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import org.jwcarman.noir.measure.TestInventory;
 import org.jwcarman.noir.spec.QualityBar;
 import org.jwcarman.noir.store.Event;
+import org.jwcarman.noir.store.Runs;
 
 /**
  * The "Why it failed" section of a failed item's draft pull request and failure comment: one line
@@ -32,7 +33,7 @@ final class FailureExplanation {
    */
   static String render(
       List<Event> allEvents, QualityBar bar, int finalAttempt, String finalCategory) {
-    var events = latestRun(allEvents);
+    var events = Runs.latest(allEvents);
     var categories = new TreeMap<Integer, String>();
     for (var e : events) {
       if (e.type().equals("transition") && e.data().get("category") instanceof String c) {
@@ -98,19 +99,6 @@ final class FailureExplanation {
         .append(": ")
         .append(text)
         .append('\n');
-  }
-
-  /**
-   * The events after the last {@code restarted} event (an earlier run's attempts reuse numbers).
-   */
-  private static List<Event> latestRun(List<Event> events) {
-    int from = 0;
-    for (int i = 0; i < events.size(); i++) {
-      if (events.get(i).type().equals("restarted")) {
-        from = i + 1;
-      }
-    }
-    return events.subList(from, events.size());
   }
 
   private static String line(String category, int attempt, List<Event> events, QualityBar bar) {

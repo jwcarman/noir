@@ -88,11 +88,12 @@ public final class Reconciler {
     if (item.state() == State.DRAFT || item.state() == State.SEALING) {
       return;
     }
-    var events = store.readEvents(item.id());
+    // A restarted item was resealed: judge edits against this run's seal only.
+    var events = org.jwcarman.noir.store.Runs.latest(store.readEvents(item.id()));
     if (events.stream().anyMatch(e -> e.type().equals("edit_notice"))) {
       return;
     }
-    var sealed = events.stream().filter(e -> e.type().equals("sealed")).findFirst();
+    var sealed = events.stream().filter(e -> e.type().equals("sealed")).reduce((a, b) -> b);
     if (sealed.isEmpty() || !editedAt.isAfter(sealedAt(sealed.get()))) {
       return;
     }

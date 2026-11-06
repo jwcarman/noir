@@ -104,4 +104,15 @@ class TransitionsTest {
     assertThat(store.readWorkItem("w1").attempt()).isZero();
     assertThat(store.readEvents("w1").getFirst().data()).containsEntry("run", 0);
   }
+
+  @Test
+  void reapprovalArchivesTheCommitmentToo() throws java.io.IOException {
+    var dir = store.itemDir("w1");
+    java.nio.file.Files.createDirectories(dir);
+    java.nio.file.Files.writeString(dir.resolve("commitment.json"), "{}");
+    item = item.withState(State.DRAFT).withAttempt(1);
+    Transitions.applyExternal(store, clock, (i, s) -> {}, item, new Trigger.Approved());
+    assertThat(dir.resolve("commitment.json")).doesNotExist();
+    assertThat(dir.resolve("runs/1/commitment.json")).hasContent("{}");
+  }
 }

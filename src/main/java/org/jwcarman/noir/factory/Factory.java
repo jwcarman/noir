@@ -59,6 +59,7 @@ import org.jwcarman.noir.spec.SpecJson;
 import org.jwcarman.noir.spec.SpecProblems;
 import org.jwcarman.noir.store.AtomicFiles;
 import org.jwcarman.noir.store.Event;
+import org.jwcarman.noir.store.Runs;
 import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 
@@ -321,14 +322,16 @@ public final class Factory implements ItemDriver {
     data.put("agentError", agent.error());
     data.put("timedOut", agent.timedOut());
     if (!outcome.producedCommits()) {
-      data.put("lastMessage", mask(lastMessage(agent.resultText())));
+      // Mask before cutting: a cut secret would leave a fragment no mask finds.
+      data.put("lastMessage", lastMessage(mask(agent.resultText())));
     }
     event(ctx.item().id(), "build_attempt", n, data);
     var report =
         SpecProblems.read(
             ctx.attempt().build().resolve(SPEC_PROBLEMS_FILE),
             ctx.spec(),
-            ApprovalSealer.baseFiles(ctx.itemDir()));
+            ApprovalSealer.baseFiles(ctx.itemDir()),
+            this::mask);
     switch (report) {
       case SpecProblems.Valid v -> {
         event(ctx.item().id(), "spec_problems", n, Map.of("problems", problemMaps(v.report())));
@@ -461,7 +464,7 @@ public final class Factory implements ItemDriver {
               "category",
               Category.CONTRACT_VIOLATION.name(),
               "violation",
-              mask(cut(violation.get(), VIOLATION_CHARS))));
+              cut(mask(violation.get()), VIOLATION_CHARS)));
       return new Step(
           new Trigger.MeasurementFailed(Category.CONTRACT_VIOLATION),
           new FeedbackInput.ContractViolation(List.of(violation.get())));
@@ -516,7 +519,7 @@ public final class Factory implements ItemDriver {
     if (outcome instanceof MeasureOutcome.Shortfall s) {
       data.put("category", s.input().category().name());
       if (s.input() instanceof FeedbackInput.ContractViolation cv && !cv.mismatches().isEmpty()) {
-        data.put("violation", mask(cut(cv.mismatches().getFirst(), VIOLATION_CHARS)));
+        data.put("violation", cut(mask(cv.mismatches().getFirst()), VIOLATION_CHARS));
       }
     }
     // Metrics are meaningful only when coverage and mutation were actually measured.
@@ -703,7 +706,8 @@ public final class Factory implements ItemDriver {
    * the base; with none, an issue comment carrying the per-requirement results.
    */
   private void draftOrComment(Ctx ctx, WorkItem next, Optional<Category> failure) {
-    var events = store.readEvents(next.id());
+    // This run's events: a restarted item's log still holds the earlier run's.
+    var events = Runs.latest(store.readEvents(next.id()));
     var whyFailed =
         FailureExplanation.render(
             events, bar(ctx.spec()), next.attempt(), failure.map(Enum::name).orElse(null));
@@ -752,7 +756,8 @@ public final class Factory implements ItemDriver {
   private String body(
       Ctx ctx, WorkItem next, AttemptPaths delivered, boolean draft, String whyFailed) {
     int attempt = delivered.attempt();
-    var events = store.readEvents(next.id());
+    // This run's events: a restarted item's log still holds the earlier run's.
+    var events = Runs.latest(store.readEvents(next.id()));
     var commitment = Commitments.read(ctx.itemDir().resolve("commitment.json"));
     var built = latest(events, "build_attempt", attempt);
     var provenance =

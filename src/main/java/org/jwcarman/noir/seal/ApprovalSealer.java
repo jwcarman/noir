@@ -34,6 +34,7 @@ import org.jwcarman.noir.spec.SpecJson;
 import org.jwcarman.noir.spec.SpliceException;
 import org.jwcarman.noir.spec.StubSplicer;
 import org.jwcarman.noir.store.Event;
+import org.jwcarman.noir.store.Runs;
 import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
 
@@ -358,7 +359,8 @@ public final class ApprovalSealer implements ApprovalSealing {
   private SealOutcome publish(WorkItem item, Path commitmentFile) {
     var commitment = Commitments.read(commitmentFile);
     var sha = Commitments.sha256(commitment);
-    var types = store.readEvents(item.id()).stream().map(Event::type).toList();
+    // This run's events only: a restarted item's log still holds the first run's.
+    var types = Runs.latest(store.readEvents(item.id())).stream().map(Event::type).toList();
     if (!types.contains("commitment_posted")) {
       gh.comment(
           item.repo(),
@@ -391,7 +393,7 @@ public final class ApprovalSealer implements ApprovalSealing {
    */
   private Optional<String> sealedEditedAt(WorkItem item, String bodySha) {
     String found = null;
-    for (var e : store.readEvents(item.id())) {
+    for (var e : Runs.latest(store.readEvents(item.id()))) {
       if (e.type().equals("approved")
           && bodySha.equals(e.data().get("bodySha256"))
           && e.data().get(SEALED_EDITED_AT) instanceof String at) {
