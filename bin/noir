@@ -1,2 +1,15 @@
 #!/bin/sh
-exec java -jar "$(dirname "$0")/../target/noir.jar" "$@"
+# Runs noir from a private copy of the jar, so rebuilding target/noir.jar (mvn package or verify)
+# cannot swap classes under a running `noir run`.
+jar="$(dirname "$0")/../target/noir.jar"
+if [ ! -f "$jar" ]; then
+  echo "noir: $jar not found; build it with: mvn -DskipTests package" >&2
+  exit 1
+fi
+copy=$(mktemp "${TMPDIR:-/tmp}/noir-jar.XXXXXX") || exit 1
+trap 'rm -f "$copy"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+cp "$jar" "$copy" || exit 1
+java -jar "$copy" "$@"
+exit $?
