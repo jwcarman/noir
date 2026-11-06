@@ -124,6 +124,18 @@ the same `--home`, e.g. `bin/noir --home ~/noir-server run` with
 `~/noir-server/config.yaml`. Restart `noir run` after rebuilding noir: the
 running server keeps the old code.
 
+Hidden tests are off by default. To seal a hidden test suite for every issue (an
+Examiner agent writes it; the build must pass it), set:
+
+```yaml
+hiddenTests: true
+```
+
+or add the `noir:hidden-tests` label to a single issue before approving it. A
+2026-11-07 experiment found the builder's own tests, held to the quality bar,
+already killed all but 1 of the 594 mutants
+(`docs/findings/2026-11-07-hidden-test-efficacy.md`).
+
 Optionally, send Maven Central traffic from noir's containers to a caching
 proxy (useful when a large dependency tree draws HTTP 429 from Central):
 
@@ -132,7 +144,7 @@ maven:
   mirror: http://host.docker.internal:8081/releases
 ```
 
-The value must be an `http` or `https` URL. noir writes a Maven settings file
+The mirror value must be an `http` or `https` URL. noir writes a Maven settings file
 under its home and mounts it read-only into every builder-image container
 (`MAVEN_ARGS=-s /opt/noir/maven-settings.xml`); only `central` is mirrored, so
 repositories a project declares itself still go direct. Absent, nothing

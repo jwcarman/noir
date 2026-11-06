@@ -11,9 +11,12 @@ seals it and builds it. This skill is the only interactive step and runs on the 
 The spec you write together is everything noir will ever know about the work:
 
 - A **builder** agent implements it from the spec and the API stubs.
-- A separate **Examiner** agent, which sees *only* the spec and stubs (never this conversation,
-  never the repository's code), writes hidden **holdout tests** that decide whether the build is
-  accepted.
+- The build is accepted when the builder's own tests meet the spec's **quality bar** (line
+  coverage, mutation score, CRAP). Optionally, with **hidden tests** on (off by default; the
+  `noir:hidden-tests` label turns them on for one issue), a separate **Examiner** agent, which
+  sees *only* the spec and stubs (never this conversation, never the repository's code), also
+  writes hidden **holdout tests** that the build must pass. Write every spec as if they were on:
+  precise, example-driven requirements serve both gates.
 - **Fairness rule:** the Examiner may test only behavior the spec states. Anything that matters
   and is not written down as a requirement, an example, or stub Javadoc will not be tested, and
   the builder is free to do it differently. Anything vague will be tested by guesswork.
