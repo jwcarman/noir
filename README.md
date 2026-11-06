@@ -15,25 +15,7 @@ seals and builds the spec in that issue. The **desktop** only writes specs
 
 ## How it works
 
-```mermaid
-flowchart TD
-  subgraph Desktop["Desktop (no credentials, no Docker)"]
-    A["/noir-spec skill<br/>co-writes the spec"] --> B["GitHub issue<br/>noir:draft"]
-  end
-  B -- "a human adds noir:ready" --> C
-  subgraph Server["noir server"]
-    C["Seal: the Examiner writes hidden tests<br/>and a reference implementation"] --> D{"Seal checks<br/>fail on today's code · pass on reference ×3<br/>PIT ≥ 0.70 · existing tests still pass"}
-    D -- "sealed: commitment posted on the issue" --> V[("Hidden tests<br/>never shown to the builder")]
-    D -- "sealed" --> E["Build: Claude Code in a<br/>locked-down container"]
-    E --> F{"Measure<br/>lock check · coverage · PIT · CRAP · API"}
-    F -- "passes" --> G{"Grade: hidden tests<br/>in a no-network grader"}
-    V -.-> G
-  end
-  D -- "rejected: comment, back to draft" --> B
-  F -- "rework with feedback" --> E
-  G -- "rework: per-requirement pass counts only" --> E
-  G -- "passes" --> P["Pull request<br/>metrics · holdout results · provenance · cost"]
-```
+<p align="center"><img src="docs/how-it-works.svg" alt="noir pipeline: you write and approve a spec; the server seals hidden tests, builds, measures and grades with no human in the loop, then opens a pull request" width="100%"></p>
 
 1. **Spec.** A work item is a GitHub issue whose body is the spec: `## Intent`,
    `## API contract` (the public API stubs), numbered `## Requirements`
