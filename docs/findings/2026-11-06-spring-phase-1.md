@@ -176,3 +176,13 @@ Branch `plan-7-spring-hidden-tests`, server with the Maven mirror configured.
 | noir-test #53 `Base62` (plain JUnit regression) | JUnit | attempt 1 | attempt 1, all passed | $0.33 | inventory lists only JUnit 6's `jspecify` |
 
 The layered changes that could not seal in Phase 1 (an abstract repository method, a JPA adapter change, a changed test fake, a web endpoint) now seal and build without shaping the code around noir.
+
+## Java 25 acceptance (2026-11-06)
+
+noir on JDK 25 images (Temurin), seal range 17–25, JavaParser at Java 25. noir-test bumped to release 25.
+
+| Spec | Repo release | Seal | Build | Cost | Notes |
+|---|---|---|---|---|---|
+| noir-test #57 padded Base62 (modify + test update) | 25 | attempt 1 | attempt 1, all passed | $0.40 | |
+| noir-test #56 run-length encoding (new file, `import module java.base`) | 25 | attempt 1 | attempt 1, all passed | $0.38 | builder code uses `import module` and `StringBuilder.repeat` |
+| noir-bookmarks #14 tag cloud (regression) | 21 | attempt 1 | attempt 1, all passed | $0.32 | Spring Boot 3.5 repo on release 21, built and graded on JDK 25 |
