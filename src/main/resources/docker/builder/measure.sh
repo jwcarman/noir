@@ -175,7 +175,16 @@ clone() {
 
 export_artifacts() {
   copy_tree "$BUILD/repo/target/classes" "$OUT/export/classes" \
-    && copy_tree "$BUILD/runtime-deps" "$OUT/export/deps"
+    && copy_tree "$BUILD/runtime-deps" "$OUT/export/deps" \
+    && copy_tree "$BUILD/test-deps" "$OUT/export/deps" \
+    && drop_junit_jars "$OUT/export/deps"
+}
+
+# The grader's classpath is the runtime and test-scope jars, de-duplicated by file name (the second
+# copy_tree overwrites the first). JUnit's own jars never come from the repository; noir's launcher
+# supplies JUnit.
+drop_junit_jars() {
+  rm -f -- "$1"/junit-*.jar "$1"/opentest4j-*.jar "$1"/apiguardian-api-*.jar
 }
 
 holdout_sources() {

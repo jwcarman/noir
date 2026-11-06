@@ -57,7 +57,16 @@ assumptions() {
 stub_build() {
   cp -R /work/stubs/. "$REPO/" && cd "$REPO" \
     && mvn -B "${MVN_REPO[@]}" -DskipTests compile "$DEPENDENCY_PLUGIN:copy-dependencies" \
-      -DincludeScope=runtime -DoutputDirectory="$OUT/deps"
+      -DincludeScope=runtime -DoutputDirectory="$OUT/deps" \
+    && mvn -B "${MVN_REPO[@]}" "$DEPENDENCY_PLUGIN:copy-dependencies" \
+      -DincludeScope=test -DoutputDirectory="$OUT/deps" \
+    && drop_junit_jars "$OUT/deps"
+}
+
+# JUnit's own jars never go on a hidden-test classpath from the repository; noir's launcher
+# supplies JUnit.
+drop_junit_jars() {
+  mkdir -p "$1" && rm -f -- "$1"/junit-*.jar "$1"/opentest4j-*.jar "$1"/apiguardian-api-*.jar
 }
 
 holdout_compile() {

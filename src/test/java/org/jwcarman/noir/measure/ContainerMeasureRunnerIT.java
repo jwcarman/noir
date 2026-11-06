@@ -233,6 +233,35 @@ import java.time.Duration;
   }
 
   @Test
+  void exportIncludesTestScopeWithoutJunit() throws Exception {
+    var files = correct();
+    files.put(
+        "pom.xml",
+        BuildFixtures.pom()
+            .replace(
+                "</dependencies>",
+                """
+                  <dependency>
+                    <groupId>org.assertj</groupId>
+                    <artifactId>assertj-core</artifactId>
+                    <version>3.27.3</version>
+                    <scope>test</scope>
+                  </dependency>
+                </dependencies>
+                """));
+    var m = measure(attempt(files));
+    try (var names = Files.list(m.artifacts().exportDeps())) {
+      var jars = names.map(f -> f.getFileName().toString()).toList();
+      assertThat(jars).anyMatch(n -> n.startsWith("assertj-core-") && n.endsWith(".jar"));
+      assertThat(jars)
+          .noneMatch(n ->
+              n.startsWith("junit-")
+                  || n.startsWith("opentest4j-")
+                  || n.startsWith("apiguardian-api-"));
+    }
+  }
+
+  @Test
   void missingMethodIsAContractViolation() {
     var files = correct();
     files.put(COUNTER_PATH, COUNTER_WITHOUT_RESET);

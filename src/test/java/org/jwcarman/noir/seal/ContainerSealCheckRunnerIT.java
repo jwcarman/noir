@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.jwcarman.noir.build.BuildFixtures;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.docker.Images;
@@ -301,6 +302,52 @@ class ContainerSealCheckRunnerIT {
         .exists();
     assertThat(listed.resolve("existing-tests/TEST-com.example.api.LegacyCounterTest.xml"))
         .doesNotExist();
+  }
+
+  /** The repository's test-scope libraries (AssertJ here) are on the hidden tests' classpath. */
+  @Test
+  void holdoutSeesTestScopeDependencies(@TempDir Path tmp) throws Exception {
+    var pom =
+        BuildFixtures.POM_WITH_JUNIT
+            .formatted(
+                """
+                <!-- assertj below -->
+                """)
+            .replace(
+                "</dependencies>",
+                """
+                  <dependency>
+                    <groupId>org.assertj</groupId>
+                    <artifactId>assertj-core</artifactId>
+                    <version>3.27.3</version>
+                    <scope>test</scope>
+                  </dependency>
+                </dependencies>
+                """);
+    var origin =
+        GitFixtures.originWithFiles(
+            tmp.resolve("remotes"),
+            "jwcarman/assertj",
+            java.util.Map.of(
+                "pom.xml",
+                pom,
+                "src/main/java/com/example/api/Placeholder.java",
+                "package com.example.api;\n\npublic final class Placeholder {}\n"));
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("assertj-clone"));
+    var head = git.revParse(clone, "origin/main");
+    var b = tmp.resolve("assertj.bundle");
+    git.bundle(clone, head, b);
+    var inputs =
+        SealInputs.of(
+            Specs.valid().withBaseSha(head),
+            b,
+            fixture("stubs"),
+            fixture("holdout-assertj"),
+            fixture("reference"));
+    var artifacts = new ContainerSealCheckRunner(docker, config).run(inputs, out);
+    assertThat(SealJudge.judge(artifacts, config.sealDiscrimination()))
+        .as(artifacts.logTail("holdout-compile", 40))
+        .isEmpty();
   }
 
   @Test
