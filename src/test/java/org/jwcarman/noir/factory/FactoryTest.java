@@ -234,8 +234,8 @@ class FactoryTest {
         itemDir.resolve("commitment.json"));
     bundles.changes = List.of(new FileChange(FileChange.Status.MODIFIED, calc, null, 1, 0));
     // Only line 5 (covered in the fixture) changes; the whole class is below the 80% bar.
-    bundles.patch =
-        "commit c0ffee\n\n    msg\n\ndiff --git a/"
+    bundles.diff =
+        "diff --git a/"
             + calc
             + " b/"
             + calc
@@ -243,13 +243,14 @@ class FactoryTest {
             + calc
             + "\n+++ b/"
             + calc
-            + "\n@@ -4,2 +4,3 @@\n a\n+b\n c\n";
+            + "\n@@ -4,0 +5 @@\n+b\n";
     measure.modes = n -> MeasureMode.SHORTFALL;
 
     var item = drive();
 
     assertThat(item.state()).isEqualTo(State.PR_OPEN);
     assertThat(item.attempt()).isEqualTo(1);
+    assertThat(bundles.diffPaths).containsExactly(calc);
   }
 
   @Test
@@ -1044,6 +1045,15 @@ class FactoryTest {
     @Override
     public String tip(Path bundle, String branch) {
       return "c0ffee";
+    }
+
+    String diff = "";
+    List<String> diffPaths;
+
+    @Override
+    public String diffSince(Path bundle, String baseSha, String branch, List<String> paths) {
+      diffPaths = paths;
+      return diff;
     }
 
     @Override

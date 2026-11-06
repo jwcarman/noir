@@ -70,6 +70,12 @@ class DispositionsTest {
               }
 
               @Override
+              public String diffSince(
+                  Path bundle, String baseSha, String branch, java.util.List<String> paths) {
+                return "";
+              }
+
+              @Override
               public String patchSince(Path bundle, String baseSha, String branch) {
                 throw new UnsupportedOperationException();
               }

@@ -37,6 +37,42 @@ class GitBundlesTest {
   }
 
   @Test
+  void diffSinceGivesFinalTreeChangedLinesAcrossCommits() throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("origin"), "o/r");
+    var src = GitFixtures.cloneOf(origin, tmp.resolve("src"));
+    var path = "src/main/java/a/C.java";
+    Files.createDirectories(src.resolve("src/main/java/a"));
+    var base = new StringBuilder();
+    for (int i = 1; i <= 10; i++) {
+      base.append("l").append(i).append('\n');
+    }
+    Files.writeString(src.resolve(path), base);
+    Files.writeString(src.resolve("Other.java"), "x\n");
+    git(src, "add", ".");
+    git(src, "commit", "-q", "-m", "base");
+    var baseSha = git(src, "rev-parse", "HEAD").trim();
+    git(src, "checkout", "-q", "-b", "noir/1-x");
+    // c1: NEW1 and NEW2 after l8.
+    Files.writeString(src.resolve(path), base.toString().replace("l8\n", "l8\nNEW1\nNEW2\n"));
+    Files.writeString(src.resolve("Other.java"), "x\ny\n");
+    git(src, "commit", "-q", "-am", "c1");
+    // c2: T1, T2 at the top (shifting c1's lines) and NEW2 deleted again.
+    var c2 = Files.readString(src.resolve(path)).replace("NEW2\n", "");
+    Files.writeString(src.resolve(path), "T1\nT2\n" + c2);
+    git(src, "commit", "-q", "-am", "c2");
+    var bundle = tmp.resolve("out.bundle");
+    git(src, "bundle", "create", "-q", bundle.toString(), "refs/heads/noir/1-x");
+    var bundles = new GitBundles(new ProcessCommandRunner(), tmp.resolve("scratch"));
+
+    var diff = bundles.diffSince(bundle, baseSha, "noir/1-x", java.util.List.of(path));
+
+    assertThat(diff).doesNotContain("Other.java");
+    assertThat(org.jwcarman.noir.measure.DiffLines.added(diff, java.util.Set.of(path)))
+        .isEqualTo(java.util.Map.of(path, java.util.Set.of(1, 2, 11)));
+    assertThat(bundles.diffSince(bundle, baseSha, "noir/1-x", java.util.List.of())).isEmpty();
+  }
+
+  @Test
   void tipIsTheBranchHeadInTheBundle() throws Exception {
     var origin = GitFixtures.originWithCommit(tmp.resolve("origin"), "o/r");
     var src = GitFixtures.cloneOf(origin, tmp.resolve("src"));

@@ -42,11 +42,17 @@ public final class FeedbackRenderer {
         for (var c : q.classes()) {
           sb.append("| ")
               .append(c.className())
+              .append(c.changedLinesOnly() ? " (changed lines only)" : "")
               .append(" | ")
               .append(pct(c.lineCoverage()))
               .append(" | ")
               .append(pct(c.mutationScore()))
               .append(" |\n");
+        }
+        if (q.classes().stream().anyMatch(ClassQuality::changedLinesOnly)) {
+          sb.append(
+              "\nFor files that already existed, only the lines this attempt added or changed are"
+                  + " measured.\n");
         }
         if (!q.crapViolations().isEmpty()) {
           sb.append("\nMethods over the CRAP limit (max ")

@@ -114,6 +114,34 @@ public final class BundleRepo implements AutoCloseable {
     return result.stdout();
   }
 
+  /**
+   * {@code git diff -U0} of {@code baseSha} against {@code branch} for {@code paths} (matched
+   * literally), numbered against {@code branch}'s tree. Empty paths give "" without running git.
+   */
+  public String diffSince(String baseSha, String branch, List<String> paths) {
+    if (paths.isEmpty()) {
+      return "";
+    }
+    var args =
+        new ArrayList<String>(
+            List.of(
+                "diff",
+                "-U0",
+                "--no-renames",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                baseSha,
+                branch,
+                "--"));
+    paths.forEach(p -> args.add(":(literal)" + p));
+    var result = git(args.toArray(String[]::new));
+    if (result.truncated()) {
+      throw new GitException("git diff output for " + baseSha + ".." + branch + " was truncated");
+    }
+    return result.stdout();
+  }
+
   /** Files changed beyond {@code baseSha}, joined from NUL-separated name-status and numstat. */
   public List<FileChange> fileChanges(String baseSha, String branch) {
     var range = baseSha + ".." + branch;

@@ -53,6 +53,33 @@ class FeedbackRendererTest {
   }
 
   @Test
+  void changedLinesOnlyRowsAreMarkedAndExplained() {
+    var md =
+        FeedbackRenderer.render(
+            1,
+            new FeedbackInput.QualityShortfall(
+                new QualityBar(0.8, 0.7, 30),
+                List.of(
+                    new ClassQuality("com.example.Old", 0.5, 0.5, true),
+                    new ClassQuality("com.example.Foo", 0.6, 0.5)),
+                List.of()));
+    assertThat(md)
+        .contains("| com.example.Old (changed lines only) | 50.0% | 50.0% |")
+        .contains("| com.example.Foo | 60.0% | 50.0% |")
+        .contains(
+            "For files that already existed, only the lines this attempt added or changed are"
+                + " measured.");
+    var plain =
+        FeedbackRenderer.render(
+            1,
+            new FeedbackInput.QualityShortfall(
+                new QualityBar(0.8, 0.7, 30),
+                List.of(new ClassQuality("com.example.Foo", 0.6, 0.5)),
+                List.of()));
+    assertThat(plain).doesNotContain("changed lines only").doesNotContain("already existed");
+  }
+
+  @Test
   void qualityShortfallListsCrapViolations() {
     var md =
         FeedbackRenderer.render(

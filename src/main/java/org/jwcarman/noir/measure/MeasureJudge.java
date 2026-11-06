@@ -253,7 +253,7 @@ public final class MeasureJudge {
         }
       }
       if (bad) {
-        failing.add(new ClassQuality(unit.name(), lineCov, score));
+        failing.add(new ClassQuality(unit.name(), lineCov, score, unit.changedLines() != null));
       }
     }
     var metrics =

@@ -2,29 +2,23 @@ package org.jwcarman.noir.measure;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
- * The lines an attempt added or changed, read from its patch.
+ * The lines an attempt added or changed, read from one diff of the base commit against the
+ * attempt's branch ({@code Bundles.diffSince}: {@code git diff -U0 base branch -- paths}), so every
+ * new-side line number is a line of the attempt's final tree, which is what JaCoCo and PIT report.
  *
- * <p>The patch is {@code git log -p} output (see {@code BundleRepo.patchSince}): one diff per
- * commit, each numbered against the tree before that commit. The commits are replayed in order, so
- * a line added by an early commit is shifted by later insertions and deletions, and dropped if a
- * later commit deletes it; the result is numbered against the attempt's final tree.
- *
- * <p>Hunks are read by their line counts, so commit messages and content lines that look like
- * headers are never mistaken for diff structure. Paths come from {@code rename from/to} and the
- * {@code ---}/{@code +++} lines (git's C-style quoting and the trailing tab it adds after a path
- * containing a space are undone), falling back to the {@code diff --git} header for diffs with
- * neither (binary or mode-only changes, which carry no line numbers). Merge commits are not
- * expected in an attempt; with {@code -m} each parent's diff would be replayed in turn.
+ * <p>Hunks are read by their {@code @@} line counts, so content lines that look like headers are
+ * never mistaken for diff structure, and {@code \ No newline at end of file} is skipped. A file's
+ * path comes from its {@code +++} line (git's C-style quoting, and the trailing tab it adds after a
+ * path containing a space, are undone), else its {@code diff --git} header when both sides are
+ * equal; a deleted file ({@code +++ /dev/null}) and a binary file (no hunks) have no added lines.
  */
 public final class DiffLines {
   private static final Pattern HUNK =
@@ -36,139 +30,58 @@ public final class DiffLines {
    * New-side line numbers of added lines, per requested path; a requested path with no added lines
    * maps to an empty set.
    */
-  public static Map<String, Set<Integer>> added(String patch, Set<String> paths) {
-    var state = new HashMap<String, TreeSet<Integer>>();
-    var lines = patch.split("\n", -1);
+  public static Map<String, Set<Integer>> added(String diff, Set<String> paths) {
+    var found = new HashMap<String, Set<Integer>>();
+    var lines = diff.split("\n", -1);
     int i = 0;
+    String path = null;
     while (i < lines.length) {
-      if (lines[i].startsWith("diff --git ")) {
-        i = file(lines, i, state);
+      var l = lines[i];
+      if (l.startsWith("diff --git ")) {
+        path = header(l);
+        i++;
+      } else if (l.startsWith("+++ ")) {
+        path = side(l.substring(4), "b/");
+        i++;
+      } else if (l.startsWith("@@ ")) {
+        var m = HUNK.matcher(l);
+        i++;
+        if (!m.matches()) {
+          continue;
+        }
+        int oldLeft = m.group(2) == null ? 1 : Integer.parseInt(m.group(2));
+        int newLine = Integer.parseInt(m.group(3));
+        int newLeft = m.group(4) == null ? 1 : Integer.parseInt(m.group(4));
+        var added = path == null ? null : found.computeIfAbsent(path, k -> new TreeSet<>());
+        while (i < lines.length && (oldLeft > 0 || newLeft > 0)) {
+          var h = lines[i++];
+          if (h.startsWith("\\")) {
+            continue; // "\ No newline at end of file"
+          }
+          char c = h.isEmpty() ? ' ' : h.charAt(0);
+          if (c == '+') {
+            if (added != null) {
+              added.add(newLine);
+            }
+            newLine++;
+            newLeft--;
+          } else if (c == '-') {
+            oldLeft--;
+          } else {
+            newLine++;
+            newLeft--;
+            oldLeft--;
+          }
+        }
       } else {
         i++;
       }
     }
     var result = new LinkedHashMap<String, Set<Integer>>();
     for (var p : paths) {
-      result.put(p, Set.copyOf(state.getOrDefault(p, new TreeSet<>())));
+      result.put(p, Set.copyOf(found.getOrDefault(p, Set.of())));
     }
     return result;
-  }
-
-  private record Hunk(
-      int oldStart, int oldCount, int newCount, Map<Integer, Integer> moved, List<Integer> added) {
-    int oldEnd() {
-      return oldCount == 0 ? oldStart : oldStart + oldCount - 1;
-    }
-
-    boolean covers(int line) {
-      return oldCount > 0 && line >= oldStart && line < oldStart + oldCount;
-    }
-
-    int delta() {
-      return newCount - oldCount;
-    }
-  }
-
-  /** Reads one file's diff starting at its {@code diff --git} line; returns the next index. */
-  private static int file(String[] lines, int start, Map<String, TreeSet<Integer>> state) {
-    String oldPath = null;
-    String newPath = null;
-    String renameFrom = null;
-    String renameTo = null;
-    boolean deleted = false;
-    boolean created = false;
-    int i = start + 1;
-    // Extended headers, up to the first hunk or the next file/commit.
-    while (i < lines.length && !lines[i].startsWith("@@ ")) {
-      var l = lines[i];
-      if (l.startsWith("diff --git ") || l.startsWith("commit ")) {
-        break;
-      }
-      if (l.startsWith("rename from ")) {
-        renameFrom = unquote(l.substring("rename from ".length()));
-      } else if (l.startsWith("rename to ")) {
-        renameTo = unquote(l.substring("rename to ".length()));
-      } else if (l.startsWith("deleted file mode")) {
-        deleted = true;
-      } else if (l.startsWith("new file mode")) {
-        created = true;
-      } else if (l.startsWith("--- ")) {
-        oldPath = side(l.substring(4), "a/");
-      } else if (l.startsWith("+++ ")) {
-        newPath = side(l.substring(4), "b/");
-      }
-      i++;
-    }
-    var hunks = new ArrayList<Hunk>();
-    while (i < lines.length && lines[i].startsWith("@@ ")) {
-      var m = HUNK.matcher(lines[i]);
-      if (!m.matches()) {
-        break;
-      }
-      int oldStart = Integer.parseInt(m.group(1));
-      int oldCount = m.group(2) == null ? 1 : Integer.parseInt(m.group(2));
-      int newStart = Integer.parseInt(m.group(3));
-      int newCount = m.group(4) == null ? 1 : Integer.parseInt(m.group(4));
-      i++;
-      var moved = new HashMap<Integer, Integer>();
-      var added = new ArrayList<Integer>();
-      int o = oldStart;
-      int n = newStart;
-      while (i < lines.length && (o < oldStart + oldCount || n < newStart + newCount)) {
-        var l = lines[i];
-        if (l.startsWith("\\")) {
-          i++; // "\ No newline at end of file"
-          continue;
-        }
-        char c = l.isEmpty() ? ' ' : l.charAt(0);
-        if (c == '+') {
-          added.add(n++);
-        } else if (c == '-') {
-          o++;
-        } else {
-          moved.put(o++, n++);
-        }
-        i++;
-      }
-      while (i < lines.length && lines[i].startsWith("\\")) {
-        i++;
-      }
-      hunks.add(new Hunk(oldStart, oldCount, newCount, moved, added));
-    }
-    var header = header(lines[start]);
-    var from = renameFrom != null ? renameFrom : oldPath != null ? oldPath : header;
-    var to = renameTo != null ? renameTo : newPath != null ? newPath : header;
-    var before = created || from == null ? new TreeSet<Integer>() : state.remove(from);
-    if (before == null) {
-      before = new TreeSet<>();
-    }
-    if (deleted || to == null) {
-      return i;
-    }
-    var after = new TreeSet<Integer>();
-    for (int line : before) {
-      int mapped = map(line, hunks);
-      if (mapped > 0) {
-        after.add(mapped);
-      }
-    }
-    hunks.forEach(h -> after.addAll(h.added()));
-    state.put(to, after);
-    return i;
-  }
-
-  /** The new-side number of old line {@code line}, or -1 when a hunk deleted it. */
-  private static int map(int line, List<Hunk> hunks) {
-    int shift = 0;
-    for (var h : hunks) {
-      if (h.covers(line)) {
-        return h.moved().getOrDefault(line, -1);
-      }
-      if (line > h.oldEnd()) {
-        shift += h.delta();
-      }
-    }
-    return line + shift;
   }
 
   /** A {@code ---}/{@code +++} path without its side prefix, or null for {@code /dev/null}. */

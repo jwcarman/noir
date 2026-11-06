@@ -12,6 +12,12 @@ public interface Bundles {
   /** The full patch of {@code branch} beyond {@code baseSha}, binary content included. */
   String patchSince(Path bundle, String baseSha, String branch);
 
+  /**
+   * One {@code git diff -U0} of {@code baseSha} against {@code branch}, limited to {@code paths};
+   * empty when {@code paths} is empty.
+   */
+  String diffSince(Path bundle, String baseSha, String branch, List<String> paths);
+
   /** The files {@code branch} changes beyond {@code baseSha}, in path order, renames detected. */
   List<FileChange> fileChanges(Path bundle, String baseSha, String branch);
 

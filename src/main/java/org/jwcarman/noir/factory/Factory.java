@@ -359,9 +359,9 @@ public final class Factory implements ItemDriver {
    * names ({@code src/main/java/a/b/C.java} becomes {@code a.b.C}). Targets outside {@code
    * src/main/java} or not ending in {@code .java} are left out.
    */
-  static Map<String, Set<Integer>> changedLinesByClass(String patch, List<String> modifies) {
+  static Map<String, Set<Integer>> changedLinesByClass(String diff, List<String> modifies) {
     var byClass = new LinkedHashMap<String, Set<Integer>>();
-    DiffLines.added(patch, Set.copyOf(modifies))
+    DiffLines.added(diff, Set.copyOf(modifies))
         .forEach((path, lines) -> {
           if (path.startsWith(MAIN_JAVA) && path.endsWith(".java")) {
             var fqn =
@@ -405,6 +405,9 @@ public final class Factory implements ItemDriver {
           new Trigger.MeasurementFailed(Category.CONTRACT_VIOLATION),
           new FeedbackInput.ContractViolation(List.of(violation.get())));
     }
+    // One base..branch diff of the modify targets: line numbers against the attempt's final tree.
+    var modifiedDiff =
+        retry.call(() -> bundles.diffSince(bundle, spec.baseSha(), ctx.branch(), spec.modifies()));
     var artifacts =
         retry.call(() ->
             measurer.run(
@@ -416,7 +419,7 @@ public final class Factory implements ItemDriver {
               artifacts,
               bar(spec),
               artifacts.changedClasses(),
-              changedLinesByClass(patch, spec.modifies()));
+              changedLinesByClass(modifiedDiff, spec.modifies()));
     } catch (IllegalStateException e) {
       throw new InfraFailure(e); // an incomplete measurement is noir's fault, not the builder's
     }

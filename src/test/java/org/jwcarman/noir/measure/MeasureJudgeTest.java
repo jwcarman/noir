@@ -469,6 +469,13 @@ class MeasureJudgeTest {
     var half = MeasureJudge.judge(a, BAR, CHANGED, Map.of("com.example.Calc", Set.of(3, 7)));
     assertThat(half.m().lineCoverage()).isEqualTo(0.5);
     assertThat(half.m().mutationScore()).isEqualTo(0.5);
+    var strict =
+        (MeasureOutcome.Shortfall)
+            MeasureJudge.judge(
+                a, new QualityBar(0.9, 0.9, 30), CHANGED, Map.of("com.example.Calc", Set.of(3, 7)));
+    assertThat(((FeedbackInput.QualityShortfall) strict.input()).classes())
+        .containsExactly(
+            new org.jwcarman.noir.feedback.ClassQuality("com.example.Calc", 0.5, 0.5, true));
   }
 
   @Test
@@ -529,6 +536,7 @@ class MeasureJudgeTest {
     var q = (FeedbackInput.QualityShortfall) s.input();
     assertThat(q.classes()).extracting(c -> c.className()).containsExactly("com.example.Fresh");
     assertThat(q.classes().get(0).lineCoverage()).isEqualTo(0.25);
+    assertThat(q.classes().get(0).changedLinesOnly()).isFalse();
     // Calc line 3 (covered) plus Fresh's four lines (one covered).
     assertThat(s.m().lineCoverage()).isEqualTo(2 / 5.0);
     // Calc has no mutant on line 3; Fresh counts both of its mutants.

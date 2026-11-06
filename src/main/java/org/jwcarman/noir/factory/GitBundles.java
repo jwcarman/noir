@@ -31,6 +31,16 @@ public final class GitBundles implements Bundles {
   }
 
   @Override
+  public String diffSince(Path bundle, String baseSha, String branch, List<String> paths) {
+    if (paths.isEmpty()) {
+      return "";
+    }
+    try (var repo = BundleRepo.open(runner, bundle, tempRoot)) {
+      return repo.diffSince(baseSha, branch, paths);
+    }
+  }
+
+  @Override
   public List<FileChange> fileChanges(Path bundle, String baseSha, String branch) {
     try (var repo = BundleRepo.open(runner, bundle, tempRoot)) {
       return repo.fileChanges(baseSha, branch);
