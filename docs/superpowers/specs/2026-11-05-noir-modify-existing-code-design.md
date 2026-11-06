@@ -87,6 +87,8 @@ section. A spec with no modified files and no tests to update renders exactly as
 
 ## 4. Splicing
 
+> Superseded by docs/superpowers/specs/2026-11-06-noir-spring-hidden-tests-design.md: fragments may now add abstract methods.
+
 `StubSplicer.splice(String baseSource, String fragment) -> Spliced` uses JavaParser, which noir
 already depends on. The result is the full file plus the lists of added and changed member
 signatures.
@@ -114,6 +116,8 @@ then means "every hidden test fails against today's behavior", which proves that
 targets the bug.
 
 ## 5. Sealing
+
+> Superseded by docs/superpowers/specs/2026-11-06-noir-spring-hidden-tests-design.md: the Examiner also sees the repository inventory and may update files listed under Tests to update, which seal check 4 uses.
 
 `ApprovalSealer`, after the lock check and parse (Plan 5 §6), checks the following:
 - Each new-file stub's path must not exist at the base commit (`stub_exists`, as today).

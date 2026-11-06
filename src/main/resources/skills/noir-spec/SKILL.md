@@ -66,8 +66,8 @@ Before asking anything substantive, build a picture of the code the work will li
 - the packages under `src/main/java` and the types near where the new work belongs;
 - existing public APIs, naming, how errors are reported (which exception types), nullability
   conventions, and whether types are classes, records, interfaces, or builders;
-- the test style under `src/test/java` (for your own understanding: the holdout tests are
-  JUnit Jupiter only and do not use the repository's test dependencies);
+- the test style under `src/test/java` and the test libraries in `pom.xml` (the holdout tests
+  may use the repository's own test libraries, for example Spring's test slices or Mockito);
 - dependencies in `pom.xml`, and formatting plugins (such as Spotless or Checkstyle) that run
   during `mvn compile`; the stubs must pass them.
 
@@ -111,12 +111,17 @@ request is really several independent pieces of work, propose splitting it into 
 Propose the public types and method signatures, following the repository's conventions. These
 become the **API stubs**. Design them so the hidden tests can exercise the behavior:
 
-- **Holdout tests may import only `java.*`, JUnit Jupiter, and the stubs' packages.** Every type
-  a test needs to construct, call, or catch must be a JDK type or a type declared in a stub (or
-  already living in a stub's package). Do not expose repository types from other packages in
-  the API surface.
-- **The Examiner never sees the repository.** If a signature mentions an existing type, the
-  Examiner knows only what the spec says about it. Prefer new types plus JDK types.
+- **Holdout tests may import JUnit Jupiter, the JDK (except `java.net`, `java.nio.channels`,
+  `java.util.concurrent` and `java.lang.reflect`), the repository's own test-scope and runtime
+  dependencies, and the repository's main packages.** They may therefore use the repository's
+  test libraries (for example `@DataJpaTest` or MockMvc, if the repository has them). A real
+  server (`@SpringBootTest(webEnvironment = RANDOM_PORT)` or `DEFINED_PORT`) is rejected;
+  in-process tests such as MockMvc are fine.
+- **The Examiner sees a summary of the repository, not its code.** It is given the repository's
+  test libraries, a Spring section when Spring is detected, and the public signatures of
+  `src/main/java`. If a signature mentions an existing type, still say in the spec what that type
+  must do, because the Examiner tests only what the spec states. Prefer new types plus JDK types
+  where you can.
 - **New files or changes to existing files.** A stub for a new file must not exist on the
   default branch; to change an existing class, use a modify entry as described in "Changing
   existing code" below.
@@ -190,11 +195,17 @@ targets and the tests under `## Tests to update`) plus new files may change.
    must fail against today's code. Leave such examples out, or state what must stay the same under
    `## Constraints`. Fragments contain only methods and
    constructors, keep the same type kind and modifiers, and add the imports their signatures need.
+   A fragment may add an abstract method: a body-less interface method (not `default`, `static` or
+   `private`), or an `abstract` method in an abstract class.
+   When the spec adds an interface method, grep `src/test/java` for classes implementing the
+   interface and suggest listing them under `## Tests to update`; the class implementing it in
+   `src/main/java` (for example a JPA adapter) must be a modify target.
 4. Search `src/test/java` with grep for the names of the changed members and for the type itself,
    and **ask** the user which of the files you found belong under `## Tests to update` (a
    section between `## Requirements` and `## Constraints`, one backticked path per bullet, such as
    ``- `src/test/java/com/example/FooTest.java` ``). Never guess: show what grep found and let the
-   user decide; leave the section out if they list none.
+   user decide; leave the section out if they list none. The Examiner may write updated versions
+   of the files listed there, which the seal uses to check the repository's other tests.
 5. Check against the real code until clean:
 
 ```
