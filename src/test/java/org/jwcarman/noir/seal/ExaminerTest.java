@@ -40,7 +40,8 @@ class ExaminerTest {
     var draft = tmp.resolve("draft");
     var out =
         new Examiner(agent, NoirConfig.defaults())
-            .attempt(Specs.valid(), List.of(), List.of(), tmp.resolve("attempt-1"), draft);
+            .attempt(
+                Specs.valid(), List.of(), List.of(), List.of(), tmp.resolve("attempt-1"), draft);
     assertThat(draft.resolve("holdout/noir/holdout/x/T.java")).hasContent("class T {}");
     assertThat(draft.resolve("holdout/notes.txt")).doesNotExist();
     assertThat(draft.resolve("reference/src/main/java/a/A.java")).hasContent("class A {}");
@@ -63,7 +64,13 @@ class ExaminerTest {
         });
     assertThatThrownBy(() ->
             new Examiner(agent, NoirConfig.defaults())
-                .attempt(Specs.valid(), List.of(), List.of(), tmp.resolve("a"), tmp.resolve("d")))
+                .attempt(
+                    Specs.valid(),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    tmp.resolve("a"),
+                    tmp.resolve("d")))
         .isInstanceOf(SealedFileException.class)
         .hasMessageContaining("holdout/Link.java");
   }
@@ -75,8 +82,10 @@ class ExaminerTest {
             (n, work) -> write(work.resolve("out/holdout/T" + n + ".java"), "class T" + n + " {}"));
     var examiner = new Examiner(agent, NoirConfig.defaults());
     var draft = tmp.resolve("draft");
-    examiner.attempt(Specs.valid(), List.of(), List.of(), tmp.resolve("attempt-1"), draft);
-    examiner.attempt(Specs.valid(), List.of(), List.of("x"), tmp.resolve("attempt-2"), draft);
+    examiner.attempt(
+        Specs.valid(), List.of(), List.of(), List.of(), tmp.resolve("attempt-1"), draft);
+    examiner.attempt(
+        Specs.valid(), List.of(), List.of(), List.of("x"), tmp.resolve("attempt-2"), draft);
     assertThat(draft.resolve("holdout/T1.java")).doesNotExist();
     assertThat(draft.resolve("holdout/T2.java")).exists();
     assertThat(draft.resolve("reference")).isDirectory();
@@ -90,7 +99,7 @@ class ExaminerTest {
         new ScriptedAgent((n, work) -> write(work.resolve("out/holdout/Fresh.java"), "class F {}"));
     var draft = tmp.resolve("draft");
     new Examiner(agent, NoirConfig.defaults())
-        .attempt(Specs.valid(), List.of(), List.of(), attemptDir, draft);
+        .attempt(Specs.valid(), List.of(), List.of(), List.of(), attemptDir, draft);
     assertThat(draft.resolve("holdout/Stale.java")).doesNotExist();
     assertThat(draft.resolve("holdout/Fresh.java")).exists();
   }
@@ -100,7 +109,7 @@ class ExaminerTest {
     var agent = new ScriptedAgent((n, work) -> {});
     var attemptDir = tmp.resolve("attempt-1");
     new Examiner(agent, NoirConfig.defaults())
-        .attempt(Specs.valid(), List.of(), List.of(), attemptDir, tmp.resolve("d"));
+        .attempt(Specs.valid(), List.of(), List.of(), List.of(), attemptDir, tmp.resolve("d"));
     var req = agent.requests().getFirst();
     assertThat(req.image()).isEqualTo("noir-builder:0.1.0");
     assertThat(req.maxTurns()).isEqualTo(100);

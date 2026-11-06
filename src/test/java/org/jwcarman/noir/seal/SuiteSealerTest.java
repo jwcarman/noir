@@ -117,7 +117,7 @@ class SuiteSealerTest {
   }
 
   SuiteSealer.Examination examine() {
-    return suiteSealer.examine(spec, List.of(STUB), itemDir, bundle);
+    return suiteSealer.examine(spec, List.of(STUB), List.of(STUB), itemDir, bundle);
   }
 
   @Test
@@ -199,7 +199,7 @@ class SuiteSealerTest {
             NoirConfig.defaults(),
             clock,
             retry());
-    var e = s.examine(spec, List.of(STUB), itemDir, bundle);
+    var e = s.examine(spec, List.of(STUB), List.of(STUB), itemDir, bundle);
     assertThat(e.problems()).isNull();
     assertThat(flaky.calls).isEqualTo(2);
     assertThat(store.readEvents(itemDir))
@@ -257,7 +257,7 @@ class SuiteSealerTest {
             NoirConfig.defaults(),
             Clock.systemUTC(),
             retry());
-    assertThatThrownBy(() -> s.examine(spec, List.of(STUB), itemDir, bundle))
+    assertThatThrownBy(() -> s.examine(spec, List.of(STUB), List.of(STUB), itemDir, bundle))
         .isInstanceOf(ExaminerFailedException.class)
         .hasMessage("Examiner agent failed: Invalid API key · Fix external API key");
     assertThat(failing.calls).isEqualTo(1);

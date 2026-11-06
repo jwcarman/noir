@@ -37,12 +37,15 @@ import org.jwcarman.noir.github.GitHubException;
 import org.jwcarman.noir.github.NoirLabels;
 import org.jwcarman.noir.lifecycle.SealRejection;
 import org.jwcarman.noir.render.SpecRenderer;
+import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.IssueSpec;
 import org.jwcarman.noir.spec.IssueSpecException;
 import org.jwcarman.noir.spec.ItemId;
 import org.jwcarman.noir.spec.Spec;
 import org.jwcarman.noir.spec.SpecJson;
 import org.jwcarman.noir.spec.Specs;
+import org.jwcarman.noir.spec.SpliceException;
+import org.jwcarman.noir.spec.StubSplicer;
 import org.jwcarman.noir.store.Event;
 import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
@@ -206,7 +209,14 @@ class ApprovalSealerTest {
     assertThat(github.comments(issue)).as("the caller posts rejection comments").isEmpty();
     assertThat(eventTypes()).doesNotContain("sealed", "commitment_posted");
     for (var leftover :
-        List.of("spec.json", "stubs", "base.bundle", "holdout", "reference", "commitment.json")) {
+        List.of(
+            "spec.json",
+            "stubs",
+            "fragments",
+            "base.bundle",
+            "holdout",
+            "reference",
+            "commitment.json")) {
       assertThat(itemDir().resolve(leftover)).doesNotExist();
     }
   }
@@ -515,5 +525,132 @@ class ApprovalSealerTest {
                 + " untestable as written. Revise the spec, then add `noir:ready` again.");
     assertThat(ApprovalComments.sealed("c", "b", "s"))
         .isEqualTo("noir commitment `c` (commitmentVersion 2, base `b`, issue body sha256 `s`)");
+  }
+
+  static final String CSV = "src/main/java/com/example/api/Csv.java";
+  static final String CSV_BASE =
+      "package com.example.api;\n\n/** Splits CSV lines. */\npublic final class Csv {\n"
+          + "  /** Splits a line on commas. */\n"
+          + "  public static String[] split(String line) {\n    return line.split(\",\");\n  }\n}\n";
+  static final String CSV_FRAGMENT =
+      "package com.example.api;\n\npublic final class Csv {\n"
+          + "  /**\n   * Splits a line on a delimiter.\n   *\n   * @param line the line\n"
+          + "   * @param delimiter the delimiter\n   * @return the fields\n   */\n"
+          + "  public static String[] split(String line, char delimiter) {\n"
+          + "    throw new UnsupportedOperationException();\n  }\n}\n";
+
+  /** Commits {@code content} at {@code path} on the origin's {@code main}. */
+  void commitToOrigin(String path, String content) {
+    var work = tmp.resolve("origin-work-" + clones.size() + "-" + path.hashCode());
+    GitFixtures.cloneOf(origin, work);
+    write(work.resolve(path), content);
+    GitFixtures.git(work, "add", ".");
+    GitFixtures.git(work, "commit", "-q", "-m", "add " + path);
+    GitFixtures.git(work, "push", "-q", "origin", "main");
+  }
+
+  Spec modifySpec() {
+    return Specs.valid().withApiStubs(List.of(CSV)).withModifies(List.of(CSV)).withSchemaVersion(2);
+  }
+
+  void openModifyIssue(Spec spec, String fragment) {
+    issue =
+        openIssue(
+            spec.title(), SpecRenderer.issueBody(spec, List.of(new StubSource(CSV, fragment))));
+    item = WorkItem.approved(ID, REPO, issue);
+  }
+
+  @Test
+  void modifySpecSplicesAgainstBaseAndStoresBoth() {
+    commitToOrigin(CSV, CSV_BASE);
+    openModifyIssue(modifySpec(), CSV_FRAGMENT);
+
+    var outcome = sealer.seal(item);
+
+    assertThat(outcome).isInstanceOf(SealOutcome.Passed.class);
+    var spliced = StubSplicer.splice(CSV, CSV_BASE, CSV_FRAGMENT).content();
+    assertThat(spliced).contains("line.split(\",\")").contains("char delimiter");
+    assertThat(itemDir().resolve("stubs").resolve(CSV)).hasContent(spliced);
+    assertThat(itemDir().resolve("fragments").resolve(CSV)).hasContent(CSV_FRAGMENT);
+    assertThat(SpecJson.read(itemDir().resolve("spec.json")).modifies()).containsExactly(CSV);
+    assertThat(github.comments(issue)).singleElement().asString().startsWith("noir commitment `");
+    assertThat(eventTypes())
+        .containsExactly("approved", "examiner_attempt", "commitment_posted", "sealed");
+    var prompt = agent.requests().getFirst().prompt();
+    assertThat(prompt)
+        .containsSubsequence(
+            "### " + CSV + " (modify)",
+            "char delimiter",
+            "## Current source",
+            "### " + CSV,
+            "line.split(\",\")");
+  }
+
+  @Test
+  void modifyTargetMissingAtBaseIsInvalidSpec() {
+    openModifyIssue(modifySpec(), CSV_FRAGMENT);
+    var problem = "API contract: `" + CSV + "` (modify) does not exist on the default branch";
+    assertRejected(
+        sealer.seal(item),
+        SealRejection.INVALID_SPEC,
+        ApprovalComments.invalidSpec(List.of(problem)),
+        1);
+    assertThat(agent.requests()).isEmpty();
+  }
+
+  @Test
+  void spliceFailureIsInvalidSpec() {
+    commitToOrigin(CSV, CSV_BASE);
+    var fragment = CSV_FRAGMENT.replace("public final class Csv", "public interface Csv");
+    openModifyIssue(modifySpec(), fragment);
+    var message =
+        catchThrowableOfType(
+                SpliceException.class, () -> StubSplicer.splice(CSV, CSV_BASE, fragment))
+            .getMessage();
+    assertThat(message).startsWith(CSV + ": ");
+
+    var outcome = (SealOutcome.Rejected) sealer.seal(item);
+
+    assertRejected(
+        outcome, SealRejection.INVALID_SPEC, ApprovalComments.invalidSpec(List.of(message)), 1);
+    assertThat(outcome.comment()).contains("- " + message + "\n");
+    assertThat(agent.requests()).isEmpty();
+  }
+
+  @Test
+  void testToUpdateMissingAtBaseIsInvalidSpec() {
+    commitToOrigin(CSV, CSV_BASE);
+    var test = "src/test/java/com/example/api/CsvTest.java";
+    openModifyIssue(modifySpec().withTestsToUpdate(List.of(test)), CSV_FRAGMENT);
+    var problem = "Tests to update: `" + test + "` does not exist on the default branch";
+    assertRejected(
+        sealer.seal(item),
+        SealRejection.INVALID_SPEC,
+        ApprovalComments.invalidSpec(List.of(problem)),
+        1);
+    assertThat(agent.requests()).isEmpty();
+  }
+
+  @Test
+  void newFileStubStillRejectedWhenItExists() {
+    commitToOrigin(CSV, CSV_BASE);
+    var placeholder = "src/main/java/com/example/api/Placeholder.java";
+    var spec =
+        Specs.valid()
+            .withApiStubs(List.of(placeholder, CSV))
+            .withModifies(List.of(CSV))
+            .withSchemaVersion(2);
+    issue =
+        openIssue(
+            spec.title(),
+            SpecRenderer.issueBody(
+                spec, List.of(Specs.stubsFor(spec).getFirst(), new StubSource(CSV, CSV_FRAGMENT))));
+    item = WorkItem.approved(ID, REPO, issue);
+    assertRejected(
+        sealer.seal(item),
+        SealRejection.STUB_EXISTS,
+        ApprovalComments.stubExists(List.of(placeholder)),
+        1);
+    assertThat(agent.requests()).isEmpty();
   }
 }

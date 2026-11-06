@@ -272,7 +272,8 @@ public final class Factory implements ItemDriver {
 
   private Step build(Ctx ctx) {
     int n = ctx.item().attempt();
-    var stubs = SpecRenderer.loadStubs(ctx.spec(), ctx.itemDir());
+    // The builder reads the issue's view (fragments for modify targets) in SPEC.md.
+    var stubs = SpecRenderer.loadContract(ctx.spec(), ctx.itemDir());
     var input = inputBundle(ctx.itemDir(), n);
     var feedback = previousFeedback(ctx.itemDir(), n);
     var message = CommitMessage.of(ctx.item().issueNumber(), ctx.spec().title(), n);

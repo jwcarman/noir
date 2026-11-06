@@ -83,7 +83,7 @@ record SealedItemFixture(
         github.createIssue(
             REPO,
             spec.title(),
-            SpecRenderer.issueBody(spec, SpecRenderer.loadStubs(spec, itemDir)),
+            SpecRenderer.issueBody(spec, SpecRenderer.loadContract(spec, itemDir)),
             List.of("noir:ready"));
     var item = WorkItem.sealed(spec.id(), REPO, issue);
     store.writeWorkItem(item);

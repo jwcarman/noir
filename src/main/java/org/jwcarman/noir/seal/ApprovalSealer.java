@@ -25,6 +25,8 @@ import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.IssueSpec;
 import org.jwcarman.noir.spec.IssueSpecException;
 import org.jwcarman.noir.spec.SpecJson;
+import org.jwcarman.noir.spec.SpliceException;
+import org.jwcarman.noir.spec.StubSplicer;
 import org.jwcarman.noir.store.Event;
 import org.jwcarman.noir.store.Store;
 import org.jwcarman.noir.store.WorkItem;
@@ -42,7 +44,14 @@ public final class ApprovalSealer implements ApprovalSealing {
   static final String SEALED_EDITED_AT = "sealedEditedAt";
 
   static final List<String> SEAL_FILES =
-      List.of("spec.json", "stubs", "base.bundle", "holdout", "reference", "commitment.json");
+      List.of(
+          "spec.json",
+          "stubs",
+          "fragments",
+          "base.bundle",
+          "holdout",
+          "reference",
+          "commitment.json");
 
   private final Store store;
   private final GitHubPort gh;
@@ -116,9 +125,47 @@ public final class ApprovalSealer implements ApprovalSealing {
     var repoDir = mirror.sync(item.repo(), branch);
     var baseSha = git.revParse(repoDir, "origin/" + branch);
 
+    var spliced = new ArrayList<String>();
+    var stubs = new ArrayList<StubSource>();
+    var spliceProblems = new ArrayList<String>();
+    for (var stub : parsed.stubs()) {
+      if (!parsed.modifies().contains(stub.path())) {
+        stubs.add(stub);
+        continue;
+      }
+      var base = git.show(repoDir, baseSha, stub.path());
+      if (base.isEmpty()) {
+        spliceProblems.add(
+            "API contract: `" + stub.path() + "` (modify) does not exist on the default branch");
+        continue;
+      }
+      try {
+        stubs.add(
+            new StubSource(
+                stub.path(),
+                StubSplicer.splice(stub.path(), base.get(), stub.content()).content()));
+        spliced.add(stub.path());
+      } catch (SpliceException e) {
+        spliceProblems.add(e.getMessage());
+      }
+    }
+    for (var test : parsed.testsToUpdate()) {
+      if (!git.exists(repoDir, baseSha, test)) {
+        spliceProblems.add("Tests to update: `" + test + "` does not exist on the default branch");
+      }
+    }
+    if (!spliceProblems.isEmpty()) {
+      return reject(
+          item,
+          itemDir,
+          SealRejection.INVALID_SPEC,
+          ApprovalComments.invalidSpec(spliceProblems),
+          spliceProblems.size());
+    }
+
     var existing = new ArrayList<String>();
     for (var stub : parsed.stubs()) {
-      if (git.exists(repoDir, baseSha, stub.path())) {
+      if (!parsed.modifies().contains(stub.path()) && git.exists(repoDir, baseSha, stub.path())) {
         existing.add(stub.path());
       }
     }
@@ -134,11 +181,15 @@ public final class ApprovalSealer implements ApprovalSealing {
     var spec = parsed.toSpec(item.id(), item.repo(), baseSha);
     deleteSealFiles(itemDir);
     SpecJson.write(spec, itemDir.resolve("spec.json"));
-    writeStubs(itemDir, parsed.stubs());
+    writeFiles(itemDir, "stubs", stubs);
+    writeFiles(
+        itemDir,
+        "fragments",
+        parsed.stubs().stream().filter(s -> spliced.contains(s.path())).toList());
     var bundle = itemDir.resolve("base.bundle");
     git.bundle(repoDir, baseSha, bundle);
 
-    var examination = suiteSealer.examine(spec, parsed.stubs(), itemDir, bundle);
+    var examination = suiteSealer.examine(spec, parsed.stubs(), stubs, itemDir, bundle);
     if (examination.problems() != null) {
       return reject(
           item,
@@ -227,13 +278,14 @@ public final class ApprovalSealer implements ApprovalSealing {
     }
   }
 
-  private static void writeStubs(Path itemDir, List<StubSource> stubs) {
-    var root = itemDir.resolve("stubs").normalize();
+  /** Writes each source at {@code <dir>/<path>}; writes nothing (no directory) when empty. */
+  private static void writeFiles(Path itemDir, String dir, List<StubSource> stubs) {
+    var root = itemDir.resolve(dir).normalize();
     try {
       for (var stub : stubs) {
         var file = root.resolve(stub.path()).normalize();
         if (!file.startsWith(root) || file.equals(root)) {
-          throw new IllegalArgumentException("stub path escapes stubs/: " + stub.path());
+          throw new IllegalArgumentException("stub path escapes " + dir + "/: " + stub.path());
         }
         Files.createDirectories(file.getParent());
         Files.writeString(file, stub.content());

@@ -109,20 +109,50 @@ public final class SpecRenderer {
         spec, List.of(new StubSource(path, "// TODO: declare the public API surface here.\n")));
   }
 
-  public static String specMd(Spec spec, List<StubSource> stubs) {
-    return specBody(spec, stubs) + "\n---\n\n" + INJECTION_GUARD;
+  /**
+   * SPEC.md: the builder's view ({@code contract}: fragments for modify targets), the files the
+   * builder may change, and the injection guard.
+   */
+  public static String specMd(Spec spec, List<StubSource> contract) {
+    return specBody(spec, contract)
+        + "\n"
+        + filesYouMayChange(spec)
+        + "\n---\n\n"
+        + INJECTION_GUARD;
   }
 
-  public static List<StubSource> loadStubs(Spec spec, Path itemDir) {
+  private static String filesYouMayChange(Spec spec) {
+    var sb = new StringBuilder("## Files you may change\n\n");
+    spec.modifies().forEach(p -> sb.append("- `").append(p).append("`\n"));
+    spec.testsToUpdate().forEach(p -> sb.append("- `").append(p).append("`\n"));
+    sb.append("- any new file (not in the reserved package noir.holdout)\n");
+    return sb.toString();
+  }
+
+  /**
+   * The issue's view of the API contract: each modify target's fragment ({@code fragments/}) and
+   * every other stub as written ({@code stubs/}). Use it to render the spec for a reader.
+   */
+  public static List<StubSource> loadContract(Spec spec, Path itemDir) {
     return spec.apiStubs().stream()
-        .map(path -> {
-          try {
-            return new StubSource(path, Files.readString(itemDir.resolve("stubs").resolve(path)));
-          } catch (IOException e) {
-            throw new UncheckedIOException("Cannot read stub " + path, e);
-          }
-        })
+        .map(path -> read(itemDir, spec.modifies().contains(path) ? "fragments" : "stubs", path))
         .toList();
+  }
+
+  /**
+   * The complete stub files ({@code stubs/}): a modify target holds its spliced content. Use it to
+   * compile stubs or find their packages.
+   */
+  public static List<StubSource> loadStubs(Spec spec, Path itemDir) {
+    return spec.apiStubs().stream().map(path -> read(itemDir, "stubs", path)).toList();
+  }
+
+  private static StubSource read(Path itemDir, String dir, String path) {
+    try {
+      return new StubSource(path, Files.readString(itemDir.resolve(dir).resolve(path)));
+    } catch (IOException e) {
+      throw new UncheckedIOException("Cannot read stub " + path, e);
+    }
   }
 
   /** Stub content ends with a newline; the closing fence follows it directly (no blank line). */
@@ -131,7 +161,7 @@ public final class SpecRenderer {
   }
 
   /** A backtick fence one longer than the longest backtick run in the content, minimum three. */
-  static String fenceFor(String content) {
+  public static String fenceFor(String content) {
     int longest = 0;
     int run = 0;
     for (int i = 0; i < content.length(); i++) {

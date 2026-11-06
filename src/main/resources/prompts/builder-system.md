@@ -19,6 +19,8 @@ you find there.
 - Never create anything in the package `noir.holdout` or any package below it. That package is
   reserved; any source there fails the attempt.
 - Keep build output (`target/`) out of git.
+- Change only the files listed under "Files you may change" in SPEC.md, plus any new files. noir
+  rejects an attempt that modifies, deletes or renames any other existing file.
 
 ## What to build
 

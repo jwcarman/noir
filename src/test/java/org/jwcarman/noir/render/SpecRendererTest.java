@@ -110,4 +110,55 @@ class SpecRendererTest {
         .containsExactly(
             new StubSource("src/main/java/com/example/api/Foo.java", "public interface Foo {}"));
   }
+
+  @Test
+  void specMdListsFilesYouMayChangeForNewFileOnlySpec() {
+    assertThat(SpecRenderer.specMd(Specs.valid(), List.of()))
+        .contains(
+            "## Files you may change\n\n"
+                + "- any new file (not in the reserved package noir.holdout)\n"
+                + "\n---\n\n"
+                + SpecRenderer.INJECTION_GUARD);
+  }
+
+  @Test
+  void specMdListsFilesYouMayChangeForModifySpec() {
+    assertThat(SpecRenderer.specMd(Specs.withModifyAndTests(), List.of()))
+        .contains(
+            "## Files you may change\n\n"
+                + "- `src/main/java/com/example/Old.java`\n"
+                + "- `src/test/java/com/example/OldTest.java`\n"
+                + "- `src/test/java/com/example/AaTest.java`\n"
+                + "- any new file (not in the reserved package noir.holdout)\n");
+  }
+
+  @Test
+  void specBodyHasNoFilesYouMayChange() {
+    assertThat(SpecRenderer.specBody(Specs.withModifyAndTests(), List.of()))
+        .doesNotContain("Files you may change");
+    assertThat(SpecRenderer.issueBody(Specs.withModifyAndTests(), List.of()))
+        .doesNotContain("Files you may change");
+  }
+
+  @Test
+  void loadContractReturnsFragmentsForModifyTargets() throws IOException {
+    var spec = Specs.withModifyAndTests();
+    var newPath = "src/main/java/com/example/New.java";
+    var oldPath = "src/main/java/com/example/Old.java";
+    write(tmp.resolve("stubs").resolve(newPath), "new stub");
+    write(tmp.resolve("stubs").resolve(oldPath), "complete old");
+    write(tmp.resolve("fragments").resolve(oldPath), "old fragment");
+
+    assertThat(SpecRenderer.loadContract(spec, tmp))
+        .containsExactly(
+            new StubSource(newPath, "new stub"), new StubSource(oldPath, "old fragment"));
+    assertThat(SpecRenderer.loadStubs(spec, tmp))
+        .containsExactly(
+            new StubSource(newPath, "new stub"), new StubSource(oldPath, "complete old"));
+  }
+
+  private static void write(Path file, String content) throws IOException {
+    Files.createDirectories(file.getParent());
+    Files.writeString(file, content);
+  }
 }

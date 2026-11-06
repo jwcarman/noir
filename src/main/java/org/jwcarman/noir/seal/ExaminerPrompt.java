@@ -19,9 +19,32 @@ public final class ExaminerPrompt {
     return SYSTEM;
   }
 
-  public static String user(Spec spec, List<StubSource> stubs, List<String> previousProblems) {
-    var sb = new StringBuilder(SpecRenderer.specBody(spec, stubs));
+  /**
+   * The Examiner's input: the spec with the issue's {@code contract} view (fragments under their
+   * {@code (modify)} headings) and, for a spec that modifies files, each modify target's complete
+   * spliced file from {@code stubs}.
+   */
+  public static String user(
+      Spec spec, List<StubSource> contract, List<StubSource> stubs, List<String> previousProblems) {
+    var sb = new StringBuilder(SpecRenderer.specBody(spec, contract));
     sb.append("\n## Holdout package\n\n`").append(ItemId.holdoutPackage(spec.id())).append("`\n");
+    if (!spec.modifies().isEmpty()) {
+      sb.append("\n## Current source\n");
+      for (var stub : stubs) {
+        if (spec.modifies().contains(stub.path())) {
+          var content = stub.content().endsWith("\n") ? stub.content() : stub.content() + "\n";
+          var fence = SpecRenderer.fenceFor(content);
+          sb.append("\n### ")
+              .append(stub.path())
+              .append("\n\n")
+              .append(fence)
+              .append("java\n")
+              .append(content)
+              .append(fence)
+              .append('\n');
+        }
+      }
+    }
     if (!previousProblems.isEmpty()) {
       sb.append("\n## Problems with your previous attempt\n\n");
       for (var problem : previousProblems) {

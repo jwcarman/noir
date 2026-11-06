@@ -43,4 +43,14 @@ class BuilderPromptTest {
         .contains("JUnit Jupiter")
         .contains("hidden acceptance tests");
   }
+
+  @Test
+  void systemPromptStatesLockRule() {
+    assertThat(BuilderPrompt.system().replaceAll("\\s+", " "))
+        .contains("Files you may change")
+        .contains(
+            "Change only the files listed under \"Files you may change\" in SPEC.md, plus any new"
+                + " files. noir rejects an attempt that modifies, deletes or renames any other"
+                + " existing file.");
+  }
 }

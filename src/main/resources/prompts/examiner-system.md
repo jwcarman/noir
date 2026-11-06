@@ -19,6 +19,12 @@ You work only from the specification you are given. Do not explore or rely on an
 
 Write nothing anywhere else.
 
+## Modifying existing files
+
+When the spec modifies an existing file, the "Current source" section shows that file as it is
+today, with added members stubbed. Your reference implementation of that file is the complete
+file: keep every public member, and change only what the requirements say.
+
 ## Rules for holdout tests
 
 - **Fairness.** Test only behavior the specification states. Every test checks a stated

@@ -54,7 +54,12 @@ public final class SuiteSealer {
   /** Examiner outcome: the model that produced the sealed suite, or the last problems. */
   public record Examination(String model, List<String> problems) {}
 
-  public Examination examine(Spec spec, List<StubSource> stubs, Path itemDir, Path bundle) {
+  /**
+   * Examines the spec: {@code contract} is the issue view (fragments for modify targets) shown to
+   * the Examiner, {@code stubs} the complete files.
+   */
+  public Examination examine(
+      Spec spec, List<StubSource> contract, List<StubSource> stubs, Path itemDir, Path bundle) {
     var stubPackages = stubPackages(stubs);
     List<String> problems = List.of();
     for (int attempt = 1; attempt <= config.examiner().attempts(); attempt++) {
@@ -62,7 +67,9 @@ public final class SuiteSealer {
       ExaminerOutput out;
       try {
         var previous = problems;
-        out = retry.call(() -> examiner.attempt(spec, stubs, previous, attemptDir, itemDir));
+        out =
+            retry.call(
+                () -> examiner.attempt(spec, contract, stubs, previous, attemptDir, itemDir));
         problems = checkSuite(spec, itemDir, bundle, stubPackages, out, attemptDir);
       } catch (SealedFileException e) {
         out = null;
