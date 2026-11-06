@@ -60,11 +60,25 @@ class SealJudgeTest {
   }
 
   @Test
-  void wrongRelease() {
-    file("release.txt", "17");
-    assertThat(judge()).containsExactly("maven.compiler.release must be 21 (found 17)");
+  void releasesFrom17To25Accepted() {
+    for (var release : java.util.List.of("17", "21", "25")) {
+      file("release.txt", release);
+      assertThat(judge()).as(release).isEmpty();
+    }
+  }
+
+  @Test
+  void releasesOutsideTheRangeRejected() {
+    file("release.txt", "11");
+    assertThat(judge()).containsExactly("maven.compiler.release must be from 17 to 25 (found 11)");
+    file("release.txt", "26");
+    assertThat(judge()).containsExactly("maven.compiler.release must be from 17 to 25 (found 26)");
+    file("release.txt", "abc");
+    assertThat(judge())
+        .containsExactly("maven.compiler.release must be from 17 to 25 (found unset)");
     file("release.txt", "null object or invalid expression");
-    assertThat(judge()).containsExactly("maven.compiler.release must be 21 (found unset)");
+    assertThat(judge())
+        .containsExactly("maven.compiler.release must be from 17 to 25 (found unset)");
   }
 
   @Test

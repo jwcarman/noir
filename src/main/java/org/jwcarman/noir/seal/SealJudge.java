@@ -112,6 +112,11 @@ public final class SealJudge {
     }
   }
 
+  /** The repository's Java release range; noir builds and tests on JDK 25. */
+  static final int MIN_RELEASE = 17;
+
+  static final int MAX_RELEASE = 25;
+
   private static void checkAssumptions(SealArtifacts a, List<String> problems) {
     if (!a.read("pom.txt").equals("yes")) {
       problems.add("pom.xml not found at repository root");
@@ -121,9 +126,18 @@ public final class SealJudge {
       problems.add("multi-module Maven builds are not supported");
     }
     var release = a.read("release.txt");
-    if (!release.equals("21")) {
+    boolean numeric = release.matches("\\d{1,3}");
+    int value = numeric ? Integer.parseInt(release) : -1;
+    if (value < MIN_RELEASE || value > MAX_RELEASE) {
       var found = release.matches("\\d+") ? release : "unset";
-      problems.add("maven.compiler.release must be 21 (found " + found + ")");
+      problems.add(
+          "maven.compiler.release must be from "
+              + MIN_RELEASE
+              + " to "
+              + MAX_RELEASE
+              + " (found "
+              + found
+              + ")");
     }
   }
 

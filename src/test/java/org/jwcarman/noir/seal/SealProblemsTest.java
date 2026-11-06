@@ -93,18 +93,18 @@ class SealProblemsTest {
             summary(
                 "pom.xml not found at repository root",
                 "multi-module Maven builds are not supported",
-                "maven.compiler.release must be 21 (found 17)",
-                "maven.compiler.release must be 21 (found unset)"))
+                "maven.compiler.release must be from 17 to 25 (found 11)",
+                "maven.compiler.release must be from 17 to 25 (found unset)"))
         .containsExactly(
             "pom.xml not found at repository root",
             "multi-module Maven builds are not supported",
-            "maven.compiler.release must be 21 (found 17)",
-            "maven.compiler.release must be 21 (found unset)");
+            "maven.compiler.release must be from 17 to 25 (found 11)",
+            "maven.compiler.release must be from 17 to 25 (found unset)");
   }
 
   @Test
   void lookalikesOfPassthroughAreNotCopied() {
-    assertThat(summary("maven.compiler.release must be 21 (found nr.Foo#bar)"))
+    assertThat(summary("maven.compiler.release must be from 17 to 25 (found nr.Foo#bar)"))
         .containsExactly("other check failures");
   }
 

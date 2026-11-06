@@ -30,7 +30,7 @@ public final class SealProblems {
       Pattern.compile(
           "pom\\.xml not found at repository root"
               + "|multi-module Maven builds are not supported"
-              + "|maven\\.compiler\\.release must be 21 \\(found (\\d+|unset)\\)");
+              + "|maven\\.compiler\\.release must be from 17 to 25 \\(found (\\d+|unset)\\)");
 
   /** {@code HoldoutAnalyzer} problems: {@code <file>.java[#method]: …} or {@code R<n> has no…}. */
   private static final Pattern ANALYZER =
