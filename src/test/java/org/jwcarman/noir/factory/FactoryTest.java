@@ -47,6 +47,7 @@ import org.jwcarman.noir.measure.MeasureArtifacts;
 import org.jwcarman.noir.measure.MeasureJudge;
 import org.jwcarman.noir.measure.MeasureOutcome;
 import org.jwcarman.noir.measure.MeasureRunner;
+import org.jwcarman.noir.measure.TestInventory;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.seal.ApprovalSealing;
 import org.jwcarman.noir.seal.SealOutcome;
@@ -261,6 +262,65 @@ class FactoryTest {
             "You modified `pom.xml`. This spec allows changes only to: new files. Restore those"
                 + " files and make the change another way.");
     assertThat(measure.calls).isZero();
+  }
+
+  static String report(String... casesXml) {
+    return "<testsuite>" + String.join("", casesXml) + "</testsuite>";
+  }
+
+  static final String ADDS_PASSED =
+      "<testcase classname=\"com.example.CalcTest\" name=\"adds()\"/>";
+  static final String ADDS_SKIPPED =
+      "<testcase classname=\"com.example.CalcTest\" name=\"adds()\"><skipped/></testcase>";
+
+  @Test
+  void lockedTestThatStopsPassingIsContractViolationRework() throws IOException {
+    TestInventory.write(
+        List.of("com.example.CalcTest#adds()", "com.example.CalcTest#subtracts()"),
+        itemDir.resolve("baseline-tests.json"));
+    measure.testReports =
+        n ->
+            n == 1
+                ? report(ADDS_SKIPPED)
+                : report(
+                    ADDS_PASSED,
+                    "<testcase classname=\"com.example.CalcTest\" name=\"subtracts()\"/>");
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.PR_OPEN);
+    assertThat(transitionsTo("REWORK").getFirst()).containsEntry("category", "CONTRACT_VIOLATION");
+    assertThat(Files.readString(attempt(1).feedback()))
+        .contains(
+            "These existing tests passed on the base commit but did not pass on your branch"
+                + " (skipped or not run): `com.example.CalcTest#adds()`,"
+                + " `com.example.CalcTest#subtracts()`.");
+  }
+
+  @Test
+  void testsInATestToUpdateMayStopRunning() throws IOException {
+    spec = spec.withTestsToUpdate(List.of("src/test/java/com/example/CalcTest.java"));
+    SpecJson.write(spec, itemDir.resolve("spec.json"));
+    Commitments.write(
+        Commitments.create(spec, itemDir, "examiner-model", "body"),
+        itemDir.resolve("commitment.json"));
+    TestInventory.write(
+        List.of("com.example.CalcTest#adds()"), itemDir.resolve("baseline-tests.json"));
+
+    assertThat(drive().state()).isEqualTo(State.PR_OPEN);
+    assertThat(transitionsTo("REWORK")).isEmpty();
+  }
+
+  @Test
+  void failedBuildIsABuildFailureNotAMissingTestViolation() throws IOException {
+    TestInventory.write(
+        List.of("com.example.CalcTest#adds()"), itemDir.resolve("baseline-tests.json"));
+    measure.modes = n -> n == 1 ? MeasureMode.BUILD_FAILED : MeasureMode.PASS;
+    measure.testReports = n -> n == 1 ? null : report(ADDS_PASSED);
+
+    drive();
+
+    assertThat(transitionsTo("REWORK").getFirst()).containsEntry("category", "BUILD_FAILED");
   }
 
   @Test
@@ -976,6 +1036,7 @@ class FactoryTest {
   enum MeasureMode {
     PASS,
     SHORTFALL,
+    BUILD_FAILED,
     THROW
   }
 
@@ -984,10 +1045,17 @@ class FactoryTest {
     int calls;
     IntFunction<MeasureMode> modes = n -> MeasureMode.PASS;
 
+    /** The build's JUnit report for each attempt, or null for none. */
+    IntFunction<String> testReports = n -> null;
+
     @Override
     public MeasureArtifacts run(
         Spec spec, Path attemptBundle, String branch, Path stubsDir, Path outDir) {
       calls++;
+      var report = testReports.apply(calls);
+      if (report != null) {
+        write(outDir.resolve("test-reports/surefire-reports-TEST-x.xml"), report);
+      }
       var mode = modes.apply(calls);
       if (mode == MeasureMode.THROW) {
         throw new DockerException("daemon unavailable");
@@ -999,6 +1067,10 @@ class FactoryTest {
       for (var step :
           List.of("build", "holdout-sources", "forbidden", "api", "changed", "deps", "pit")) {
         write(outDir.resolve(step + ".exit"), "0\n");
+      }
+      if (mode == MeasureMode.BUILD_FAILED) {
+        write(outDir.resolve("build.exit"), "1\n");
+        write(outDir.resolve("build.log"), "[ERROR] BUILD FAILURE\n");
       }
       for (var f : List.of("generated.txt", "holdout-sources.txt", "forbidden.txt")) {
         write(outDir.resolve(f), "");

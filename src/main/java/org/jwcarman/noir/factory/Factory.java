@@ -44,6 +44,7 @@ import org.jwcarman.noir.measure.MeasureArtifacts;
 import org.jwcarman.noir.measure.MeasureJudge;
 import org.jwcarman.noir.measure.MeasureOutcome;
 import org.jwcarman.noir.measure.MeasureRunner;
+import org.jwcarman.noir.measure.TestInventory;
 import org.jwcarman.noir.render.SpecRenderer;
 import org.jwcarman.noir.seal.ApprovalSealing;
 import org.jwcarman.noir.seal.SealOutcome;
@@ -412,6 +413,23 @@ public final class Factory implements ItemDriver {
         retry.call(() ->
             measurer.run(
                 spec, bundle, ctx.branch(), ctx.itemDir().resolve("stubs"), paths.measure()));
+    var notPassing = lockedTestsNotPassing(ctx, artifacts);
+    if (!notPassing.isEmpty()) {
+      event(
+          ctx.item().id(),
+          "measurement",
+          ctx.item().attempt(),
+          Map.of(
+              "passed",
+              false,
+              "category",
+              Category.CONTRACT_VIOLATION.name(),
+              "lockedTestsNotPassing",
+              notPassing.size()));
+      return new Step(
+          new Trigger.MeasurementFailed(Category.CONTRACT_VIOLATION),
+          new FeedbackInput.ContractViolation(List.of(TestInventory.feedback(notPassing))));
+    }
     MeasureOutcome outcome;
     try {
       outcome =
@@ -447,6 +465,23 @@ public final class Factory implements ItemDriver {
       case MeasureOutcome.Shortfall s ->
           new Step(new Trigger.MeasurementFailed(s.input().category()), s.input());
     };
+  }
+
+  /**
+   * The base commit's passing tests that did not pass in this attempt's build, except those in
+   * files the spec lets change. Empty when the build failed (that is a build failure) or the item
+   * was sealed before baselines were recorded.
+   */
+  private static List<String> lockedTestsNotPassing(Ctx ctx, MeasureArtifacts artifacts) {
+    var baseline = ctx.itemDir().resolve(TestInventory.BASELINE_FILE);
+    if (artifacts.exit("build").orElse(1) != 0
+        || !Files.isRegularFile(baseline, LinkOption.NOFOLLOW_LINKS)) {
+      return List.of();
+    }
+    var changeable = new ArrayList<String>(ctx.spec().modifies());
+    changeable.addAll(ctx.spec().testsToUpdate());
+    return TestInventory.notPassing(
+        TestInventory.read(baseline), artifacts.testOutcomes(), changeable);
   }
 
   private QualityBar bar(Spec spec) {

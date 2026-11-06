@@ -77,6 +77,7 @@ final class Wiring {
     Retry.Sleeper sleeper = Wiring::sleep;
     var delivery = new GitHubDelivery(gh, new GitBranchPublisher(runner, tmp));
     var git = new GitCli(runner);
+    var measurer = new ContainerMeasureRunner(docker, config);
     var approvalSealer =
         new ApprovalSealer(
             store,
@@ -91,8 +92,10 @@ final class Wiring {
                 config,
                 clock,
                 Retry.forConfig(config, sleeper)),
+            measurer,
             config,
             clock,
+            Retry.forConfig(config, sleeper),
             secrets);
     var factory =
         new Factory(
@@ -100,7 +103,7 @@ final class Wiring {
             delivery,
             approvalSealer,
             new ContainerBuildRunner(docker, new ClaudeContainerAgent(docker, auth), config),
-            new ContainerMeasureRunner(docker, config),
+            measurer,
             new ContainerGradeRunner(docker, config),
             new GitBundles(runner, tmp),
             config,

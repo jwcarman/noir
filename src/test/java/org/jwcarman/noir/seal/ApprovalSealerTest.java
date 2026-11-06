@@ -30,6 +30,7 @@ import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.factory.InfraFailure;
 import org.jwcarman.noir.factory.Retry;
+import org.jwcarman.noir.feedback.TestOutcome;
 import org.jwcarman.noir.git.GitCli;
 import org.jwcarman.noir.git.GitFixtures;
 import org.jwcarman.noir.git.GitPort;
@@ -38,6 +39,8 @@ import org.jwcarman.noir.github.FakeGitHub;
 import org.jwcarman.noir.github.GitHubException;
 import org.jwcarman.noir.github.NoirLabels;
 import org.jwcarman.noir.lifecycle.SealRejection;
+import org.jwcarman.noir.measure.BaselineRunner;
+import org.jwcarman.noir.measure.TestInventory;
 import org.jwcarman.noir.render.SpecRenderer;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.IssueSpec;
@@ -78,6 +81,19 @@ class ApprovalSealerTest {
   List<String> inventoryCalls;
   List<Integer> inventoryCallsSeenByExaminer;
   RuntimeException inventoryFailure;
+
+  /** What the base build returns; each call is recorded as "bundle-name branch out-name". */
+  java.util.function.Supplier<BaselineRunner.Baseline> baselineResult =
+      () ->
+          new BaselineRunner.Baseline(
+              0,
+              List.of(
+                  new TestOutcome("a.T#x()", Set.of(), TestOutcome.Result.PASSED, null),
+                  new TestOutcome("a.T#s()", Set.of(), TestOutcome.Result.SKIPPED, null)),
+              "BUILD SUCCESS");
+
+  List<String> baselineCalls = new ArrayList<>();
+  List<Integer> examinerRequestsAtBaseline = new ArrayList<>();
   ScriptedAgent agent;
   ApprovalSealer sealer;
   int issue;
@@ -199,8 +215,14 @@ class ApprovalSealerTest {
             config,
             clock,
             Retry.forConfig(config, d -> {})),
+        (itemId, bundle, branch, out) -> {
+          baselineCalls.add(bundle.getFileName() + " " + branch + " " + out.getFileName());
+          examinerRequestsAtBaseline.add(agent.requests().size());
+          return baselineResult.get();
+        },
         config,
         clock,
+        Retry.forConfig(config, d -> {}),
         Set.of(SECRET));
   }
 
@@ -228,6 +250,59 @@ class ApprovalSealerTest {
     assertThat(eventTypes())
         .contains("sealed", "commitment_posted")
         .doesNotContain("examiner_attempt");
+  }
+
+  @Test
+  void baseTestsArePinnedAtSealing() {
+    sealer = newSealer(NoirConfig.defaults());
+    assertThat(sealer.seal(item)).isInstanceOf(SealOutcome.Passed.class);
+
+    assertThat(baselineCalls).containsExactly("base.bundle noir/seal-base baseline");
+    assertThat(TestInventory.read(itemDir().resolve(TestInventory.BASELINE_FILE)))
+        .containsExactly("a.T#x()");
+    assertThat(event("baseline").data())
+        .containsEntry("exit", 0)
+        .containsEntry("passed", 1)
+        .containsEntry("failing", 0);
+  }
+
+  @Test
+  void baseTestsArePinnedWithHiddenTestsOnToo() {
+    assertThat(sealer.seal(item)).isInstanceOf(SealOutcome.Passed.class);
+    assertThat(baselineCalls).hasSize(1);
+    assertThat(examinerRequestsAtBaseline).as("before the Examiner").containsExactly(0);
+    assertThat(itemDir().resolve(TestInventory.BASELINE_FILE)).exists();
+  }
+
+  @Test
+  void failingBaseTestsReject() {
+    baselineResult =
+        () ->
+            new BaselineRunner.Baseline(
+                1,
+                List.of(
+                    new TestOutcome("a.T#x()", Set.of(), TestOutcome.Result.PASSED, null),
+                    new TestOutcome("a.T#f()", Set.of(), TestOutcome.Result.FAILED, "boom")),
+                "[ERROR] BUILD FAILURE");
+
+    var outcome = sealer.seal(item);
+
+    assertRejected(
+        outcome,
+        SealRejection.BASE_TESTS_FAIL,
+        ApprovalComments.baseTestsFail(List.of("a.T#f()")),
+        1);
+    assertThat(agent.requests()).isEmpty();
+  }
+
+  @Test
+  void baseBuildFailureWithoutFailingTestsIsAnInfrastructureFailure() {
+    baselineResult = () -> new BaselineRunner.Baseline(1, List.of(), "[ERROR] network");
+
+    assertThatThrownBy(() -> sealer.seal(item)).isInstanceOf(InfraFailure.class);
+
+    assertThat(baselineCalls).hasSize(NoirConfig.defaults().infraRetries() + 1);
+    assertThat(itemDir().resolve("commitment.json")).doesNotExist();
   }
 
   @Test
@@ -302,6 +377,8 @@ class ApprovalSealerTest {
             "base.bundle",
             "holdout",
             "reference",
+            "baseline",
+            TestInventory.BASELINE_FILE,
             "commitment.json")) {
       assertThat(itemDir().resolve(leftover)).doesNotExist();
     }
@@ -325,7 +402,7 @@ class ApprovalSealerTest {
                 + bodySha
                 + "`)");
     assertThat(eventTypes())
-        .containsExactly("approved", "examiner_attempt", "commitment_posted", "sealed");
+        .containsExactly("approved", "baseline", "examiner_attempt", "commitment_posted", "sealed");
     assertThat(event("approved").data())
         .isEqualTo(
             Map.of(
@@ -384,7 +461,7 @@ class ApprovalSealerTest {
 
     assertThatThrownBy(() -> sealer.seal(item)).isInstanceOf(InfraFailure.class);
 
-    assertThat(eventTypes()).containsExactly("approved");
+    assertThat(eventTypes()).containsExactly("approved", "baseline");
     assertThat(itemDir().resolve("commitment.json")).doesNotExist();
     assertThat(inventoryCalls).hasSize(NoirConfig.defaults().infraRetries() + 1);
   }
@@ -596,7 +673,7 @@ class ApprovalSealerTest {
     assertThat(agent.requests()).as("examiner not called again").hasSize(1);
     assertThat(github.comments(issue)).singleElement().asString().contains(sha);
     assertThat(eventTypes())
-        .containsExactly("approved", "examiner_attempt", "commitment_posted", "sealed");
+        .containsExactly("approved", "baseline", "examiner_attempt", "commitment_posted", "sealed");
     assertThat(event("sealed").data())
         .containsEntry("baseSha", originHead())
         .as("the edit time of the body that was sealed, not of the later edit")
@@ -620,7 +697,7 @@ class ApprovalSealerTest {
     assertThat(github.comments(issue)).hasSize(1);
     assertThat(agent.requests()).hasSize(1);
     assertThat(eventTypes())
-        .containsExactly("approved", "examiner_attempt", "commitment_posted", "sealed");
+        .containsExactly("approved", "baseline", "examiner_attempt", "commitment_posted", "sealed");
   }
 
   @Test
@@ -667,6 +744,12 @@ class ApprovalSealerTest {
             "noir did not seal this issue: the requested change breaks existing tests that this"
                 + " spec does not allow to change: `A`, `B`. If those expectations should change,"
                 + " list their files under `## Tests to update` and add `noir:ready` again.");
+    assertThat(ApprovalComments.baseTestsFail(List.of("a.T#f()", "b.U#g()")))
+        .isEqualTo(
+            "noir did not seal this issue: these existing tests fail on the default branch:"
+                + " `a.T#f()`, `b.U#g()`. noir requires every existing test that passes before the"
+                + " change to pass after it, so the default branch must be green first. Fix them,"
+                + " then add `noir:ready` again.");
     assertThat(ApprovalComments.sealed("c", "b", "s"))
         .isEqualTo("noir commitment `c` (commitmentVersion 2, base `b`, issue body sha256 `s`)");
   }
@@ -729,7 +812,7 @@ class ApprovalSealerTest {
     assertThat(SpecJson.read(itemDir().resolve("spec.json")).modifies()).containsExactly(CSV);
     assertThat(github.comments(issue)).singleElement().asString().startsWith("noir commitment `");
     assertThat(eventTypes())
-        .containsExactly("approved", "examiner_attempt", "commitment_posted", "sealed");
+        .containsExactly("approved", "baseline", "examiner_attempt", "commitment_posted", "sealed");
     var prompt = agent.requests().getFirst().prompt();
     assertThat(prompt)
         .containsSubsequence(

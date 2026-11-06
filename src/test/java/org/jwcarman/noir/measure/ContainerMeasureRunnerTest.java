@@ -2,6 +2,7 @@ package org.jwcarman.noir.measure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -20,12 +21,17 @@ import org.jwcarman.noir.docker.ContainerSpec;
 import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.docker.FakeContainerPort;
 import org.jwcarman.noir.docker.Mount;
+import org.jwcarman.noir.feedback.TestOutcome;
 import org.jwcarman.noir.spec.Specs;
 
 class ContainerMeasureRunnerTest {
   @TempDir Path tmp;
 
   static final ContainerResult OK = new ContainerResult(0, "", "", false, "sha");
+
+  static final String REPORT =
+      "<testsuite><testcase classname=\"a.T\" name=\"x()\"/>"
+          + "<testcase classname=\"a.T\" name=\"s()\"><skipped/></testcase></testsuite>";
 
   /** What each phase writes, keyed by phase, then by path relative to its rw mount. */
   final Map<String, Map<String, String>> writes = new HashMap<>();
@@ -53,7 +59,8 @@ class ContainerMeasureRunnerTest {
             "forbidden",
             "generated",
             "api",
-            "coverage")) {
+            "coverage",
+            "test-reports")) {
       analyze.put(step + ".exit", "0\n");
       analyze.put(step + ".log", "");
     }
@@ -67,7 +74,19 @@ class ContainerMeasureRunnerTest {
     analyze.put("jacoco.xml", "<report/>");
     analyze.put("export/classes/.keep", "");
     analyze.put("export/deps/.keep", "");
+    analyze.put("test-reports/surefire-reports-TEST-a.T.xml", REPORT);
     writes.put("analyze", analyze);
+    writes.put(
+        "baseline",
+        new HashMap<>(
+            Map.of(
+                "clone.exit", "0\n",
+                "clone.log", "",
+                "baseline.exit", "0\n",
+                "baseline.log", "BUILD SUCCESS\n",
+                "test-reports.exit", "0\n",
+                "test-reports.log", "",
+                "test-reports/surefire-reports-TEST-a.T.xml", REPORT)));
     writes.put(
         "pit",
         new HashMap<>(
@@ -133,6 +152,77 @@ class ContainerMeasureRunnerTest {
         .allSatisfy(s ->
             assertThat(s.env().keySet())
                 .noneMatch(k -> k.contains("ANTHROPIC") || k.contains("CLAUDE")));
+  }
+
+  @Test
+  void measurementCarriesTheBuildsTestOutcomes() {
+    assertThat(run().testOutcomes())
+        .extracting(TestOutcome::testId, TestOutcome::result)
+        .containsExactly(
+            tuple("a.T#x()", TestOutcome.Result.PASSED),
+            tuple("a.T#s()", TestOutcome.Result.SKIPPED));
+  }
+
+  @Test
+  void failedTestReportsStepIsAnInfrastructureError() {
+    writes.get("analyze").put("test-reports.exit", "1\n");
+    assertThatThrownBy(this::run)
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("test-reports");
+  }
+
+  BaselineRunner.Baseline baseline() {
+    return new ContainerMeasureRunner(port, NoirConfig.defaults())
+        .baseline(Specs.ID, tmp.resolve("base.bundle"), "noir/seal-base", tmp.resolve("baseline"));
+  }
+
+  @Test
+  void baselineRunsTheBaseBundleAndReturnsItsOutcomes() {
+    var b = baseline();
+    assertThat(b.exit()).isZero();
+    assertThat(b.outcomes())
+        .extracting(TestOutcome::testId, TestOutcome::result)
+        .containsExactly(
+            tuple("a.T#x()", TestOutcome.Result.PASSED),
+            tuple("a.T#s()", TestOutcome.Result.SKIPPED));
+    var spec = phase("baseline");
+    assertThat(spec.network()).isTrue();
+    assertThat(spec.env()).containsEntry("BRANCH", "noir/seal-base").containsKey("STEP_TIMEOUT");
+    assertThat(spec.env().keySet()).noneMatch(k -> k.contains("ANTHROPIC") || k.contains("CLAUDE"));
+    assertThat(spec.mounts())
+        .extracting(Mount::host, Mount::container, Mount::readOnly)
+        .containsExactlyInAnyOrder(
+            tuple(tmp.resolve("base.bundle"), "/work/attempt.bundle", true),
+            tuple(tmp.resolve("baseline"), "/work/out", false));
+    assertThat(spec.labels()).containsExactly(Map.entry(ContainerSpec.ITEM_LABEL, Specs.ID));
+  }
+
+  @Test
+  void baselineBuildFailureIsReportedNotThrown() {
+    writes.get("baseline").put("baseline.exit", "1\n");
+    writes.get("baseline").put("baseline.log", "[ERROR] BUILD FAILURE\n");
+    var b = baseline();
+    assertThat(b.exit()).isEqualTo(1);
+    assertThat(b.logTail()).contains("BUILD FAILURE");
+  }
+
+  @Test
+  void baselineContainerFailureIsAnInfrastructureError() {
+    results.put("baseline", new ContainerResult(137, "", "killed", true, "sha"));
+    assertThatThrownBy(this::baseline).isInstanceOf(DockerException.class);
+  }
+
+  @Test
+  void baselineCloneOrReportFailureIsAnInfrastructureError() {
+    writes.get("baseline").put("clone.exit", "1\n");
+    assertThatThrownBy(this::baseline)
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("clone");
+    writes.get("baseline").put("clone.exit", "0\n");
+    writes.get("baseline").remove("test-reports.exit");
+    assertThatThrownBy(this::baseline)
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("test-reports");
   }
 
   @Test

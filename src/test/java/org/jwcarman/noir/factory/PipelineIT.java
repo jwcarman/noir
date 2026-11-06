@@ -41,6 +41,7 @@ import org.jwcarman.noir.github.NoirLabels;
 import org.jwcarman.noir.grade.ContainerGradeRunner;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.measure.ContainerMeasureRunner;
+import org.jwcarman.noir.measure.TestInventory;
 import org.jwcarman.noir.render.SpecRenderer;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.seal.ApprovalComments;
@@ -298,9 +299,10 @@ class PipelineIT {
   }
 
   /**
-   * The service registration and the auto-detection switch ship in the builder's classes. The
-   * forbidden scan rejects them in measurement (CONTRACT_VIOLATION), so the swallowing extension
-   * never reaches the grader; were it to, the grader's own scan fails the grade closed.
+   * The service registration and the auto-detection switch are added under src/main/resources. The
+   * lock check rejects them by name before anything runs (CONTRACT_VIOLATION); measurement's
+   * forbidden scan would reject them in the build output, and the grader's own scan fails the grade
+   * closed, so the swallowing extension never reaches a hidden-test run.
    */
   @Test
   void junitExtensionCannotSwallowHoldoutFailures() {
@@ -314,9 +316,9 @@ class PipelineIT {
     assertThat(run.ofType("grade")).isEmpty();
     assertThat(run.read(run.attempt(1).resolve("FEEDBACK.md")))
         .contains(
-            "forbidden in build output: /work/out/export/classes/META-INF/services/"
-                + "org.junit.jupiter.api.extension.Extension")
-        .contains("forbidden in build output: /work/out/export/classes/junit-platform.properties");
+            "You added"
+                + " `src/main/resources/META-INF/services/org.junit.jupiter.api.extension.Extension`,"
+                + " `src/main/resources/junit-platform.properties`.");
     assertThat(run.item().github().pullRequests())
         .singleElement()
         .satisfies(pr -> assertThat(pr.draft()).isTrue());
@@ -548,8 +550,10 @@ class PipelineIT {
                 cfg,
                 clock,
                 Retry.forConfig(cfg, d -> {})),
+            new ContainerMeasureRunner(docker, cfg),
             cfg,
             clock,
+            Retry.forConfig(cfg, d -> {}),
             Set.of(SECRET));
     var builder = new ScriptedAgent(s.builder());
     var delivery =
@@ -793,6 +797,41 @@ class PipelineIT {
                       + "` (+17 \u22120)\n")
               .doesNotContain(SECRET);
         });
+  }
+
+  /**
+   * Attempt 1 leaves every file the spec locks untouched but makes Counter.increment() throw
+   * JUnit's abort exception by reflection, so the locked CounterTest cases that call it report as
+   * skipped and the build passes. Sealing recorded which base tests pass; measurement finds two of
+   * them no longer passing and reworks the attempt as a contract violation.
+   */
+  @Test
+  void builderAbortingLockedTestsIsReworked() {
+    var a =
+        approveModify(
+            modifyBody("three", List.of()),
+            "examiner-cap",
+            copying(n -> modifyFixture("builders/aborts-locked-test/attempt-" + n)),
+            config.examiner().attempts());
+
+    assertThat(a.path())
+        .as(String.valueOf(a.github().comments(a.issue())))
+        .isEqualTo(
+            "SEALING > SEALED > BUILDING > MEASURING > REWORK(CONTRACT_VIOLATION)"
+                + " > BUILDING > MEASURING > GRADING > PR_OPEN");
+    var itemDir = a.store().itemDir(a.itemId());
+    assertThat(TestInventory.read(itemDir.resolve(TestInventory.BASELINE_FILE)))
+        .hasSize(3)
+        .allMatch(id -> id.startsWith("com.example.api.CounterTest#"));
+    assertThat(readFile(a.attempt(1).resolve("FEEDBACK.md")))
+        .contains("These existing tests passed on the base commit but did not pass on your branch")
+        .contains("`com.example.api.CounterTest#incrementAddsOne")
+        .contains("`com.example.api.CounterTest#incrementTwice")
+        .doesNotContain("startsAtZero");
+    assertThat(a.store().readEvents(a.itemId()))
+        .filteredOn(e -> e.type().equals("measurement"))
+        .first()
+        .satisfies(e -> assertThat(e.data()).containsEntry("lockedTestsNotPassing", 2));
   }
 
   @Test

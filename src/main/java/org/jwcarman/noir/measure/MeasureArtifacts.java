@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.jwcarman.noir.exec.CommandResult;
+import org.jwcarman.noir.feedback.TestOutcome;
+import org.jwcarman.noir.reports.JUnitXmlReports;
 
 /**
  * The files written by the measurement container into its output directory. The builder controls
@@ -113,6 +115,14 @@ public record MeasureArtifacts(Path outDir) {
       }
     }
     return classes;
+  }
+
+  /**
+   * The build's JUnit test outcomes. Its tests ran builder code, so an unreadable report is left
+   * out (its tests count as not run) rather than failing the measurement.
+   */
+  public List<TestOutcome> testOutcomes() {
+    return JUnitXmlReports.parseLenient(outDir.resolve("test-reports"));
   }
 
   public Path exportClasses() {

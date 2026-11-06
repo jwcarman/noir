@@ -38,4 +38,23 @@ class JUnitXmlReportsTest {
     assertThatThrownBy(() -> JUnitXmlReports.parse(tmp))
         .isInstanceOf(IllegalArgumentException.class);
   }
+
+  @Test
+  void lenientParsingSkipsUnreadableReports(@TempDir Path tmp) throws Exception {
+    Files.writeString(
+        tmp.resolve("TEST-a.xml"),
+        "<testsuite><testcase classname=\"a.T\" name=\"x()\"/></testsuite>");
+    Files.writeString(tmp.resolve("TEST-b.xml"), "<testsuite><testcase");
+    Files.writeString(
+        tmp.resolve("TEST-c.xml"),
+        "<?xml version=\"1.0\"?><!DOCTYPE t [<!ENTITY e \"x\">]><testsuite>&e;</testsuite>");
+    assertThat(JUnitXmlReports.parseLenient(tmp))
+        .extracting(TestOutcome::testId, TestOutcome::result)
+        .containsExactly(org.assertj.core.groups.Tuple.tuple("a.T#x()", PASSED));
+  }
+
+  @Test
+  void lenientParsingOfAMissingDirIsEmpty(@TempDir Path tmp) {
+    assertThat(JUnitXmlReports.parseLenient(tmp.resolve("nope"))).isEmpty();
+  }
 }

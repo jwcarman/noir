@@ -41,7 +41,7 @@ import org.jwcarman.noir.spec.Spec;
  * container, its infrastructure steps, missing judged files) are a {@link DockerException}, so the
  * judge never sees an incomplete measurement.
  */
-public final class ContainerMeasureRunner implements MeasureRunner {
+public final class ContainerMeasureRunner implements MeasureRunner, BaselineRunner {
   static final int LOG_TAIL_LINES = 80;
   static final long MAX_LOG_BYTES = 256 * 1024;
   static final long MAX_EXIT_BYTES = 16;
@@ -49,7 +49,14 @@ public final class ContainerMeasureRunner implements MeasureRunner {
 
   /** Analyze steps that only fail on infrastructure trouble. */
   static final List<String> INFRA_STEPS =
-      List.of("clone", "export", "holdout-sources", "changed", "forbidden", "generated");
+      List.of(
+          "clone",
+          "export",
+          "holdout-sources",
+          "changed",
+          "forbidden",
+          "generated",
+          "test-reports");
 
   /** Steps whose exit the judge requires. */
   static final List<String> STEPS =
@@ -64,6 +71,7 @@ public final class ContainerMeasureRunner implements MeasureRunner {
           "generated",
           "api",
           "coverage",
+          "test-reports",
           "pit");
 
   static final List<String> FILES =
@@ -209,6 +217,53 @@ public final class ContainerMeasureRunner implements MeasureRunner {
     var artifacts = new MeasureArtifacts(outDir);
     requireSteps(artifacts);
     return artifacts;
+  }
+
+  /**
+   * Runs {@code measure.sh baseline} on the item's base bundle: the base commit is code a human
+   * approved, never builder code, so its container writes the output directory directly. A base
+   * build that fails is returned (with its log tail); a container, clone or report-copy failure is
+   * infrastructure.
+   */
+  @Override
+  public Baseline baseline(String itemId, Path baseBundle, String branch, Path outDir) {
+    deleteRecursively(outDir);
+    try {
+      Files.createDirectories(outDir);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+    var log = new StringBuilder();
+    try {
+      requireOk(
+          "baseline",
+          phase(
+              log,
+              itemId,
+              "baseline",
+              List.of(Mount.ro(baseBundle, "/work/attempt.bundle"), Mount.rw(outDir, "/work/out")),
+              Map.of(
+                  "BRANCH",
+                  branch,
+                  "STEP_TIMEOUT",
+                  String.valueOf(timeouts.buildStep().toSeconds())),
+              true,
+              timeouts.buildContainer()));
+    } finally {
+      writeLog(outDir, log);
+    }
+    var a = new MeasureArtifacts(outDir);
+    for (var step : List.of("clone", "test-reports")) {
+      var exit = a.exit(step);
+      if (exit.isEmpty() || exit.get() != 0) {
+        throw new DockerException(
+            "baseline step " + step + " did not complete:\n" + a.logTail(step, 40));
+      }
+    }
+    var exit =
+        a.exit("baseline")
+            .orElseThrow(() -> new DockerException("baseline recorded no build exit"));
+    return new Baseline(exit, a.testOutcomes(), a.logTail("baseline", LOG_TAIL_LINES));
   }
 
   /**

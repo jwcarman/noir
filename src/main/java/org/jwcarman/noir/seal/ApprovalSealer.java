@@ -15,6 +15,8 @@ import java.util.Optional;
 import java.util.Set;
 import org.jwcarman.noir.commit.Commitments;
 import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.docker.DockerException;
+import org.jwcarman.noir.factory.Retry;
 import org.jwcarman.noir.factory.Secrets;
 import org.jwcarman.noir.git.GitPort;
 import org.jwcarman.noir.git.RepoMirror;
@@ -22,6 +24,8 @@ import org.jwcarman.noir.github.GitHubPort;
 import org.jwcarman.noir.github.IssueSnapshot;
 import org.jwcarman.noir.github.NoirLabels;
 import org.jwcarman.noir.lifecycle.SealRejection;
+import org.jwcarman.noir.measure.BaselineRunner;
+import org.jwcarman.noir.measure.TestInventory;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.IssueSpec;
 import org.jwcarman.noir.spec.IssueSpecException;
@@ -46,6 +50,9 @@ public final class ApprovalSealer implements ApprovalSealing {
    */
   static final String SEALED_EDITED_AT = "sealedEditedAt";
 
+  /** Where the base build's container output (logs, reports) is kept for the operator. */
+  static final String BASELINE_DIR = "baseline";
+
   static final List<String> SEAL_FILES =
       List.of(
           "spec.json",
@@ -55,6 +62,8 @@ public final class ApprovalSealer implements ApprovalSealing {
           SuiteSealer.INVENTORY_DIR,
           "holdout",
           "reference",
+          BASELINE_DIR,
+          TestInventory.BASELINE_FILE,
           "commitment.json");
 
   private static final String MAIN_JAVA = "src/main/java/";
@@ -64,8 +73,10 @@ public final class ApprovalSealer implements ApprovalSealing {
   private final RepoMirror mirror;
   private final GitPort git;
   private final SuiteSealer suiteSealer;
+  private final BaselineRunner baselineRunner;
   private final NoirConfig config;
   private final Clock clock;
+  private final Retry retry;
   private final Set<String> secrets;
 
   public ApprovalSealer(
@@ -74,16 +85,20 @@ public final class ApprovalSealer implements ApprovalSealing {
       RepoMirror mirror,
       GitPort git,
       SuiteSealer suiteSealer,
+      BaselineRunner baselineRunner,
       NoirConfig config,
       Clock clock,
+      Retry retry,
       Set<String> secrets) {
     this.store = store;
     this.gh = gh;
     this.mirror = mirror;
     this.git = git;
     this.suiteSealer = suiteSealer;
+    this.baselineRunner = baselineRunner;
     this.config = config;
     this.clock = clock;
+    this.retry = retry;
     this.secrets = Set.copyOf(secrets);
   }
 
@@ -199,6 +214,15 @@ public final class ApprovalSealer implements ApprovalSealing {
         parsed.stubs().stream().filter(s -> spliced.contains(s.path())).toList());
     var bundle = itemDir.resolve("base.bundle");
     git.bundle(repoDir, baseSha, bundle);
+    var failing = pinBaseline(item, itemDir, bundle);
+    if (!failing.isEmpty()) {
+      return reject(
+          item,
+          itemDir,
+          SealRejection.BASE_TESTS_FAIL,
+          ApprovalComments.baseTestsFail(failing),
+          failing);
+    }
 
     if (!config.hiddenTests() && !snapshot.labels().contains(NoirLabels.HIDDEN_TESTS)) {
       // Hidden tests off: the spec is sealed (commitment to the issue text, base and stubs) with no
@@ -231,6 +255,41 @@ public final class ApprovalSealer implements ApprovalSealing {
     Commitments.write(
         Commitments.create(spec, itemDir, examination.model(), bodySha), commitmentFile);
     return publish(item, commitmentFile);
+  }
+
+  /**
+   * Runs the base commit's tests and records the ones that passed ({@link
+   * TestInventory#BASELINE_FILE}): every attempt must keep them passing. Returns the failing tests
+   * when the base build failed because of them (the seal is rejected); a base build that failed
+   * with no failing test is infrastructure (retried, then {@code InfraFailure}). A build that
+   * passed despite failing tests (the POM ignores failures) is accepted: only passing tests are
+   * locked.
+   */
+  private List<String> pinBaseline(WorkItem item, Path itemDir, Path bundle) {
+    var result =
+        retry.call(() -> {
+          var b =
+              baselineRunner.baseline(
+                  item.id(), bundle, GitPort.SEAL_BRANCH, itemDir.resolve(BASELINE_DIR));
+          if (b.exit() != 0 && TestInventory.failing(b.outcomes()).isEmpty()) {
+            throw new DockerException(
+                "the base build failed (exit "
+                    + b.exit()
+                    + ") with no failing test:\n"
+                    + b.logTail());
+          }
+          return b;
+        });
+    var passed = TestInventory.passed(result.outcomes());
+    var failing = result.exit() == 0 ? List.<String>of() : TestInventory.failing(result.outcomes());
+    append(
+        item,
+        "baseline",
+        Map.of("exit", result.exit(), "passed", passed.size(), "failing", failing.size()));
+    if (failing.isEmpty()) {
+      TestInventory.write(passed, itemDir.resolve(TestInventory.BASELINE_FILE));
+    }
+    return failing;
   }
 
   /** The base commit's {@code src/main/java} Java sources, keyed by path. */

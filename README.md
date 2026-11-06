@@ -30,7 +30,12 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    change only the files the spec lists (modify targets and tests to update)
    plus new files; any other change (including deleting or renaming an allowed
    file) is a violation and sends the attempt back as a contract-violation
-   rework. In modified files only the changed lines are measured. List under
+   rework. New files that change how tests run (anything under `.mvn/`, any
+   `junit-platform.properties`, any `META-INF/services/org.junit.*`) are
+   violations too. Existing tests are locked by outcome as well: every test
+   that passed on the base commit must still pass, and one that is skipped or
+   missing is a violation, unless its file is listed under
+   `## Tests to update`. In modified files only the changed lines are measured. List under
    `## Tests to update` every existing test the change will break: with hidden
    tests on, sealing rejects a spec that breaks an unlisted test
    (`conflicts_with_existing_tests`); with them off, nothing checks this
@@ -39,8 +44,10 @@ seals and builds the spec in that issue. The **desktop** only writes specs
 2. **Approve.** A human reviews the issue and adds `noir:ready`. Only humans
    add that label; it is the approval.
 3. **Seal.** The server locks the spec: it checks it against the default
-   branch and posts a SHA-256 commitment to the issue text, base commit and
-   stubs. **Hidden tests are off by default**; turn them on for one issue with
+   branch, runs the repository's existing tests on the base commit to record
+   which ones pass, and posts a SHA-256 commitment to the issue text, base
+   commit and stubs. A default branch whose tests fail is rejected
+   (`base_tests_fail`): fix it first. **Hidden tests are off by default**; turn them on for one issue with
    the `noir:hidden-tests` label, or for every issue with `hiddenTests: true`
    in `config.yaml`. With hidden tests on, the server also asks a separate
    *Examiner* agent to write a **holdout acceptance suite** and a reference

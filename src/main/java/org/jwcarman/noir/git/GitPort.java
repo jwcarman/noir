@@ -14,7 +14,13 @@ public interface GitPort {
   /** The {@code owner/name} of the {@code origin} remote. */
   String originRepo(Path repoDir);
 
-  /** Writes a git bundle containing {@code sha} and its history to {@code out}. */
+  /** The branch a {@link #bundle} holds its commit on. */
+  String SEAL_BRANCH = "noir/seal-base";
+
+  /**
+   * Writes a git bundle containing {@code sha} and its history to {@code out}, on branch {@link
+   * #SEAL_BRANCH}.
+   */
   void bundle(Path repoDir, String sha, Path out);
 
   /** Clones {@code repo} ({@code owner/name}) into {@code dir} using the {@code gh} credentials. */

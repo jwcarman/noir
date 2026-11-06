@@ -18,18 +18,28 @@
 #            ForbiddenScan and ClassScan, and the JaCoCo CLI (none of these load builder classes).
 #            Mounts: /work/attempt.bundle (ro), /work/build (ro), /work/stubs (ro), /work/out (rw).
 #            Writes every judged file except the build/deps/pit records and mutations.xml.
+#            Also copies the build's JUnit XML reports to /work/out/test-reports (test-reports).
 #   pit      network off, no credentials. EXECUTES BUILDER CODE (PIT runs the builder's tests).
 #            Mounts: /work/build (ro), /work/pit (rw scratch, never judged). PIT's targets come
 #            from analyze (TARGET_CLASSES), its tests are '*', and no builder PIT config applies.
 #
+# A fourth phase runs once per item, at sealing, on the item's base bundle instead of an attempt:
+#
+#   baseline network on (Maven Central), no credentials. Runs only the BASE commit (the default
+#            branch a human approved the issue against), never builder code. Mounts:
+#            /work/attempt.bundle (ro, the base bundle), /work/out (rw). Runs `mvn verify` and
+#            copies its JUnit XML reports to /work/out/test-reports: the tests that passed there
+#            must still pass on every attempt's branch (TestInventory).
+#
 # The host (ContainerMeasureRunner) then copies build/deps/pit step records and mutations.xml from
 # the scratch directories into the output directory (regular files only, no symlinks, size and
 # format checked) and writes stubs.txt itself. The data that originates in builder JVMs (the
-# coverage exec file, PIT's kill results, the build exit) can be influenced by hostile tests no
+# coverage exec file, PIT's kill results, the build exit, the test reports) can be influenced by
+# hostile tests no
 # matter where it is written; the quality bar is a builder-facing guide and the holdout suite is
 # the acceptance gate (spec §7).
 #
-# Usage: measure.sh build|analyze|pit
+# Usage: measure.sh build|analyze|pit|baseline
 # Env: BRANCH, BASE_SHA; build and pit also STEP_TIMEOUT (seconds per builder-code step: a step
 # that hangs is killed and records exit 124, a build or mutation-testing failure for the judge);
 # analyze also STUB_CLASSES (comma-separated FQNs); pit also TARGET_CLASSES.
@@ -45,6 +55,7 @@ JACOCO_CLI=$LIB/jacoco/org.jacoco.cli-nodeps.jar
 LAUNCHER=$LIB/junit/junit-platform-console-standalone.jar
 DEPENDENCY_PLUGIN=org.apache.maven.plugins:maven-dependency-plugin:3.11.0
 MAX_EXEC_BYTES=$((256 * 1024 * 1024))
+MAX_REPORT_BYTES=$((16 * 1024 * 1024))
 
 # Kills every other process this user can signal (all but PID 1 and this shell): nothing a
 # builder-code step started may outlive it.
@@ -143,6 +154,26 @@ build_phase() {
   exit 0
 }
 
+# ---------------------------------------------------------------- baseline (base commit only)
+
+baseline_clone() {
+  fresh_clone /tmp/base
+}
+
+baseline() {
+  cd /tmp/base || return 1
+  rm -rf target
+  mvn -B -Djacoco.skip=true verify
+}
+
+baseline_phase() {
+  mkdir -p "$OUT"
+  run "$OUT" clone baseline_clone || exit 0
+  run "$OUT" baseline limited baseline
+  run "$OUT" test-reports copy_reports /tmp/base/target "$OUT/test-reports"
+  exit 0
+}
+
 # ---------------------------------------------------------------- analyze (no builder code)
 
 # real_dir <path>: an existing directory reached without any symlink.
@@ -171,6 +202,28 @@ copy_tree() {
 
 clone() {
   fresh_clone /tmp/repo
+}
+
+# copy_reports <target-dir> <dst>: the surefire and failsafe TEST-*.xml reports, regular files of
+# at most MAX_REPORT_BYTES, flattened to <dst>/<plugin>-<name>. Anything else is left out (a test
+# whose report is missing counts as not run).
+copy_reports() {
+  mkdir -p "$2" || return 1
+  local d f
+  for d in surefire-reports failsafe-reports; do
+    real_dir "$1/$d" || continue
+    while IFS= read -r -d '' f; do
+      if [ "$(stat -c %s -- "$f")" -gt "$MAX_REPORT_BYTES" ]; then
+        echo "left out (too large): ${f##*/}"
+        continue
+      fi
+      cat -- "$f" >"$2/$d-${f##*/}" || return 1
+    done < <(find "$1/$d" -maxdepth 1 -type f -name 'TEST-*.xml' -print0)
+  done
+}
+
+test_reports() {
+  copy_reports "$BUILD/repo/target" "$OUT/test-reports"
 }
 
 export_artifacts() {
@@ -272,6 +325,7 @@ analyze_phase() {
   run "$OUT" generated generated
   run "$OUT" api api
   run "$OUT" coverage coverage
+  run "$OUT" test-reports test_reports
   exit 0
 }
 
@@ -305,11 +359,12 @@ pit_phase() {
 
 # limited steps run in a child bash: it needs the functions and settings.
 export BUILD OUT PIT LIB JACOCO_AGENT JACOCO_CLI LAUNCHER DEPENDENCY_PLUGIN
-export -f g changed_includes build deps launcher pit
+export -f g changed_includes build deps launcher pit baseline
 
 case "${1:-}" in
   build) build_phase ;;
   analyze) analyze_phase ;;
   pit) pit_phase ;;
-  *) echo "usage: measure.sh build|analyze|pit" >&2; exit 2 ;;
+  baseline) baseline_phase ;;
+  *) echo "usage: measure.sh build|analyze|pit|baseline" >&2; exit 2 ;;
 esac

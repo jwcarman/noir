@@ -33,6 +33,7 @@ import org.jwcarman.noir.github.FakeGitHub;
 import org.jwcarman.noir.github.NoirLabels;
 import org.jwcarman.noir.grade.GradeRunner;
 import org.jwcarman.noir.lifecycle.State;
+import org.jwcarman.noir.measure.BaselineRunner;
 import org.jwcarman.noir.measure.MeasureRunner;
 import org.jwcarman.noir.render.SpecRenderer;
 import org.jwcarman.noir.seal.ApprovalComments;
@@ -102,8 +103,10 @@ class ReapprovalFlowTest {
                 config,
                 clock,
                 Retry.forConfig(config, d -> {})),
+            (id, bundle, branch, out) -> new BaselineRunner.Baseline(0, List.of(), ""),
             config,
             clock,
+            Retry.forConfig(config, d -> {}),
             Set.of(SECRET));
     var delivery = new GitHubDelivery(gh, new FakeBranchPublisher());
     var factory =

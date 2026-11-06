@@ -42,6 +42,21 @@ public final class ApprovalComments {
         + READY_AGAIN;
   }
 
+  /** The most failing tests named in the comment. */
+  static final int BASE_TESTS_LIMIT = 20;
+
+  public static String baseTestsFail(List<String> tests) {
+    var shown =
+        String.join(", ", tests.stream().limit(BASE_TESTS_LIMIT).map(t -> "`" + t + "`").toList());
+    var more = tests.size() - BASE_TESTS_LIMIT;
+    return "noir did not seal this issue: these existing tests fail on the default branch: "
+        + shown
+        + (more > 0 ? ", and " + more + " more" : "")
+        + ". noir requires every existing test that passes before the change to pass after it,"
+        + " so the default branch must be green first. Fix them, then "
+        + READY_AGAIN;
+  }
+
   public static String conflictsWithExistingTests(List<String> classes) {
     return "noir did not seal this issue: the requested change breaks existing tests that this"
         + " spec does not allow to change: "

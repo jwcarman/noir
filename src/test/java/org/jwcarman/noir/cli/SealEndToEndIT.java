@@ -26,6 +26,7 @@ import org.jwcarman.noir.git.LocalOriginGit;
 import org.jwcarman.noir.git.RepoMirror;
 import org.jwcarman.noir.github.FakeGitHub;
 import org.jwcarman.noir.github.NoirLabels;
+import org.jwcarman.noir.measure.ContainerMeasureRunner;
 import org.jwcarman.noir.render.SpecRenderer;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.seal.ApprovalSealer;
@@ -103,8 +104,10 @@ class SealEndToEndIT {
                 config,
                 clock,
                 Retry.forConfig(config, d -> {})),
+            new ContainerMeasureRunner(docker, config),
             config,
             clock,
+            Retry.forConfig(config, d -> {}),
             Set.of());
 
     var outcome = sealer.seal(item);

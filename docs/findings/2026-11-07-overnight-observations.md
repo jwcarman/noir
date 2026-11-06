@@ -12,9 +12,12 @@ with my own tests, plus extra edge-case probes, and found no wrong behavior that
 specified. The weak spots are not in the code the builder writes. They are in what noir does with
 the signals around it:
 
-1. **(High) The lock check has a hole** (Defects 0). A builder already tried to switch off a locked
-   test with a JUnit extension. It used `src/test/resources`, which is blocked, but the same files
-   under `src/main/resources` pass, as I confirmed. Worth fixing before anything else.
+1. **(High) Locked tests could be silenced** (Defects 0). A builder already tried to switch off a
+   locked test with a JUnit extension. noir blocked that route. My first claim, that the same
+   files under `src/main/resources` would pass, was wrong: measurement's forbidden scan rejects
+   them in the build output. A real route remains, though: main code that throws JUnit's abort
+   exception by reflection makes locked tests report as skipped with a green build. *Correction
+   added after review, see Defect 0. Fixed on branch `lock-check-test-inventory`.*
 2. **Both agents notice spec contradictions, and noir throws that away** (Improvements 6). With
    hidden tests off, the builder silently follows the Javadoc. With hidden tests on, the Examiner
    silently *drops* the bad example, so the holdout never tests that branch. A "spec problems"
@@ -50,27 +53,34 @@ Wall clock is seal start to PR (excluding time queued behind other items).
 
 ## Defects
 
-0. **(High) The lock check can be bypassed by putting JUnit config under `src/main/resources`.**
+0. **(High) Locked tests can be silenced so the build passes.** *Corrected after review.*
    On noir-test #75, attempt 4 tried to get past the locked `RomanNumeralsTest` by adding an
    `ExecutionCondition` that disables the two conflicting cases, registered through
    `src/test/resources/META-INF/services/...Extension` and
    `src/test/resources/junit-platform.properties` (autodetection on). `LockCheck.lockedNewFile`
-   blocks exactly those two paths, so the attempt failed (`CONTRACT_VIOLATION`). But JUnit reads
-   both files from anywhere on the test classpath. I moved the two files to `src/main/resources/`
-   on a copy of the PR branch: `mvn verify` passes, and the surefire report shows the two locked
-   cases `skipped` ("Superseded: toRoman now accepts values up to 4999"). noir would have opened a
-   ready-for-review PR in which two existing tests had been silently turned off. Fixes:
-   - Short term: also lock new `src/main/resources/junit-platform.properties` and
-     `src/main/resources/META-INF/services/org.junit.*` (and any other root on the test
-     classpath).
-   - Robust: check the outcome instead of paths. During measurement, compare the surefire
-     reports with the base commit: any test from a pre-existing test class (not under Tests to
-     update) that is skipped or missing in the attempt but ran at base is a contract violation.
-     That covers every disabling route (extensions, `Assumptions`, conditions, listeners), not
-     only the ones we thought of.
-   - Unfixable mechanically: main code that sniffs the stack for a test caller. Only hidden tests
-     (an independent assertion that 4000 returns `MMMM` in a test noir controls) or review catch
-     that.
+   blocks exactly those two paths, so the attempt failed (`CONTRACT_VIOLATION`).
+   - **My original claim was wrong.** I moved the two files to `src/main/resources/` on a copy of
+     the branch and ran plain `mvn verify`: it passed with the two cases skipped, and I concluded
+     noir would have opened a ready PR. It would not have. Measurement's forbidden scan
+     (`ForbiddenScan` over `target/classes`) rejects a `junit-platform.properties` or JUnit service
+     registration in the build output as a contract violation, and `PipelineIT` already tests
+     exactly that. I tested with plain Maven, not through noir.
+   - **A real route does exist.** Main code can throw `org.opentest4j.TestAbortedException` by
+     reflection (it is on the test classpath only at test time). JUnit reports the calling tests as
+     *skipped* and the build passes. Verified on a copy of noir-test: a three-line `abort()` in
+     `Luhn.isValid` turned 28 of `LuhnTest`'s 44 tests into skips. No path or file check can see
+     this.
+   - **Fix (branch `lock-check-test-inventory`):**
+     - At sealing, noir runs the base commit's tests and records which pass.
+     - At measurement, every one of them must pass on the attempt's branch. A test that is skipped
+       or missing is a contract violation, unless its file is under Tests to update.
+     - A default branch with failing tests is rejected at sealing (`base_tests_fail`).
+     - `LockCheck` now also blocks `junit-platform.properties` and `META-INF/services/org.junit.*`
+       anywhere in the repository. That gives the builder earlier, clearer feedback than the
+       build-output scan does.
+   - Still unfixable mechanically: main code that checks the stack for a test caller and behaves
+     differently there. Only hidden tests (an independent assertion in a test noir controls) or
+     review catch that.
 
 1. **Approvals in one poll run newest first.** The daemon creates items in the order GitHub lists
    ready issues (newest first), and drives items oldest id first, so four issues approved together

@@ -10,7 +10,7 @@ import org.jwcarman.noir.exec.CommandRunner;
 
 /** {@link GitPort} backed by the {@code git} CLI. */
 public final class GitCli implements GitPort {
-  private static final String SEAL_REF = "refs/heads/noir/seal-base";
+  private static final String SEAL_REF = "refs/heads/" + SEAL_BRANCH;
 
   private final CommandRunner runner;
 
