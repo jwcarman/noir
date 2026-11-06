@@ -87,18 +87,20 @@ public final class SuiteSealer {
   /**
    * The repository inventory at the spec's base commit, listed into {@code itemDir/inventory/}:
    * {@code contract} is the issue view of the API stubs and {@code mainSources} the base commit's
-   * {@code src/main/java} sources, keyed by path. A failed listing is retried as an infrastructure
-   * failure, then thrown as {@link org.jwcarman.noir.factory.InfraFailure}.
+   * {@code src/main/java} sources, keyed by path; {@code testsToUpdate} is the base content of the
+   * spec's listed tests, keyed by path. A failed listing is retried as an infrastructure failure,
+   * then thrown as {@link org.jwcarman.noir.factory.InfraFailure}.
    */
   public RepoInventory inventory(
       Spec spec,
       List<StubSource> contract,
       Map<String, String> mainSources,
+      Map<String, String> testsToUpdate,
       Path itemDir,
       Path bundle) {
     var files =
         retry.call(() -> checks.inventory(bundle, spec.baseSha(), itemDir.resolve(INVENTORY_DIR)));
-    return RepoInventory.of(files, mainSources, spec, contract);
+    return RepoInventory.of(files, mainSources, testsToUpdate, spec, contract);
   }
 
   /**

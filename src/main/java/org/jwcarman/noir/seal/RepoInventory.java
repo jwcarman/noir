@@ -5,6 +5,7 @@ import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -19,14 +20,16 @@ import org.jwcarman.noir.spec.Spec;
  * What the repository offers hidden tests at the base commit, computed once per seal before the
  * Examiner runs: its libraries ({@code group:artifact:version}, sorted, JUnit's own left out), the
  * packages in those libraries' jars, the packages under {@code src/main/java}, the one top-level
- * {@code @SpringBootApplication} class (if exactly one), and the Repository API text.
+ * {@code @SpringBootApplication} class (if exactly one), the Repository API text, and the base
+ * content of each test file the spec lists under "Tests to update" (path to content, spec order).
  */
 public record RepoInventory(
     List<String> testLibraries,
     Set<String> dependencyPackages,
     Set<String> mainPackages,
     Optional<String> applicationClass,
-    String repositoryApi) {
+    String repositoryApi,
+    Map<String, String> testsToUpdate) {
 
   /** The Repository API section's size limit, in characters. */
   public static final int REPOSITORY_API_CAP = 60_000;
@@ -40,16 +43,19 @@ public record RepoInventory(
     testLibraries = List.copyOf(testLibraries);
     dependencyPackages = Collections.unmodifiableSortedSet(new TreeSet<>(dependencyPackages));
     mainPackages = Collections.unmodifiableSortedSet(new TreeSet<>(mainPackages));
+    testsToUpdate = Collections.unmodifiableMap(new LinkedHashMap<>(testsToUpdate));
   }
 
   /**
    * The inventory from the seal check's listing and the base commit's {@code src/main/java/**.java}
    * ({@code mainSources}, path to content). {@code contract} is the spec's API stubs as the issue
-   * shows them; types they name come first in the Repository API.
+   * shows them; types they name come first in the Repository API. {@code testsToUpdate} is the
+   * listed test files' base content, path to content.
    */
   public static RepoInventory of(
       RepoInventoryFiles files,
       Map<String, String> mainSources,
+      Map<String, String> testsToUpdate,
       Spec spec,
       List<StubSource> contract) {
     var mainPackages = new TreeSet<String>();
@@ -80,6 +86,7 @@ public record RepoInventory(
         new TreeSet<>(files.packages()),
         mainPackages,
         applications.size() == 1 ? Optional.of(applications.getFirst()) : Optional.empty(),
-        RepositoryApi.render(mainSources, spec, contract, REPOSITORY_API_CAP));
+        RepositoryApi.render(mainSources, spec, contract, REPOSITORY_API_CAP),
+        testsToUpdate);
   }
 }

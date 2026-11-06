@@ -155,9 +155,13 @@ public final class ApprovalSealer implements ApprovalSealing {
         spliceProblems.add(e.getMessage());
       }
     }
+    var testSources = new LinkedHashMap<String, String>();
     for (var test : parsed.testsToUpdate()) {
-      if (!git.exists(repoDir, baseSha, test)) {
+      var content = git.show(repoDir, baseSha, test);
+      if (content.isEmpty()) {
         spliceProblems.add(RepoProblems.testMissing(test));
+      } else {
+        testSources.put(test, content.get());
       }
     }
     if (!spliceProblems.isEmpty()) {
@@ -196,7 +200,8 @@ public final class ApprovalSealer implements ApprovalSealing {
     git.bundle(repoDir, baseSha, bundle);
 
     var inventory =
-        suiteSealer.inventory(spec, parsed.stubs(), mainSources(repoDir, baseSha), itemDir, bundle);
+        suiteSealer.inventory(
+            spec, parsed.stubs(), mainSources(repoDir, baseSha), testSources, itemDir, bundle);
     var examination =
         suiteSealer.examine(spec, parsed.stubs(), stubs, baseSources, itemDir, bundle, inventory);
     if (examination.problems() != null && !examination.conflictingTests().isEmpty()) {

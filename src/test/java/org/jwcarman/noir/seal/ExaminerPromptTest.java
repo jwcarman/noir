@@ -150,9 +150,57 @@ class ExaminerPromptTest {
         .doesNotContain("whose method bodies throw `UnsupportedOperationException`. A test");
   }
 
+  @Test
+  void userPromptShowsListedTestsUnderCurrentSource() {
+    var spec = Specs.withModifyAndTests();
+    var stub = new StubSource(OLD, "package com.example;\n\npublic class Old {}\n");
+    var tests = new java.util.LinkedHashMap<String, String>();
+    tests.put(spec.testsToUpdate().get(0), "class OldTest {}\n");
+    tests.put(spec.testsToUpdate().get(1), "class AaTest {}\n");
+    var p = ExaminerPrompt.user(spec, List.of(stub), List.of(stub), withTests(tests), List.of());
+    assertThat(p)
+        .containsSubsequence(
+            "## Current source\n\n### " + OLD + "\n",
+            "### "
+                + spec.testsToUpdate().get(0)
+                + " (test to update)\n\n```java\nclass OldTest {}\n```\n",
+            "### "
+                + spec.testsToUpdate().get(1)
+                + " (test to update)\n\n```java\nclass AaTest {}\n```\n");
+  }
+
+  @Test
+  void userPromptShowsListedTestsWithoutModifyTargets() {
+    var spec = Specs.valid().withTestsToUpdate(List.of("src/test/java/com/example/FooTest.java"));
+    var p =
+        ExaminerPrompt.user(
+            spec,
+            List.of(),
+            List.of(),
+            withTests(
+                java.util.Map.of("src/test/java/com/example/FooTest.java", "class FooTest {}\n")),
+            List.of());
+    assertThat(p)
+        .contains(
+            "## Current source\n\n### src/test/java/com/example/FooTest.java (test to update)\n\n"
+                + "```java\nclass FooTest {}\n```\n");
+  }
+
+  @Test
+  void systemPromptSaysListedTestsAreUnderCurrentSource() {
+    assertThat(ExaminerPrompt.system().replaceAll("\\s+", " "))
+        .contains("Their current source is under Current source, marked (test to update).");
+  }
+
+  private static RepoInventory withTests(java.util.Map<String, String> tests) {
+    return new RepoInventory(
+        List.of(), java.util.Set.of(), java.util.Set.of(), java.util.Optional.empty(), "", tests);
+  }
+
   private static RepoInventory inventory(
       List<String> libraries, java.util.Optional<String> application, String api) {
-    return new RepoInventory(libraries, java.util.Set.of(), java.util.Set.of(), application, api);
+    return new RepoInventory(
+        libraries, java.util.Set.of(), java.util.Set.of(), application, api, java.util.Map.of());
   }
 
   @Test

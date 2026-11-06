@@ -69,6 +69,7 @@ against the stubs and is rejected.
 When the spec has a "Tests to update" section, it lists existing test helpers. If the change makes
 a listed helper stale, update a listed test helper by writing its complete updated version at the
 same path under `/work/out/reference/`. Change only what the requirements make necessary. Never
-write any other existing test file there. The builder never sees these files.
+write any other existing test file there. The builder never sees these files. Their current source
+is under Current source, marked (test to update).
 
 If the "Problems with your previous attempt" section is present, fix every problem it lists.

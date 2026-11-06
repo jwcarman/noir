@@ -22,8 +22,9 @@ public final class ExaminerPrompt {
   /**
    * The Examiner's input: the spec with the issue's {@code contract} view (fragments under their
    * {@code (modify)} headings) and, for a spec that modifies files, each modify target's complete
-   * spliced file from {@code stubs}; then what the repository offers hidden tests: its test
-   * libraries, Spring guidance when the repository uses Spring, and its public API.
+   * spliced file from {@code stubs} and each listed test's base content from {@code inventory};
+   * then what the repository offers hidden tests: its test libraries, Spring guidance when the
+   * repository uses Spring, and its public API.
    */
   public static String user(
       Spec spec,
@@ -33,22 +34,16 @@ public final class ExaminerPrompt {
       List<String> previousProblems) {
     var sb = new StringBuilder(SpecRenderer.specBody(spec, contract));
     sb.append("\n## Holdout package\n\n`").append(ItemId.holdoutPackage(spec.id())).append("`\n");
-    if (!spec.modifies().isEmpty()) {
+    if (!spec.modifies().isEmpty() || !inventory.testsToUpdate().isEmpty()) {
       sb.append("\n## Current source\n");
       for (var stub : stubs) {
         if (spec.modifies().contains(stub.path())) {
-          var content = stub.content().endsWith("\n") ? stub.content() : stub.content() + "\n";
-          var fence = SpecRenderer.fenceFor(content);
-          sb.append("\n### ")
-              .append(stub.path())
-              .append("\n\n")
-              .append(fence)
-              .append("java\n")
-              .append(content)
-              .append(fence)
-              .append('\n');
+          appendSource(sb, stub.path(), stub.content());
         }
       }
+      inventory
+          .testsToUpdate()
+          .forEach((path, content) -> appendSource(sb, path + " (test to update)", content));
     }
     sb.append("\n## Test libraries\n\n");
     if (inventory.testLibraries().isEmpty()) {
@@ -93,6 +88,19 @@ public final class ExaminerPrompt {
       }
     }
     return sb.toString();
+  }
+
+  private static void appendSource(StringBuilder sb, String heading, String source) {
+    var content = source.endsWith("\n") ? source : source + "\n";
+    var fence = SpecRenderer.fenceFor(content);
+    sb.append("\n### ")
+        .append(heading)
+        .append("\n\n")
+        .append(fence)
+        .append("java\n")
+        .append(content)
+        .append(fence)
+        .append('\n');
   }
 
   private static boolean usesSpring(RepoInventory inventory) {

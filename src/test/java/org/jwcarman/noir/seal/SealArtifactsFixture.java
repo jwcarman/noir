@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
@@ -15,7 +16,7 @@ public final class SealArtifactsFixture {
 
   /** The inventory of a repository with no libraries and no main sources. */
   public static final RepoInventory EMPTY_INVENTORY =
-      new RepoInventory(List.of(), Set.of(), Set.of(), Optional.empty(), "");
+      new RepoInventory(List.of(), Set.of(), Set.of(), Optional.empty(), "", Map.of());
 
   /**
    * A runner whose checks are {@code run} and whose inventory lists no libraries (writing the empty

@@ -694,6 +694,22 @@ class ApprovalSealerTest {
   }
 
   @Test
+  void listedTestSourcesReachTheExaminer() {
+    commitToOrigin(CSV, CSV_BASE);
+    var test = "src/test/java/com/example/api/CsvTest.java";
+    var testSource = "package com.example.api;\n\nclass CsvTest {}\n";
+    commitToOrigin(test, testSource);
+    openModifyIssue(modifySpec().withTestsToUpdate(List.of(test)), CSV_FRAGMENT);
+    referencePath = CSV;
+    referenceSource = CSV_BASE;
+
+    sealer.seal(item);
+
+    assertThat(agent.requests().getFirst().prompt())
+        .contains("### " + test + " (test to update)\n\n```java\n" + testSource + "```\n");
+  }
+
+  @Test
   void modifyTargetMissingAtBaseIsInvalidSpec() {
     openModifyIssue(modifySpec(), CSV_FRAGMENT);
     var problem = "API contract: `" + CSV + "` (modify) does not exist on the default branch";

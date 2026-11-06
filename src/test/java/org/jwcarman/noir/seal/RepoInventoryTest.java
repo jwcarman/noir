@@ -40,7 +40,11 @@ class RepoInventoryTest {
   void findsTheSpringBootApplication() {
     var inventory =
         RepoInventory.of(
-            SPRING_FILES, Map.of(APP_PATH, APP, ORDER_PATH, ORDER), Specs.valid(), List.of());
+            SPRING_FILES,
+            Map.of(APP_PATH, APP, ORDER_PATH, ORDER),
+            Map.of(),
+            Specs.valid(),
+            List.of());
 
     assertThat(inventory.applicationClass()).contains("com.example.shop.ShopApplication");
     assertThat(inventory.testLibraries())
@@ -63,6 +67,7 @@ class RepoInventoryTest {
         RepoInventory.of(
             new RepoInventoryFiles(List.of(), List.of()),
             Map.of("src/main/java/com/example/api/Counter.java", counter),
+            Map.of(),
             Specs.valid(),
             List.of());
 
@@ -79,6 +84,7 @@ class RepoInventoryTest {
         RepoInventory.of(
             SPRING_FILES,
             Map.of(APP_PATH, APP, "src/main/java/com/example/admin/AdminApplication.java", other),
+            Map.of(),
             Specs.valid(),
             List.of());
 
@@ -113,6 +119,7 @@ class RepoInventoryTest {
                 qualified,
                 ORDER_PATH,
                 ORDER),
+            Map.of(),
             Specs.valid(),
             List.of());
 
