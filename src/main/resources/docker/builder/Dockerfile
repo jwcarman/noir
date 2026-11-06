@@ -1,6 +1,6 @@
-# noir builder image: JDK 21, Maven 3.10.0, Claude Code, JUnit console launcher, PIT, JaCoCo.
+# noir builder image: JDK 25, Maven 3.10.0, Claude Code, JUnit console launcher, PIT, JaCoCo.
 # Built locally by noir (org.jwcarman.noir.docker.Images); every version is pinned.
-FROM maven:3.10.0-eclipse-temurin-21-noble
+FROM maven:3.10.0-eclipse-temurin-25-noble
 
 ARG NODE_MAJOR=22
 ARG CLAUDE_CODE_VERSION=2.1.318

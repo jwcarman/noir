@@ -75,8 +75,14 @@ class ContainerGradeRunnerIT {
   }
 
   static void javac(Path classes, List<Path> sources) throws IOException {
+    javac(classes, sources, 21);
+  }
+
+  static void javac(Path classes, List<Path> sources, int release) throws IOException {
     Files.createDirectories(classes);
-    var argv = new ArrayList<>(List.of("javac", "--release", "21", "-d", classes.toString()));
+    var argv =
+        new ArrayList<>(
+            List.of("javac", "--release", String.valueOf(release), "-d", classes.toString()));
     sources.forEach(s -> argv.add(s.toString()));
     var r = new ProcessCommandRunner().run(Command.of(argv));
     assertThat(r.ok()).as(r.tail(20)).isTrue();
@@ -120,6 +126,18 @@ class ContainerGradeRunnerIT {
                 List.of(new RequirementResult("R1", 3, 3), new RequirementResult("R2", 1, 1))));
     assertThat(g.recording().specs).hasSize(1);
     assertThat(g.recording().specs.get(0).network()).isFalse();
+  }
+
+  /** Builder classes compiled for Java 25 (class file 69) load and pass in the grader. */
+  @Test
+  void java25ClassesGrade() throws Exception {
+    var classes = tmp.resolve("classes25");
+    javac(classes, javaFiles(fixture("reference")), 25);
+    var g = grade(classes);
+    assertThat(g.outcome())
+        .isEqualTo(
+            new GradeOutcome.Passed(
+                List.of(new RequirementResult("R1", 3, 3), new RequirementResult("R2", 1, 1))));
   }
 
   @Test

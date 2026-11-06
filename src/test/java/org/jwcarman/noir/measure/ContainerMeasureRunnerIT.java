@@ -205,6 +205,25 @@ import java.time.Duration;
     return files;
   }
 
+  /** Java 25 bytecode (class file 69) builds, gets JaCoCo coverage and PIT mutants. */
+  @Test
+  void java25RepositoryIsMeasured() {
+    var files = correct();
+    files.put(
+        "pom.xml",
+        BuildFixtures.pom()
+            .replace(
+                "<maven.compiler.release>21</maven.compiler.release>",
+                "<maven.compiler.release>25</maven.compiler.release>"));
+    var m = measure(attempt(files));
+    assertThat(m.outcome())
+        .as(m.artifacts().logTail("build", 80))
+        .isInstanceOf(MeasureOutcome.Passed.class);
+    assertThat(m.outcome().m().lineCoverage()).isEqualTo(1.0);
+    assertThat(m.outcome().m().mutants()).isPositive();
+    assertThat(m.artifacts().report("jacoco.xml")).isPresent();
+  }
+
   @Test
   void correctCounterPasses() {
     var m = measure(attempt(correct()));

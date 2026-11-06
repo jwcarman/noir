@@ -1,6 +1,6 @@
-# noir grader image: JDK 21 and the JUnit console launcher. No Maven, no network use at runtime.
+# noir grader image: JDK 25 and the JUnit console launcher. No Maven, no network use at runtime.
 # Built locally by noir (org.jwcarman.noir.docker.Images); every version is pinned.
-FROM eclipse-temurin:21-jdk-noble
+FROM eclipse-temurin:25-jdk-noble
 
 # Ubuntu images ship user "ubuntu" as uid 1000; noir containers run as 1000:1000 named "noir".
 RUN (userdel -r ubuntu 2>/dev/null || true) \

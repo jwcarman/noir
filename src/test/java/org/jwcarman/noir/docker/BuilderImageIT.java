@@ -48,7 +48,7 @@ class BuilderImageIT {
                 .withLimits(NoirConfig.defaults().limits()));
     assertThat(r.ok()).as(r.tail(40)).isTrue();
     assertThat(r.stdout())
-        .contains("\"21.")
+        .contains("\"25.")
         .contains("Apache Maven 3.10.0")
         .contains("2.1.318")
         .contains("1000")

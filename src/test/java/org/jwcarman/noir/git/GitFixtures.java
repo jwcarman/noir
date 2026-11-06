@@ -61,6 +61,13 @@ public final class GitFixtures {
   }
 
   /** A bare repository at {@code root/<owner>/<repo>.git} with {@code files} committed on main. */
+  /** {@link #POM} with {@code maven.compiler.release} set to {@code release}. */
+  public static String pomWithRelease(int release) {
+    return POM.replace(
+        "<maven.compiler.release>21</maven.compiler.release>",
+        "<maven.compiler.release>" + release + "</maven.compiler.release>");
+  }
+
   public static Path originWithFiles(
       Path root, String ownerRepo, java.util.Map<String, String> files) {
     try {

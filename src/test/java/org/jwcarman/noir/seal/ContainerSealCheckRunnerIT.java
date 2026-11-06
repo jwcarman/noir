@@ -58,6 +58,30 @@ class ContainerSealCheckRunnerIT {
     return Path.of(ContainerSealCheckRunnerIT.class.getResource("/fixtures/seal/" + name).toURI());
   }
 
+  /** A repository on Java 25 seals on noir's JDK 25 image (release 25 bytecode, class file 69). */
+  @Test
+  void java25RepositorySeals(@TempDir Path tmp) throws Exception {
+    var origin =
+        GitFixtures.originWithFiles(
+            tmp.resolve("remotes"),
+            "jwcarman/java25",
+            java.util.Map.of("pom.xml", GitFixtures.pomWithRelease(25)));
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("clone"));
+    var head = git.revParse(clone, "origin/main");
+    var b = tmp.resolve("java25.bundle");
+    git.bundle(clone, head, b);
+    var inputs =
+        SealInputs.of(
+            Specs.valid().withBaseSha(head),
+            b,
+            fixture("stubs"),
+            fixture("holdout-good"),
+            fixture("reference"));
+    var artifacts = new ContainerSealCheckRunner(docker, config).run(inputs, out);
+    assertThat(artifacts.read("release.txt")).isEqualTo("25");
+    assertThat(SealJudge.judge(artifacts, config.sealDiscrimination())).isEmpty();
+  }
+
   @Test
   void goodSuiteSeals() throws Exception {
     assertThat(judge("holdout-good")).isEmpty();
