@@ -54,6 +54,25 @@ class GitCliTest {
   }
 
   @Test
+  void showReadsFileAtRevision(@TempDir Path tmp) throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), "jwcarman/demo");
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("clone"));
+    Files.writeString(clone.resolve("A.txt"), "one\ntwo\n");
+    git(clone, "add", ".");
+    git(clone, "commit", "-qm", "add a");
+    var sha = gitPort.revParse(clone, "HEAD");
+    Files.writeString(clone.resolve("A.txt"), "changed\n");
+    assertThat(gitPort.show(clone, sha, "A.txt")).contains("one\ntwo\n");
+  }
+
+  @Test
+  void showMissingPathIsEmpty(@TempDir Path tmp) throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), "jwcarman/demo");
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("clone"));
+    assertThat(gitPort.show(clone, "HEAD", "nope.txt")).isEmpty();
+  }
+
+  @Test
   void neverPromptsForCredentials() {
     var runner =
         new org.jwcarman.noir.exec.FakeCommandRunner()

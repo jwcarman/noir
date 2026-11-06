@@ -3,6 +3,7 @@ package org.jwcarman.noir.git;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.jwcarman.noir.exec.Command;
 import org.jwcarman.noir.exec.CommandResult;
 import org.jwcarman.noir.exec.CommandRunner;
@@ -70,6 +71,21 @@ public final class GitCli implements GitPort {
       return false;
     }
     throw new GitException("git cat-file failed: " + result.tail(20));
+  }
+
+  @Override
+  public Optional<String> show(Path repoDir, String rev, String path) {
+    var result =
+        runner.run(
+            Command.of(List.of("git", "-C", repoDir.toString(), "show", rev + ":" + path))
+                .withEnv(java.util.Map.of("GIT_TERMINAL_PROMPT", "0")));
+    if (result.ok()) {
+      return Optional.of(result.stdout());
+    }
+    if (result.exitCode() == 128 && !result.timedOut()) {
+      return Optional.empty();
+    }
+    throw new GitException("git show failed: " + result.tail(20));
   }
 
   /** Parses {@code owner/name} from an https, scp-style, or filesystem remote URL. */

@@ -30,6 +30,13 @@ public final class GitBundles implements Bundles {
   }
 
   @Override
+  public List<FileChange> fileChanges(Path bundle, String baseSha, String branch) {
+    try (var repo = BundleRepo.open(runner, bundle, tempRoot)) {
+      return repo.fileChanges(baseSha, branch);
+    }
+  }
+
+  @Override
   public String tip(Path bundle, String branch) {
     try (var repo = BundleRepo.open(runner, bundle, tempRoot)) {
       return repo.tip(branch);

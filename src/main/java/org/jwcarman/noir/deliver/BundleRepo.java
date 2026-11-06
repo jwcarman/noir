@@ -12,6 +12,7 @@ import java.util.Map;
 import org.jwcarman.noir.exec.Command;
 import org.jwcarman.noir.exec.CommandResult;
 import org.jwcarman.noir.exec.CommandRunner;
+import org.jwcarman.noir.factory.FileChange;
 import org.jwcarman.noir.git.GitException;
 
 /**
@@ -111,6 +112,62 @@ public final class BundleRepo implements AutoCloseable {
           "patch " + baseSha + ".." + branch + " exceeds " + MAX_PATCH_BYTES + " bytes");
     }
     return result.stdout();
+  }
+
+  /** Files changed beyond {@code baseSha}, joined from NUL-separated name-status and numstat. */
+  public List<FileChange> fileChanges(String baseSha, String branch) {
+    var range = baseSha + ".." + branch;
+    var status =
+        git("diff", "-z", "-M", "--name-status", "--no-color", "--no-ext-diff", range)
+            .stdout()
+            .split("\0");
+    var numstat =
+        git("diff", "-z", "-M", "--numstat", "--no-color", "--no-ext-diff", range)
+            .stdout()
+            .split("\0");
+    var counts = new java.util.HashMap<String, int[]>();
+    for (int i = 0; i < numstat.length; i++) {
+      var tok = numstat[i];
+      if (tok.isEmpty()) {
+        continue;
+      }
+      var f = tok.split("\t", 3);
+      var path = f[2];
+      if (path.isEmpty()) { // rename: "a\td\t" then old, new
+        path = numstat[i + 2];
+        i += 2;
+      }
+      counts.put(path, new int[] {count(f[0]), count(f[1])});
+    }
+    var changes = new ArrayList<FileChange>();
+    for (int i = 0; i < status.length; i++) {
+      var code = status[i];
+      if (code.isEmpty()) {
+        continue;
+      }
+      var kind = code.charAt(0);
+      String oldPath = null;
+      var path = status[++i];
+      if (kind == 'R' || kind == 'C') {
+        oldPath = path;
+        path = status[++i];
+      }
+      var c = counts.getOrDefault(path, new int[] {0, 0});
+      var st =
+          switch (kind) {
+            case 'A', 'C' -> FileChange.Status.ADDED;
+            case 'D' -> FileChange.Status.DELETED;
+            case 'R' -> FileChange.Status.RENAMED;
+            default -> FileChange.Status.MODIFIED;
+          };
+      changes.add(new FileChange(st, path, kind == 'R' ? oldPath : null, c[0], c[1]));
+    }
+    changes.sort(java.util.Comparator.comparing(FileChange::path));
+    return List.copyOf(changes);
+  }
+
+  private static int count(String s) {
+    return s.equals("-") ? 0 : Integer.parseInt(s);
   }
 
   public Path dir() {

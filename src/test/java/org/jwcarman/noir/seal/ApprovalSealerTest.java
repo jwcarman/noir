@@ -146,6 +146,11 @@ class ApprovalSealerTest {
     }
 
     @Override
+    public java.util.Optional<String> show(Path repoDir, String rev, String path) {
+      return gitCli.show(repoDir, rev, path);
+    }
+
+    @Override
     public boolean exists(Path repoDir, String sha, String path) {
       return gitCli.exists(repoDir, sha, path);
     }

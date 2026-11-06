@@ -76,4 +76,64 @@ class GitBundlesTest {
 
     assertThat(patch).contains("blob.bin").contains(secret);
   }
+
+  @Test
+  void fileChangesReportsEachStatusAndCounts() throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("origin"), "o/r");
+    var src = GitFixtures.cloneOf(origin, tmp.resolve("src"));
+    Files.writeString(src.resolve("mod.txt"), "a\nb\nc\n");
+    Files.writeString(src.resolve("del.txt"), "x\ny\n");
+    Files.writeString(src.resolve("old.txt"), "keep1\nkeep2\nkeep3\nkeep4\n");
+    git(src, "add", ".");
+    git(src, "commit", "-q", "-m", "setup");
+    var base = git(src, "rev-parse", "HEAD").trim();
+    git(src, "checkout", "-q", "-b", "noir/1-x");
+    Files.writeString(src.resolve("mod.txt"), "a\nB\nc\nd\n");
+    Files.delete(src.resolve("del.txt"));
+    git(src, "mv", "old.txt", "new.txt");
+    Files.writeString(src.resolve("add.txt"), "1\n2\n3\n");
+    Files.write(src.resolve("bin.dat"), new byte[] {0, 1, 2, 0, 3});
+    git(src, "add", "-A");
+    git(src, "commit", "-q", "-m", "change");
+    var bundle = tmp.resolve("out.bundle");
+    git(src, "bundle", "create", "-q", bundle.toString(), "refs/heads/noir/1-x");
+
+    var changes =
+        new GitBundles(new ProcessCommandRunner(), tmp.resolve("scratch"))
+            .fileChanges(bundle, base, "noir/1-x");
+
+    assertThat(changes)
+        .containsExactly(
+            new FileChange(FileChange.Status.ADDED, "add.txt", null, 3, 0),
+            new FileChange(FileChange.Status.ADDED, "bin.dat", null, 0, 0),
+            new FileChange(FileChange.Status.DELETED, "del.txt", null, 0, 2),
+            new FileChange(FileChange.Status.MODIFIED, "mod.txt", null, 2, 1),
+            new FileChange(FileChange.Status.RENAMED, "new.txt", "old.txt", 0, 0));
+    try (var left = Files.list(tmp.resolve("scratch"))) {
+      assertThat(left).isEmpty();
+    }
+  }
+
+  @Test
+  void fileChangesHandlesSpacesAndUnicodeInPaths() throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("origin"), "o/r");
+    var src = GitFixtures.cloneOf(origin, tmp.resolve("src"));
+    var base = git(src, "rev-parse", "HEAD").trim();
+    git(src, "checkout", "-q", "-b", "noir/1-x");
+    Files.createDirectories(src.resolve("dir with space"));
+    Files.writeString(src.resolve("dir with space/caf\u00e9 \u65e5\u672c.txt"), "hi\n");
+    git(src, "add", "-A");
+    git(src, "commit", "-q", "-m", "unicode");
+    var bundle = tmp.resolve("out.bundle");
+    git(src, "bundle", "create", "-q", bundle.toString(), "refs/heads/noir/1-x");
+
+    var changes =
+        new GitBundles(new ProcessCommandRunner(), tmp.resolve("scratch"))
+            .fileChanges(bundle, base, "noir/1-x");
+
+    assertThat(changes)
+        .containsExactly(
+            new FileChange(
+                FileChange.Status.ADDED, "dir with space/caf\u00e9 \u65e5\u672c.txt", null, 1, 0));
+  }
 }

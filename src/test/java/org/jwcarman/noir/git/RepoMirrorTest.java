@@ -49,6 +49,11 @@ class RepoMirrorTest {
     }
 
     @Override
+    public java.util.Optional<String> show(Path repoDir, String rev, String path) {
+      return java.util.Optional.empty();
+    }
+
+    @Override
     public boolean exists(Path repoDir, String sha, String path) {
       throw new UnsupportedOperationException();
     }

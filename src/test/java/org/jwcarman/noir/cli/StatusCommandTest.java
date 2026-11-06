@@ -270,6 +270,12 @@ class StatusCommandTest {
     }
 
     @Override
+    public java.util.List<org.jwcarman.noir.factory.FileChange> fileChanges(
+        Path bundle, String baseSha, String branch) {
+      return java.util.List.of();
+    }
+
+    @Override
     public String tip(Path bundle, String branch) {
       throw new UnsupportedOperationException();
     }

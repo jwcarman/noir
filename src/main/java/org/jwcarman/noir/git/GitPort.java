@@ -1,6 +1,7 @@
 package org.jwcarman.noir.git;
 
 import java.nio.file.Path;
+import java.util.Optional;
 
 /** The git operations noir needs on a local clone of the target repository. */
 public interface GitPort {
@@ -20,4 +21,7 @@ public interface GitPort {
 
   /** Whether {@code path} exists in the tree of commit {@code sha}. */
   boolean exists(Path repoDir, String sha, String path);
+
+  /** The content of {@code path} at {@code rev}, or empty when the path does not exist there. */
+  Optional<String> show(Path repoDir, String rev, String path);
 }
