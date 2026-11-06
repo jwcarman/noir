@@ -99,6 +99,14 @@ class ConfigLoaderTest {
   }
 
   @Test
+  void bareMavenKeyMeansNoMirror() throws IOException {
+    Files.writeString(tmp.resolve("config.yaml"), "maven:\n");
+    var config = ConfigLoader.load(tmp.resolve("config.yaml"));
+    assertThat(config.maven()).isNotNull();
+    assertThat(config.maven().mirrorUrl()).isEmpty();
+  }
+
+  @Test
   void mirrorIsParsed() throws IOException {
     Files.writeString(
         tmp.resolve("config.yaml"),

@@ -26,6 +26,8 @@ public record NoirConfig(
 
   public NoirConfig {
     repos = repos == null ? List.of() : List.copyOf(repos);
+    // A bare "maven:" key parses as null: no Maven settings, so no mirror.
+    maven = maven == null ? new Maven(null) : maven;
   }
 
   /** Per-attempt agent budgets. */
