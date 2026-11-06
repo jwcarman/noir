@@ -42,8 +42,8 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    per-requirement pass counts only — never test code — so the agent can't
    overfit to the test.
 7. **Deliver.** On a pass noir pushes a branch and opens a PR with the
-   metrics, holdout results, and provenance (base SHA, commitment, models,
-   image digests). Each attempt is one commit titled after the issue, e.g.
+   metrics, holdout results, provenance (base SHA, commitment, models, image
+   digests) and cost (builder and Examiner, as reported by Claude Code). Each attempt is one commit titled after the issue, e.g.
    `Add a Counter (#12)` (`…, attempt 2` for rework). When attempts run out it
    opens a draft PR instead.
 

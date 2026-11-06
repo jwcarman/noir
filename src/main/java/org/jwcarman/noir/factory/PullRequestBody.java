@@ -1,5 +1,7 @@
 package org.jwcarman.noir.factory;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -13,7 +15,10 @@ public final class PullRequestBody {
   /** Aggregate measurement across the changed classes. */
   public record Metrics(double lineCoverage, double mutationScore, double maxCrap) {}
 
-  /** Where the delivered work came from. Null values render as {@code unknown}. */
+  /**
+   * Where the delivered work came from. Null values render as {@code unknown}. The costs are the
+   * item's totals across every builder and Examiner attempt, as Claude Code reported them.
+   */
   public record Provenance(
       String baseSha,
       int attempts,
@@ -21,7 +26,9 @@ public final class PullRequestBody {
       String builderModel,
       String examinerModel,
       String builderImageId,
-      String graderImageId) {}
+      String graderImageId,
+      BigDecimal builderCostUsd,
+      BigDecimal examinerCostUsd) {}
 
   private PullRequestBody() {}
 
@@ -59,7 +66,27 @@ public final class PullRequestBody {
     sb.append("- Examiner model: ").append(line(p.examinerModel())).append('\n');
     sb.append("- Builder image: `").append(line(p.builderImageId())).append("`\n");
     sb.append("- Grader image: `").append(line(p.graderImageId())).append("`\n");
+    sb.append("- Cost: ").append(cost(p.builderCostUsd(), p.examinerCostUsd())).append('\n');
     return sb.toString();
+  }
+
+  private static String cost(BigDecimal builder, BigDecimal examiner) {
+    if (builder == null && examiner == null) {
+      return "unknown";
+    }
+    var total =
+        (builder == null ? BigDecimal.ZERO : builder)
+            .add(examiner == null ? BigDecimal.ZERO : examiner);
+    return money(total)
+        + " (builder "
+        + money(builder)
+        + ", Examiner "
+        + money(examiner)
+        + "; as reported by Claude Code)";
+  }
+
+  private static String money(BigDecimal v) {
+    return v == null ? "unknown" : "$" + v.setScale(2, RoundingMode.HALF_UP).toPlainString();
   }
 
   /** The issue comment when the item failed and no attempt has commits worth a draft PR. */

@@ -147,6 +147,7 @@ class FactoryTest {
         .contains("Builder model: claude-test")
         .contains("Examiner model: examiner-model")
         .contains("Grader image: `sha256:grader-image-id`")
+        .contains("- Cost: $1.25 (builder $1.25, Examiner unknown; as reported by Claude Code)")
         .doesNotContain("noir-grader:")
         .contains(
             "`" + Commitments.sha256(Commitments.read(itemDir.resolve("commitment.json"))) + "`");

@@ -536,6 +536,18 @@ public final class Factory implements ItemDriver {
     event(next.id(), "delivered", next.attempt(), Map.of("comment", true));
   }
 
+  /** The sum of {@code costUsd} over every event of {@code type}; null when none recorded one. */
+  private static BigDecimal totalCost(List<Event> events, String type) {
+    BigDecimal total = null;
+    for (var e : events) {
+      if (e.type().equals(type) && e.data().get("costUsd") instanceof Number n) {
+        var c = new BigDecimal(n.toString());
+        total = total == null ? c : total.add(c);
+      }
+    }
+    return total;
+  }
+
   private String body(Ctx ctx, WorkItem next, int attempt, boolean draft) {
     var events = store.readEvents(next.id());
     var commitment = Commitments.read(ctx.itemDir().resolve("commitment.json"));
@@ -548,7 +560,9 @@ public final class Factory implements ItemDriver {
             built.map(e -> str(e.data().get("model"))).orElse(null),
             commitment.examinerModel(),
             built.map(e -> str(e.data().get("imageId"))).orElse(null),
-            graderImageId);
+            graderImageId,
+            totalCost(events, "build_attempt"),
+            totalCost(events, "examiner_attempt"));
     var metrics =
         latest(events, "measurement", attempt)
             .filter(e -> e.data().containsKey("lineCoverage"))

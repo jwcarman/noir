@@ -2,6 +2,7 @@ package org.jwcarman.noir.factory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -16,7 +17,9 @@ class PullRequestBodyTest {
           "claude-opus",
           "claude-examiner",
           "sha256:b1",
-          "sha256:9f86d081884c");
+          "sha256:9f86d081884c",
+          new BigDecimal("0.198197"),
+          new BigDecimal("0.3836754"));
   static final List<RequirementResult> RESULTS =
       List.of(new RequirementResult("R1", 4, 4), new RequirementResult("R2", 3, 3));
 
@@ -50,7 +53,17 @@ class PullRequestBodyTest {
             - Examiner model: claude-examiner
             - Builder image: `sha256:b1`
             - Grader image: `sha256:9f86d081884c`
+            - Cost: $0.58 (builder $0.20, Examiner $0.38; as reported by Claude Code)
             """);
+  }
+
+  @Test
+  void costWithOnlyOnePartReportedCountsTheOtherAsUnknown() {
+    var prov =
+        new PullRequestBody.Provenance(
+            "abc", 1, "f00d", "m", "e", "b", "g", new BigDecimal("1.255"), null);
+    assertThat(PullRequestBody.render(1, Optional.empty(), RESULTS, prov, false))
+        .contains("- Cost: $1.26 (builder $1.26, Examiner unknown; as reported by Claude Code)\n");
   }
 
   @Test
@@ -60,7 +73,7 @@ class PullRequestBodyTest {
             9,
             Optional.empty(),
             List.of(),
-            new PullRequestBody.Provenance("abc", 4, "f00d", null, null, null, "g"),
+            new PullRequestBody.Provenance("abc", 4, "f00d", null, null, null, "g", null, null),
             true);
     assertThat(body)
         .startsWith(
@@ -69,7 +82,8 @@ class PullRequestBodyTest {
         .contains("### Holdout results\n\nNot graded.\n")
         .contains("- Builder model: unknown\n")
         .contains("- Examiner model: unknown\n")
-        .contains("- Builder image: `unknown`\n");
+        .contains("- Builder image: `unknown`\n")
+        .contains("- Cost: unknown\n");
   }
 
   @Test
@@ -80,7 +94,7 @@ class PullRequestBodyTest {
             Optional.empty(),
             RESULTS,
             new PullRequestBody.Provenance(
-                "abc", 1, "f00d", "m`\n### Injected", "e", "id`x\ny", "g"),
+                "abc", 1, "f00d", "m`\n### Injected", "e", "id`x\ny", "g", null, null),
             false);
     assertThat(body)
         .contains("- Builder model: m ### Injected\n")
