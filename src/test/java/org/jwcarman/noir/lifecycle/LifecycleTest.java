@@ -23,6 +23,39 @@ class LifecycleTest {
   }
 
   @Test
+  void specProblemFromBuildingGoesToDraft() {
+    var t = apply(atState(State.BUILDING), new Trigger.SpecProblemReported());
+    assertThat(t.next().state()).isEqualTo(State.DRAFT);
+    assertThat(t.effects()).containsExactly(REJECT_APPROVAL, APPLY_LABEL);
+    assertThat(t.failure()).isEmpty();
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = State.class,
+      names = {"DRAFT", "SEALING", "SEALED", "MEASURING", "GRADING", "REWORK", "BLOCKED"})
+  void specProblemIsIllegalOutsideBuilding(State s) {
+    assertThatThrownBy(() -> apply(atState(s), new Trigger.SpecProblemReported()))
+        .isInstanceOf(IllegalTransitionException.class);
+  }
+
+  @Test
+  void approvingAnItemThatBuiltRestartsIt() {
+    var built = atState(State.DRAFT).withAttempt(3).withReworkCount(2);
+    var t = apply(built, new Trigger.Approved());
+    assertThat(t.next().state()).isEqualTo(State.SEALING);
+    assertThat(t.next().attempt()).isZero();
+    assertThat(t.next().reworkCount()).isZero();
+    assertThat(t.effects()).containsExactly(ARCHIVE_ATTEMPTS, APPLY_LABEL);
+  }
+
+  @Test
+  void approvingAnItemThatNeverBuiltOnlyRelabels() {
+    var t = apply(atState(State.DRAFT).withAttempt(0), new Trigger.Approved());
+    assertThat(t.effects()).containsExactly(APPLY_LABEL);
+  }
+
+  @Test
   void pickupFromSealedStartsFirstAttempt() {
     var t = apply(WorkItem.sealed(ID, "o/r", 1), new Trigger.Pickup());
     assertThat(t.next().state()).isEqualTo(State.BUILDING);
@@ -215,7 +248,8 @@ class LifecycleTest {
 
   @Test
   void approvedMovesDraftToSealing() {
-    var t = apply(atState(State.DRAFT), new Trigger.Approved());
+    // A draft that never built (attempt 0); one that built restarts (see above).
+    var t = apply(atState(State.DRAFT).withAttempt(0), new Trigger.Approved());
     assertThat(t.next().state()).isEqualTo(State.SEALING);
     assertThat(t.effects()).containsExactly(APPLY_LABEL);
   }

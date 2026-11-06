@@ -16,6 +16,12 @@ public final class Lifecycle {
       throw new IllegalTransitionException(state, trigger);
     }
     return switch (trigger) {
+      case Trigger.Approved a when state == State.DRAFT && item.attempt() > 0 ->
+          // Back in draft after building (a spec problem): start over from a fresh seal.
+          to(
+              item.withState(State.SEALING).withAttempt(0).withReworkCount(0),
+              ARCHIVE_ATTEMPTS,
+              APPLY_LABEL);
       case Trigger.Approved a when state == State.DRAFT ->
           to(item.withState(State.SEALING), APPLY_LABEL);
       case Trigger.SealPassed s when state == State.SEALING ->
@@ -31,6 +37,8 @@ public final class Lifecycle {
           a.producedCommits()
               ? to(item.withState(State.MEASURING), EXTRACT_BUNDLE)
               : fail(item, Category.NO_OUTPUT, maxReworks);
+      case Trigger.SpecProblemReported s when state == State.BUILDING ->
+          to(item.withState(State.DRAFT), REJECT_APPROVAL, APPLY_LABEL);
       case Trigger.MeasurementFailed m
           when state == State.MEASURING && isMeasurementCategory(m.category()) ->
           fail(item, m.category(), maxReworks);

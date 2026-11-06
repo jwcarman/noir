@@ -12,6 +12,9 @@ public sealed interface Trigger {
 
   record AgentExited(boolean producedCommits) implements Trigger {}
 
+  /** The builder reported that the spec cannot be satisfied as written. */
+  record SpecProblemReported() implements Trigger {}
+
   record MeasurementFailed(Category category) implements Trigger {}
 
   record MeasurementPassed() implements Trigger {}

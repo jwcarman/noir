@@ -11,5 +11,7 @@ public enum SideEffect {
   OPEN_DRAFT_PR_OR_COMMENT,
   STOP_CONTAINERS,
   /** Comment and remove {@code noir:ready} from the issue. */
-  REJECT_APPROVAL
+  REJECT_APPROVAL,
+  /** Move the item's attempts aside ({@code runs/<n>/}) before a re-approved item starts over. */
+  ARCHIVE_ATTEMPTS
 }

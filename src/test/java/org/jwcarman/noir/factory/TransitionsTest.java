@@ -69,4 +69,39 @@ class TransitionsTest {
             new Trigger.SealRejected(org.jwcarman.noir.lifecycle.SealRejection.SUITE_TOO_WEAK));
     assertThat(data).containsEntry("reason", "suite_too_weak").containsEntry("to", "DRAFT");
   }
+
+  @Test
+  void reapprovalArchivesAttempts() throws java.io.IOException {
+    var dir = store.itemDir("w1");
+    java.nio.file.Files.createDirectories(dir.resolve("attempts/1"));
+    java.nio.file.Files.writeString(dir.resolve("attempts/1/x"), "one");
+    item = item.withState(State.DRAFT).withAttempt(2).withReworkCount(1);
+    store.writeWorkItem(item);
+    var labels = new java.util.ArrayList<State>();
+
+    Transitions.applyExternal(store, clock, (i, s) -> labels.add(s), item, new Trigger.Approved());
+
+    assertThat(dir.resolve("runs/1/attempts/1/x")).hasContent("one");
+    assertThat(dir.resolve("attempts")).doesNotExist();
+    assertThat(store.readWorkItem("w1").attempt()).isZero();
+    assertThat(labels).containsExactly(State.SEALING);
+    var events = store.readEvents("w1");
+    assertThat(events)
+        .extracting(org.jwcarman.noir.store.Event::type)
+        .containsExactly("restarted", "transition");
+    assertThat(events.getFirst().data()).containsEntry("run", 1);
+
+    java.nio.file.Files.createDirectories(dir.resolve("attempts/1"));
+    var again = store.readWorkItem("w1").withState(State.DRAFT).withAttempt(1);
+    Transitions.applyExternal(store, clock, (i, s) -> {}, again, new Trigger.Approved());
+    assertThat(dir.resolve("runs/2/attempts/1")).isDirectory();
+  }
+
+  @Test
+  void reapprovalWithoutAttemptsDirStillRestarts() {
+    item = item.withState(State.DRAFT).withAttempt(2);
+    Transitions.applyExternal(store, clock, (i, s) -> {}, item, new Trigger.Approved());
+    assertThat(store.readWorkItem("w1").attempt()).isZero();
+    assertThat(store.readEvents("w1").getFirst().data()).containsEntry("run", 0);
+  }
 }

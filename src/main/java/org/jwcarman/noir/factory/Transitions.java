@@ -1,7 +1,13 @@
 package org.jwcarman.noir.factory;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -26,7 +32,7 @@ import org.jwcarman.noir.store.WorkItem;
 public final class Transitions {
   /** Effects an external trigger may carry; containers are --rm and phase-scoped. */
   private static final Set<SideEffect> HANDLED =
-      Set.of(SideEffect.APPLY_LABEL, SideEffect.STOP_CONTAINERS);
+      Set.of(SideEffect.APPLY_LABEL, SideEffect.STOP_CONTAINERS, SideEffect.ARCHIVE_ATTEMPTS);
 
   private Transitions() {}
 
@@ -47,10 +53,39 @@ public final class Transitions {
           "Not an external trigger: " + trigger.getClass().getSimpleName());
     }
     var next = transition.next();
+    if (transition.effects().contains(SideEffect.ARCHIVE_ATTEMPTS)) {
+      int run = archiveAttempts(store.itemDir(item.id()));
+      store.appendEvent(
+          Event.of(clock, item.id(), "restarted", item.attempt(), Map.of("run", run)));
+    }
     if (transition.effects().contains(SideEffect.APPLY_LABEL)) {
       labeler.accept(next, next.state());
     }
     return persist(store, clock, item, next, trigger);
+  }
+
+  /**
+   * Moves {@code itemDir/attempts} to {@code itemDir/runs/<n>/attempts}, {@code n} the first unused
+   * run number, and returns {@code n}; 0 (nothing moved) when there is no {@code attempts}.
+   */
+  static int archiveAttempts(Path itemDir) {
+    var attempts = itemDir.resolve("attempts");
+    if (!Files.exists(attempts, LinkOption.NOFOLLOW_LINKS)) {
+      return 0;
+    }
+    int n = 1;
+    while (Files.exists(
+        itemDir.resolve("runs").resolve(Integer.toString(n)), LinkOption.NOFOLLOW_LINKS)) {
+      n++;
+    }
+    var run = itemDir.resolve("runs").resolve(Integer.toString(n));
+    try {
+      Files.createDirectories(run);
+      Files.move(attempts, run.resolve("attempts"));
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+    return n;
   }
 
   /** The failure category a trigger implies, if any. */
