@@ -393,8 +393,12 @@ class SuiteSealerTest {
     assertThat(SuiteSealer.stubPackages(List.of(STUB))).containsExactly("com.example.api");
   }
 
+  /**
+   * The Examiner cannot change the repository's tests, so an attempt whose only problems are
+   * existing-test failures is a conflict in the spec: sealing stops there instead of retrying.
+   */
   @Test
-  void finalAttemptWithOnlyExistingTestFailuresReportsConflict() {
+  void attemptWithOnlyExistingTestFailuresStopsAsConflict() {
     checkResults.add((in, out) -> SealArtifactsFixture.vacuous(out));
     for (int i = 0; i < 2; i++) {
       checkResults.add((in, out) ->
@@ -409,8 +413,7 @@ class SuiteSealerTest {
             "existing test fails with the reference: com.example.a.ATest#y",
             "existing test fails with the reference: com.example.b.BTest#z");
     assertThat(e.conflictingTests()).containsExactly("com.example.a.ATest", "com.example.b.BTest");
-    assertThat(agent.requests().get(2).prompt())
-        .contains("existing test fails with the reference: com.example.b.BTest#x");
+    assertThat(agent.requests()).hasSize(2);
   }
 
   @Test
@@ -450,14 +453,12 @@ class SuiteSealerTest {
   }
 
   @Test
-  void earlierConflictThenOtherProblemsIsNotAConflict() {
-    checkResults.add(
-        (in, out) -> SealArtifactsFixture.existingTestsFail(out, "com.example.a.ATest#y"));
+  void firstAttemptConflictIsNotRetried() {
     checkResults.add(
         (in, out) -> SealArtifactsFixture.existingTestsFail(out, "com.example.a.ATest#y"));
     checkResults.add((in, out) -> SealArtifactsFixture.vacuous(out));
     var e = examine();
-    assertThat(e.problems()).singleElement().asString().startsWith("holdout test passes");
-    assertThat(e.conflictingTests()).isEmpty();
+    assertThat(e.conflictingTests()).containsExactly("com.example.a.ATest");
+    assertThat(agent.requests()).hasSize(1);
   }
 }

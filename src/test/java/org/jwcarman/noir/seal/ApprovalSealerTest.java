@@ -432,7 +432,7 @@ class ApprovalSealerTest {
         .doesNotContain("incrementAddsTwo")
         .doesNotContain("logsIncrement")
         .doesNotContain("noir.holdout");
-    assertThat(agent.requests()).hasSize(3);
+    assertThat(agent.requests()).hasSize(1);
   }
 
   @Test

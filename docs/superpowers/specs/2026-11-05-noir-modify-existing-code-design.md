@@ -140,7 +140,7 @@ repository:
    files listed under `## Tests to update` are excluded. A failure becomes an Examiner problem
    naming the test class and method, and is fed back as usual.
 
-If the final Examiner attempt ends with only check-4 problems, the seal is rejected with a **new
+If an Examiner attempt ends with only check-4 problems, sealing stops there (the Examiner cannot change existing tests, so retrying cannot help) and the seal is rejected with a **new
 reason**, `conflicts_with_existing_tests`. The issue comment names the failing test classes. They
 are ordinary repository code, so naming them reveals nothing secret. The comment suggests listing
 them under `## Tests to update`. Otherwise rejections are as in Plan 5: comment, remove

@@ -72,7 +72,7 @@ public final class SuiteSealer {
   /**
    * Examiner outcome: the model that produced the sealed suite, or the last problems. {@code
    * conflictingTests} are the existing test classes (sorted) the reference broke, when those were
-   * the final attempt's only problems; empty otherwise.
+   * an attempt's only problems (sealing stops at that attempt); empty otherwise.
    */
   public record Examination(String model, List<String> problems, List<String> conflictingTests) {
     public Examination {
@@ -122,8 +122,14 @@ public final class SuiteSealer {
       if (problems.isEmpty()) {
         return new Examination(out.agent().model(), null, List.of());
       }
+      // The Examiner cannot change the repository's tests: a conflict with them is the spec's,
+      // so another attempt cannot fix it.
+      var conflicts = conflictingTests(problems);
+      if (!conflicts.isEmpty()) {
+        return new Examination(null, problems, conflicts);
+      }
     }
-    return new Examination(null, problems, conflictingTests(problems));
+    return new Examination(null, problems, List.of());
   }
 
   private List<String> checkSuite(
