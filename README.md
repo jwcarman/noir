@@ -37,8 +37,13 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    a local clone with `noir spec check <file> --title <t> --repo .`.
 2. **Approve.** A human reviews the issue and adds `noir:ready`. Only humans
    add that label; it is the approval.
-3. **Seal.** The server asks a separate *Examiner* agent to write a
-   **holdout acceptance suite** and a reference implementation. noir checks
+3. **Seal.** The server locks the spec: it checks it against the default
+   branch and posts a SHA-256 commitment to the issue text, base commit and
+   stubs. **Hidden tests are off by default**; turn them on for one issue with
+   the `noir:hidden-tests` label, or for every issue with `hiddenTests: true`
+   in `config.yaml`. With hidden tests on, the server also asks a separate
+   *Examiner* agent to write a **holdout acceptance suite** and a reference
+   implementation. noir checks
    that the tests fail on the stubs, pass on the reference (3×), and are
    strong enough (PIT mutation score ≥ 0.70). The holdout suite is stored on
    the server and never shown to the builder; a SHA-256 commitment to it is
@@ -51,8 +56,10 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    container against the spec.
 5. **Measure.** In fresh containers noir measures line coverage (JaCoCo),
    mutation score (PIT), CRAP score, and API conformance of the changed
-   classes. These guide rework; they are not the gate.
-6. **Grade.** The sealed holdout suite runs in a grader container with no
+   classes. Falling short of the spec's quality bar (by default line coverage
+   90%, mutation score 80%, max CRAP 15) sends the attempt back for rework;
+   with hidden tests off, this is the quality gate.
+6. **Grade.** Only with hidden tests on. The sealed holdout suite runs in a grader container with no
    network and read-only mounts. noir does not sandbox the test JVM itself:
    there is no Java Security Manager, and the container is the sandbox.
    Builder code runs in the same JVM as the hidden tests and could tamper with
@@ -62,7 +69,7 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    Failures go back to the builder as per-requirement pass counts only —
    never test code — so the agent can't overfit to the test.
 7. **Deliver.** On a pass noir pushes a branch and opens a PR with the
-   metrics, holdout results, provenance (base SHA, commitment, models, image
+   metrics, holdout results (or a note that hidden tests were off), provenance (base SHA, commitment, models, image
    digests) and cost (builder and Examiner, as reported by Claude Code). Each attempt is one commit titled after the issue, e.g.
    `Add a Counter (#12)` (`…, attempt 2` for rework). When attempts run out it
    opens a draft PR instead.

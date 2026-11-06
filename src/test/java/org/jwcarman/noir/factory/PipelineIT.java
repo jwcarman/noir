@@ -511,7 +511,7 @@ class PipelineIT {
                 config.examiner().wallClock(),
                 s.examinerAttempts()),
             config.maven(),
-            true);
+            hiddenTests);
     var clock = Clock.systemUTC();
     var git = new LocalOriginGit(new GitCli(runner), origin);
     var approvedId = new AtomicReference<String>();
@@ -611,6 +611,31 @@ class PipelineIT {
         new Approval(store, github, examinerAgent, builder, created.getFirst(), issue, origin);
     System.out.printf("[PipelineIT] approval: %s%n", result.path());
     return result;
+  }
+
+  /** Scenarios run with hidden tests on unless a test turns them off. */
+  boolean hiddenTests = true;
+
+  /** The default: sealed without an Examiner, built and measured, grading skipped, PR opened. */
+  @Test
+  void approvedIssueWithoutHiddenTests() {
+    hiddenTests = false;
+    var a = approve(null);
+
+    assertThat(a.path())
+        .as(String.valueOf(a.github().comments(a.issue())))
+        .isEqualTo("SEALING > SEALED > BUILDING > MEASURING > GRADING > PR_OPEN");
+    assertThat(a.examiner().requests()).isEmpty();
+    assertThat(a.github().comments(a.issue()))
+        .singleElement()
+        .satisfies(
+            c -> assertThat(c).startsWith("noir commitment `").endsWith("; hidden tests: off"));
+    assertThat(a.github().pullRequests())
+        .singleElement()
+        .satisfies(pr ->
+            assertThat(pr.body())
+                .contains("### Hidden tests")
+                .doesNotContain("### Holdout results"));
   }
 
   @Test
