@@ -16,6 +16,11 @@ public class Counter {
     return count;
   }
 
+  /** Takes one from the count. */
+  public void decrement() {
+    count--;
+  }
+
   /** Sets the count back to zero. */
   public void reset() {
     count = 0;

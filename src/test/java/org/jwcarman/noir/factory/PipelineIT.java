@@ -19,6 +19,7 @@ import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.IntFunction;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -712,14 +713,45 @@ class PipelineIT {
     assertThat(originFile(a.origin(), branch, SealedItemFixture.COUNTER_PATH))
         .contains("if (count < 3)");
     assertThat(originFile(a.origin(), branch, COUNTER_TEST_PATH)).contains("incrementStopsAtThree");
+    // Sealing kept the issue's fragment and spliced it into the base: increment keeps today's
+    // body under the new Javadoc, and reset() is appended with the UOE body.
+    var itemDir = a.store().itemDir(a.itemId());
+    assertThat(readFile(itemDir.resolve("fragments").resolve(SealedItemFixture.COUNTER_PATH)))
+        .isEqualTo(readFile(modifyFixture("fragments").resolve(SealedItemFixture.COUNTER_PATH)));
+    assertThat(readFile(itemDir.resolve("stubs").resolve(SealedItemFixture.COUNTER_PATH)))
+        .isEqualTo(readFile(modifyFixture("spliced").resolve(SealedItemFixture.COUNTER_PATH)));
+
+    // The base Counter has decrement(), which no test calls. Whole-class measurement would
+    // report it as an uncovered line and a surviving mutant; changed-lines measurement counts
+    // only the lines the attempt added or changed (the capped increment and reset), all of
+    // which the builder's tests cover and whose mutants they kill.
+    assertThat(a.store().readEvents(a.itemId()))
+        .filteredOn(e -> e.type().equals("measurement"))
+        .singleElement()
+        .satisfies(e -> {
+          assertThat(e.data()).containsEntry("passed", true);
+          assertThat(e.data().get("changedClasses"))
+              .asInstanceOf(InstanceOfAssertFactories.LIST)
+              .contains("com.example.api.Counter");
+          assertThat(e.data())
+              .containsEntry("lineCoverage", 1.0)
+              .containsEntry("mutationScore", 1.0);
+        });
+
     assertThat(a.github().pullRequests())
         .singleElement()
         .satisfies(pr -> {
           assertThat(pr.draft()).isFalse();
           assertThat(pr.body())
-              .contains("### Files")
-              .contains("- Modified: `" + SealedItemFixture.COUNTER_PATH + "` (+")
-              .contains("- Tests updated: `" + COUNTER_TEST_PATH + "` (+")
+              .contains(
+                  "### Files\n\n"
+                      + "- Added: `ATTEMPT.txt` (+1)\n"
+                      + "- Modified: `"
+                      + SealedItemFixture.COUNTER_PATH
+                      + "` (+9 \u22122)\n"
+                      + "- Tests updated: `"
+                      + COUNTER_TEST_PATH
+                      + "` (+17 \u22120)\n")
               .doesNotContain(SECRET);
         });
   }
@@ -754,7 +786,13 @@ class PipelineIT {
         .satisfies(pr -> {
           assertThat(pr.draft()).isFalse();
           assertThat(pr.body())
-              .contains("- Modified: `" + SealedItemFixture.COUNTER_PATH + "` (+")
+              .contains(
+                  "### Files\n\n"
+                      + "- Added: `ATTEMPT.txt` (+1)\n"
+                      + "- Added: `src/test/java/com/example/api/CounterCapTest.java` (+24)\n"
+                      + "- Modified: `"
+                      + SealedItemFixture.COUNTER_PATH
+                      + "` (+9 \u22122)\n")
               .doesNotContain("Tests updated:");
         });
   }
@@ -785,6 +823,7 @@ class PipelineIT {
         .doesNotContain(NoirLabels.READY)
         .contains("noir:draft");
     assertThat(a.examiner().requests()).hasSize(1);
+    assertThat(a.builder().requests()).isEmpty();
     assertThat(a.github().pullRequests()).isEmpty();
   }
 }
