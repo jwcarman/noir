@@ -197,6 +197,84 @@ class SealJudgeTest {
         .doesNotContain("line 440\n");
   }
 
+  @Test
+  void existingTestsSkippedWhenNotRun() {
+    assertThat(out.resolve("existing-tests.exit")).doesNotExist();
+    assertThat(judge()).isEmpty();
+  }
+
+  @Test
+  void existingTestsThatPassAreFine() {
+    exit("existing-tests", 0);
+    file(
+        "existing-tests/TEST-com.example.api.LegacyCounterTest.xml",
+        "<testsuite>" + existing("incrementAddsTwo", true) + "</testsuite>");
+    assertThat(judge()).isEmpty();
+  }
+
+  @Test
+  void existingTestFailuresBecomeProblems() {
+    exit("existing-tests", 1);
+    file(
+        "existing-tests/TEST-com.example.api.LegacyCounterTest.xml",
+        "<testsuite>"
+            + existing("startsAtZero", true)
+            + existing("incrementAddsTwo", false)
+            + "<testcase classname=\"com.example.api.LegacyCounterTest\" name=\"ignored\">"
+            + "<skipped/></testcase></testsuite>");
+    file("existing-tests/com.example.api.LegacyCounterTest.txt", "Tests run: 3, Failures: 1");
+    assertThat(judge())
+        .containsExactly(
+            "existing test fails with the reference: com.example.api.LegacyCounterTest#incrementAddsTwo");
+  }
+
+  @Test
+  void existingTestsThatDoNotCompileAreNotAConflict() {
+    exit("existing-tests", 1);
+    log("existing-tests", "[ERROR] LegacyCounterTest.java: cannot find symbol");
+    assertThat(judge())
+        .containsExactly(
+            "existing tests do not compile with the reference:\n"
+                + "[ERROR] LegacyCounterTest.java: cannot find symbol");
+  }
+
+  @Test
+  void existingTestsInterrupted() {
+    log("existing-tests", "Killed");
+    assertThat(judge()).containsExactly("seal check did not complete step existing-tests:\nKilled");
+  }
+
+  @Test
+  void existingTestFailuresAreReportedWithMutationProblems() {
+    pit(20, 11);
+    exit("existing-tests", 1);
+    file(
+        "existing-tests/TEST-com.example.api.LegacyCounterTest.xml",
+        "<testsuite>" + existing("incrementAddsTwo", false) + "</testsuite>");
+    assertThat(judge())
+        .containsExactly(
+            "holdout tests are not discriminating enough: mutation score 0.55 < 0.70"
+                + " (11 of 20 mutants killed)",
+            "existing test fails with the reference: com.example.api.LegacyCounterTest#incrementAddsTwo");
+  }
+
+  @Test
+  void existingTestsIgnoredWhenTheReferenceFails() {
+    exit("ref-build", 1);
+    log("ref-build", "Counter.java: error");
+    exit("existing-tests", 1);
+    assertThat(judge())
+        .containsExactly("reference implementation does not compile:\nCounter.java: error");
+  }
+
+  static String existing(String name, boolean pass) {
+    return "<testcase classname=\"com.example.api.LegacyCounterTest\" name=\""
+        + name
+        + "\">"
+        + (pass ? "" : "<failure message=\"expected: &lt;2&gt; but was: &lt;1&gt;\"/>")
+        + "</testcase>";
+  }
+
   // --- helpers -------------------------------------------------------------------------------
 
   void exit(String step, int code) {

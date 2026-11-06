@@ -4,12 +4,15 @@
 # noir's SealJudge decides what they mean.
 #
 # Usage: seal-check.sh prepare   (network on)  clone, assumptions, stub build, dependencies
-#        seal-check.sh check     (network off) holdout compile/run, reference build/runs, PIT
+#        seal-check.sh check     (network off) holdout compile/run, reference build/runs, PIT,
+#                                              existing tests against the reference
 # State shared between phases lives in /work/out (repo, Maven cache, dependency jars).
 #
 # Inputs (read-only mounts): /work/base.bundle, /work/stubs, and for "check" also
 # /work/holdout and /work/reference.
-# Env: BASE_SHA, HOLDOUT_PKG, TARGET_CLASSES (comma-separated), TEST_TIMEOUT (e.g. 10s), RERUNS
+# Env: BASE_SHA, HOLDOUT_PKG, TARGET_CLASSES (comma-separated), TEST_TIMEOUT (e.g. 10s), RERUNS,
+#      EXISTING_TESTS (yes|no: run the repository's tests against the reference) and
+#      EXCLUDE_TESTS (comma-separated repository paths of test files left out of that run)
 set -u
 
 OUT=/work/out
@@ -77,6 +80,41 @@ ref_build() {
     && mvn -B -o -Dmaven.repo.local="$M2" -DskipTests compile
 }
 
+# Deletes the EXCLUDE_TESTS files (the spec's tests to update) from the repository.
+exclude_tests() {
+  local path
+  local -a excluded=()
+  IFS=, read -ra excluded <<<"${EXCLUDE_TESTS:-}"
+  for path in "${excluded[@]}"; do
+    case "$path" in
+      "" | /* | *..*) continue ;;
+    esac
+    rm -f -- "$REPO/$path"
+  done
+}
+
+# Downloads what the offline existing-tests run needs. Surefire resolves its test-framework
+# provider only when it finds test classes to run (-DskipTests, or a class filter matching
+# nothing, skips that), so it runs every test class here with a method filter matching nothing.
+test_deps() {
+  exclude_tests
+  cd "$REPO" && mvn -B -Dmaven.repo.local="$M2" test \
+    '-Dtest=*#noirResolveProvidersOnly' -Dsurefire.failIfNoSpecifiedTests=false
+}
+
+# The repository's own tests with the reference in place, minus the tests to update.
+existing_tests() {
+  exclude_tests
+  cd "$REPO" || return 1
+  rm -rf target/surefire-reports
+  mvn -B -o -Dmaven.repo.local="$M2" test
+  local rc=$?
+  if [ -d target/surefire-reports ]; then
+    cp -R target/surefire-reports "$OUT/existing-tests"
+  fi
+  return $rc
+}
+
 pit() {
   local cp="$REPO/target/classes"
   local d
@@ -98,6 +136,7 @@ prepare_phase() {
   run assumptions assumptions || exit 0
   [ "$(cat "$OUT/pom.txt" 2>/dev/null)" = yes ] || exit 0
   run stub-build stub_build || exit 0
+  [ "${EXISTING_TESTS:-no}" = yes ] && run test-deps test_deps
   exit 0
 }
 
@@ -112,4 +151,5 @@ for n in $(seq 1 "${RERUNS:-3}"); do
   run "ref-run-$n" holdout_run "ref-run-$n"
 done
 run pit pit
+[ "${EXISTING_TESTS:-no}" = yes ] && run existing-tests existing_tests
 exit 0

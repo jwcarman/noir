@@ -123,7 +123,7 @@ class SuiteSealerTest {
   @Test
   void goodSuitePassesFirstAttempt() {
     var e = examine();
-    assertThat(e).isEqualTo(new SuiteSealer.Examination("scripted", null));
+    assertThat(e).isEqualTo(new SuiteSealer.Examination("scripted", null, List.of()));
     assertThat(itemDir.resolve("holdout/noir/holdout/T.java")).exists();
     assertThat(itemDir.resolve("reference/src/main/java/com/example/api/Foo.java")).exists();
     assertThat(checkCalls.getFirst().bundle()).isEqualTo(bundle);
@@ -169,7 +169,7 @@ class SuiteSealerTest {
       throw new DockerException("docker daemon went away");
     });
     var e = examine();
-    assertThat(e).isEqualTo(new SuiteSealer.Examination("scripted", null));
+    assertThat(e).isEqualTo(new SuiteSealer.Examination("scripted", null, List.of()));
     assertThat(agent.requests()).hasSize(1);
     assertThat(checkCalls).hasSize(2);
     assertThat(store.readEvents(itemDir))
@@ -277,5 +277,73 @@ class SuiteSealerTest {
   @Test
   void stubPackagesReadsPackageDeclarations() {
     assertThat(SuiteSealer.stubPackages(List.of(STUB))).containsExactly("com.example.api");
+  }
+
+  @Test
+  void finalAttemptWithOnlyExistingTestFailuresReportsConflict() {
+    checkResults.add((in, out) -> SealArtifactsFixture.vacuous(out));
+    for (int i = 0; i < 2; i++) {
+      checkResults.add((in, out) ->
+          SealArtifactsFixture.existingTestsFail(
+              out, "com.example.b.BTest#x", "com.example.a.ATest#y", "com.example.b.BTest#z"));
+    }
+    var e = examine();
+    assertThat(e.model()).isNull();
+    assertThat(e.problems())
+        .containsExactly(
+            "existing test fails with the reference: com.example.b.BTest#x",
+            "existing test fails with the reference: com.example.a.ATest#y",
+            "existing test fails with the reference: com.example.b.BTest#z");
+    assertThat(e.conflictingTests()).containsExactly("com.example.a.ATest", "com.example.b.BTest");
+    assertThat(agent.requests().get(2).prompt())
+        .contains("existing test fails with the reference: com.example.b.BTest#x");
+  }
+
+  @Test
+  void mixedProblemsAreNotAConflict() {
+    for (int i = 0; i < 3; i++) {
+      checkResults.add((in, out) -> {
+        SealArtifactsFixture.existingTestsFail(out, "com.example.a.ATest#y");
+        write(
+            out.resolve("pit/mutations.xml"),
+            "<mutations><mutation detected='false'/></mutations>");
+        return new SealArtifacts(out);
+      });
+    }
+    var e = examine();
+    assertThat(e.problems())
+        .hasSize(2)
+        .contains("existing test fails with the reference: com.example.a.ATest#y");
+    assertThat(e.conflictingTests()).isEmpty();
+  }
+
+  @Test
+  void existingTestsThatDoNotCompileAreNotAConflict() {
+    for (int i = 0; i < 3; i++) {
+      checkResults.add((in, out) -> {
+        SealArtifactsFixture.good(out);
+        write(out.resolve("existing-tests.exit"), "1");
+        write(out.resolve("existing-tests.log"), "[ERROR] cannot find symbol\n");
+        return new SealArtifacts(out);
+      });
+    }
+    var e = examine();
+    assertThat(e.problems())
+        .singleElement()
+        .asString()
+        .startsWith("existing tests do not compile with the reference:");
+    assertThat(e.conflictingTests()).isEmpty();
+  }
+
+  @Test
+  void earlierConflictThenOtherProblemsIsNotAConflict() {
+    checkResults.add(
+        (in, out) -> SealArtifactsFixture.existingTestsFail(out, "com.example.a.ATest#y"));
+    checkResults.add(
+        (in, out) -> SealArtifactsFixture.existingTestsFail(out, "com.example.a.ATest#y"));
+    checkResults.add((in, out) -> SealArtifactsFixture.vacuous(out));
+    var e = examine();
+    assertThat(e.problems()).singleElement().asString().startsWith("holdout test passes");
+    assertThat(e.conflictingTests()).isEmpty();
   }
 }

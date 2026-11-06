@@ -3,6 +3,7 @@ package org.jwcarman.noir.seal;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -18,6 +19,9 @@ public final class SealProblems {
   static final String REF_COMPILE = "the reference implementation does not compile";
   static final String REF_FAILED = "the reference implementation failed the hidden tests";
   static final String MUTATION = "mutation score below the required threshold";
+  static final String EXISTING_FAILED = "existing tests fail with the reference implementation: ";
+  static final String EXISTING_COMPILE =
+      "the existing tests do not compile with the reference implementation";
   static final String STRUCTURE = "the hidden tests did not meet noir's structural rules";
   static final String INCOMPLETE = "a seal check did not complete";
   static final String OTHER = "other check failures";
@@ -32,6 +36,12 @@ public final class SealProblems {
   private static final Pattern ANALYZER =
       Pattern.compile("(?s)([^\\n:]+\\.java(#[^\\n:]*)?: .*|R\\d+ has no holdout tests)");
 
+  /** Check-4 problems: the class (a Java binary name outside the holdout tree) and the method. */
+  private static final Pattern EXISTING =
+      Pattern.compile(
+          Pattern.quote(SealJudge.EXISTING_TEST_FAILS)
+              + "((?!noir\\.holdout\\.)[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)#[^\\n]*");
+
   private enum Kind {
     PASSTHROUGH,
     STUBS,
@@ -41,6 +51,8 @@ public final class SealProblems {
     REF_COMPILE,
     REF_FAILED,
     MUTATION,
+    EXISTING_FAILED,
+    EXISTING_COMPILE,
     STRUCTURE,
     INCOMPLETE,
     OTHER
@@ -52,11 +64,14 @@ public final class SealProblems {
   public static List<String> publicSummary(List<String> problems) {
     var passthrough = new LinkedHashSet<String>();
     var kinds = new LinkedHashSet<Kind>();
+    var existing = new LinkedHashSet<String>();
     int vacuous = 0;
     for (var p : problems) {
       var kind = classify(p);
       if (kind == Kind.PASSTHROUGH) {
         passthrough.add(p);
+      } else if (kind == Kind.EXISTING_FAILED) {
+        existing.add(existingTestClass(p).orElseThrow());
       } else if (kind == Kind.VACUOUS) {
         vacuous++;
       }
@@ -80,6 +95,8 @@ public final class SealProblems {
             case REF_COMPILE -> REF_COMPILE;
             case REF_FAILED -> REF_FAILED;
             case MUTATION -> MUTATION;
+            case EXISTING_FAILED -> EXISTING_FAILED + codeList(existing);
+            case EXISTING_COMPILE -> EXISTING_COMPILE;
             case STRUCTURE -> STRUCTURE;
             case INCOMPLETE -> INCOMPLETE;
             case OTHER, PASSTHROUGH -> OTHER;
@@ -88,9 +105,30 @@ public final class SealProblems {
     return out;
   }
 
+  /**
+   * The test class named by a check-4 problem ({@code existing test fails with the reference:
+   * <Class>#<method>}); empty for any other problem, or one whose class is not a plain Java name.
+   */
+  public static Optional<String> existingTestClass(String problem) {
+    var m = EXISTING.matcher(problem);
+    return m.matches() ? Optional.of(m.group(1)) : Optional.empty();
+  }
+
+  private static String codeList(Iterable<String> items) {
+    var parts = new ArrayList<String>();
+    items.forEach(i -> parts.add("`" + i + "`"));
+    return String.join(", ", parts);
+  }
+
   private static Kind classify(String p) {
     if (PASSTHROUGH.matcher(p).matches()) {
       return Kind.PASSTHROUGH;
+    }
+    if (existingTestClass(p).isPresent()) {
+      return Kind.EXISTING_FAILED;
+    }
+    if (p.startsWith(SealJudge.EXISTING_TESTS_DO_NOT_COMPILE + ":")) {
+      return Kind.EXISTING_COMPILE;
     }
     if (p.startsWith("API stubs do not compile")) {
       return Kind.STUBS;

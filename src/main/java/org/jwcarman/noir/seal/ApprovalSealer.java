@@ -190,6 +190,14 @@ public final class ApprovalSealer implements ApprovalSealing {
     git.bundle(repoDir, baseSha, bundle);
 
     var examination = suiteSealer.examine(spec, parsed.stubs(), stubs, itemDir, bundle);
+    if (examination.problems() != null && !examination.conflictingTests().isEmpty()) {
+      return reject(
+          item,
+          itemDir,
+          SealRejection.CONFLICTS_WITH_EXISTING_TESTS,
+          ApprovalComments.conflictsWithExistingTests(examination.conflictingTests()),
+          examination.problems().size());
+    }
     if (examination.problems() != null) {
       return reject(
           item,

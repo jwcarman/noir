@@ -20,8 +20,9 @@ import org.jwcarman.noir.spec.ItemId;
 /**
  * Runs {@code seal-check.sh} in the builder image, in two phases: {@code prepare} (with network:
  * clone, assumptions, stub build, dependency download) and {@code check} (no network: compile and
- * run the holdout tests, build the reference, mutation testing). Holdout tests and the reference
- * never run with network access, matching grading conditions.
+ * run the holdout tests, build the reference, mutation testing, and for a modify spec the
+ * repository's existing tests against the reference). Holdout tests and the reference never run
+ * with network access, matching grading conditions.
  */
 public final class ContainerSealCheckRunner implements SealCheckRunner {
   static final int RERUNS = 3;
@@ -51,7 +52,9 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
             "HOLDOUT_PKG", ItemId.holdoutPackage(in.spec().id()),
             "TARGET_CLASSES", String.join(",", in.targetClasses()),
             "TEST_TIMEOUT", config.timeouts().perTest().toSeconds() + "s",
-            "RERUNS", String.valueOf(RERUNS));
+            "RERUNS", String.valueOf(RERUNS),
+            "EXISTING_TESTS", in.spec().modifies().isEmpty() ? "no" : "yes",
+            "EXCLUDE_TESTS", String.join(",", in.spec().testsToUpdate()));
     var log = new StringBuilder();
 
     var prepareMounts =

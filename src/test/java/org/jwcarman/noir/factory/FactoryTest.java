@@ -618,6 +618,21 @@ class FactoryTest {
   }
 
   @Test
+  void conflictRejectionRemovesReadyAndDraftsWithReason() {
+    sealingItem();
+    sealing.outcome =
+        n -> new SealOutcome.Rejected(SealRejection.CONFLICTS_WITH_EXISTING_TESTS, REJECTION);
+
+    var item = factory().advance(Specs.ID);
+
+    assertThat(item.state()).isEqualTo(State.DRAFT);
+    assertThat(gh.labels(1)).containsExactly("noir:draft");
+    assertThat(gh.comments(1)).containsExactly(REJECTION);
+    assertThat(transitionsTo("DRAFT").getFirst())
+        .containsEntry("reason", "conflicts_with_existing_tests");
+  }
+
+  @Test
   void rejectionCommentIsPostedOnceWhenRemovingReadyIsRetried() {
     sealingItem();
     rejecting();

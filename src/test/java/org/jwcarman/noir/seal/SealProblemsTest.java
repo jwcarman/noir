@@ -155,4 +155,34 @@ class SealProblemsTest {
         .doesNotContain(".java")
         .doesNotContain("holdout");
   }
+
+  @Test
+  void existingTestProblemIsPublicWithClassName() {
+    assertThat(
+            summary(
+                "existing test fails with the reference: com.example.api.LegacyCounterTest#incrementAddsTwo",
+                "existing test fails with the reference: com.example.api.LegacyCounterTest#resetKeeps",
+                "existing test fails with the reference: com.example.api.OtherTest#a"))
+        .containsExactly(
+            "existing tests fail with the reference implementation:"
+                + " `com.example.api.LegacyCounterTest`, `com.example.api.OtherTest`")
+        .noneMatch(
+            p -> p.contains("incrementAddsTwo") || p.contains("resetKeeps") || p.contains("#"));
+  }
+
+  @Test
+  void existingTestCompileFailureIsAFixedPhrase() {
+    assertThat(summary("existing tests do not compile with the reference:\n[ERROR] Secret.java"))
+        .containsExactly("the existing tests do not compile with the reference implementation");
+  }
+
+  @Test
+  void existingTestProblemWithUnexpectedShapeIsNotPassedThrough() {
+    assertThat(summary("existing test fails with the reference: has spaces#m"))
+        .containsExactly("other check failures");
+    assertThat(summary("existing test fails with the reference: noir.holdout.nr_x.T#m"))
+        .containsExactly("other check failures");
+    assertThat(summary("existing test fails with the reference: a.B\nsecret#m"))
+        .containsExactly("other check failures");
+  }
 }

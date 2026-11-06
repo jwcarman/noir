@@ -65,4 +65,32 @@ class ContainerSealCheckRunnerTest {
             .run(inputs(), tmp.resolve("out"));
     assertThat(a.read("container.log")).contains("timed out");
   }
+
+  @Test
+  void existingTestsRunOnlyForModifySpecsAndExcludeTestsToUpdate() throws Exception {
+    var docker = new FakeContainerPort(spec -> new ContainerResult(0, "", "", false, "id"));
+    var runner = new ContainerSealCheckRunner(docker, NoirConfig.defaults());
+    runner.run(inputs(), tmp.resolve("out"));
+    assertThat(docker.specs().get(0).env())
+        .containsEntry("EXISTING_TESTS", "no")
+        .containsEntry("EXCLUDE_TESTS", "");
+
+    var modify = inputs();
+    modify =
+        new SealInputs(
+            Specs.withModifyAndTests(),
+            modify.bundle(),
+            modify.stubsDir(),
+            modify.holdoutDir(),
+            modify.referenceDir(),
+            modify.targetClasses());
+    runner.run(modify, tmp.resolve("out"));
+    var spec = Specs.withModifyAndTests();
+    for (var s : docker.specs().subList(2, 4)) {
+      assertThat(s.env())
+          .containsEntry("EXISTING_TESTS", "yes")
+          .containsEntry("EXCLUDE_TESTS", String.join(",", spec.testsToUpdate()));
+    }
+    assertThat(spec.testsToUpdate()).hasSizeGreaterThan(1);
+  }
 }

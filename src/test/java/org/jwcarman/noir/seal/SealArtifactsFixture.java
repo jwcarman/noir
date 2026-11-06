@@ -44,6 +44,23 @@ public final class SealArtifactsFixture {
     return new SealArtifacts(out);
   }
 
+  /** Like {@link #good} but each {@code Class#method} existing test fails with the reference. */
+  static SealArtifacts existingTestsFail(Path out, String... tests) {
+    good(out);
+    write(out, "existing-tests.exit", "1");
+    var sb = new StringBuilder("<testsuite>");
+    for (var t : tests) {
+      var hash = t.indexOf('#');
+      sb.append("<testcase classname=\"")
+          .append(t, 0, hash)
+          .append("\" name=\"")
+          .append(t.substring(hash + 1))
+          .append("\"><failure message=\"x\"/></testcase>");
+    }
+    write(out, "existing-tests/TEST-existing.xml", sb.append("</testsuite>").toString());
+    return new SealArtifacts(out);
+  }
+
   private static String suite(boolean pass) {
     return suite(pass, "noir.holdout.x.T", "a()");
   }

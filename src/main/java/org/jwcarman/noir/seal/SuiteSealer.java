@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 import org.jwcarman.noir.commit.SealedFileException;
 import org.jwcarman.noir.config.NoirConfig;
@@ -51,8 +52,16 @@ public final class SuiteSealer {
     this.retry = retry;
   }
 
-  /** Examiner outcome: the model that produced the sealed suite, or the last problems. */
-  public record Examination(String model, List<String> problems) {}
+  /**
+   * Examiner outcome: the model that produced the sealed suite, or the last problems. {@code
+   * conflictingTests} are the existing test classes (sorted) the reference broke, when those were
+   * the final attempt's only problems; empty otherwise.
+   */
+  public record Examination(String model, List<String> problems, List<String> conflictingTests) {
+    public Examination {
+      conflictingTests = List.copyOf(conflictingTests);
+    }
+  }
 
   /**
    * Examines the spec: {@code contract} is the issue view (fragments for modify targets) shown to
@@ -88,10 +97,10 @@ public final class SuiteSealer {
       }
       store.appendEvent(itemDir, Event.of(clock, spec.id(), "examiner_attempt", attempt, data));
       if (problems.isEmpty()) {
-        return new Examination(out.agent().model(), null);
+        return new Examination(out.agent().model(), null, List.of());
       }
     }
-    return new Examination(null, problems);
+    return new Examination(null, problems, conflictingTests(problems));
   }
 
   private List<String> checkSuite(
@@ -110,6 +119,19 @@ public final class SuiteSealer {
         SealInputs.of(spec, bundle, itemDir.resolve("stubs"), out.holdoutDir(), out.referenceDir());
     var artifacts = retry.call(() -> checks.run(inputs, attemptDir.resolve("checks")));
     return SealJudge.judge(artifacts, config.sealDiscrimination());
+  }
+
+  /** The classes named by check-4 problems, when every problem is one; empty otherwise. */
+  static List<String> conflictingTests(List<String> problems) {
+    var classes = new TreeSet<String>();
+    for (var p : problems) {
+      var cls = SealProblems.existingTestClass(p);
+      if (cls.isEmpty()) {
+        return List.of();
+      }
+      classes.add(cls.get());
+    }
+    return List.copyOf(classes);
   }
 
   public static Set<String> stubPackages(List<StubSource> stubs) {

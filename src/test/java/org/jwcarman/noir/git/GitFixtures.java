@@ -47,6 +47,28 @@ public final class GitFixtures {
     }
   }
 
+  /** A bare repository at {@code root/<owner>/<repo>.git} with {@code files} committed on main. */
+  public static Path originWithFiles(
+      Path root, String ownerRepo, java.util.Map<String, String> files) {
+    try {
+      var work = Files.createTempDirectory("noir-fixture-work");
+      git(work, "init", "-q", "-b", "main");
+      for (var e : files.entrySet()) {
+        var file = work.resolve(e.getKey());
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, e.getValue());
+      }
+      git(work, "add", ".");
+      git(work, "commit", "-q", "-m", "initial");
+      var origin = root.resolve(ownerRepo + ".git");
+      Files.createDirectories(origin.getParent());
+      git(root, "clone", "-q", "--bare", work.toString(), origin.toString());
+      return origin;
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
   public static Path cloneOf(Path origin, Path dest) {
     git(dest.getParent(), "clone", "-q", origin.toString(), dest.toString());
     return dest;

@@ -16,6 +16,12 @@ import org.jwcarman.noir.reports.PitMutations;
 public final class SealJudge {
   static final int TAIL = 60;
 
+  /** Prefix of the check-4 problem: {@code <prefix><ClassName>#<method>}. */
+  public static final String EXISTING_TEST_FAILS = "existing test fails with the reference: ";
+
+  static final String EXISTING_TESTS_DO_NOT_COMPILE =
+      "existing tests do not compile with the reference";
+
   private SealJudge() {}
 
   public static List<String> judge(SealArtifacts a, double discriminationThreshold) {
@@ -61,7 +67,33 @@ public final class SealJudge {
       return problems;
     }
     checkDiscrimination(a, discriminationThreshold, problems);
+    checkExistingTests(a, problems);
     return problems;
+  }
+
+  /**
+   * Check 4: the repository's own tests against the reference. Only modify specs run them, so a
+   * missing step (neither log nor exit) means there is nothing to check.
+   */
+  private static void checkExistingTests(SealArtifacts a, List<String> problems) {
+    var step = "existing-tests";
+    if (a.exit(step).isEmpty() && !Files.exists(a.path(step + ".log"))) {
+      return;
+    }
+    if (!stepCompleted(a, step, problems)) {
+      return;
+    }
+    var outcomes = JUnitXmlReports.parse(a.path(step));
+    var failed = false;
+    for (var o : outcomes) {
+      if (o.result() != TestOutcome.Result.PASSED && o.result() != TestOutcome.Result.SKIPPED) {
+        problems.add(EXISTING_TEST_FAILS + o.testId());
+        failed = true;
+      }
+    }
+    if (!failed && a.exit(step).orElseThrow() != 0) {
+      problems.add(EXISTING_TESTS_DO_NOT_COMPILE + ":\n" + a.logTail(step, TAIL));
+    }
   }
 
   private static void checkAssumptions(SealArtifacts a, List<String> problems) {

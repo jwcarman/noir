@@ -7,7 +7,8 @@ public enum SealRejection {
   EDITED_AFTER_APPROVAL,
   INVALID_SPEC,
   SUITE_TOO_WEAK,
-  STUB_EXISTS;
+  STUB_EXISTS,
+  CONFLICTS_WITH_EXISTING_TESTS;
 
   /** The value recorded on the {@code transition} event. */
   public String eventValue() {

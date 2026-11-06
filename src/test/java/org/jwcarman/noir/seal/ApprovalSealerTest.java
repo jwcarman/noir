@@ -406,6 +406,30 @@ class ApprovalSealerTest {
   }
 
   @Test
+  void conflictRejectsWithReasonAndComment() {
+    for (int i = 0; i < 3; i++) {
+      checkResults.add((in, out) ->
+          SealArtifactsFixture.existingTestsFail(
+              out,
+              "com.example.api.LegacyCounterTest#incrementAddsTwo",
+              "com.example.api.AuditTest#logsIncrement"));
+    }
+    var outcome = (SealOutcome.Rejected) sealer.seal(item);
+
+    var expected =
+        ApprovalComments.conflictsWithExistingTests(
+            List.of("com.example.api.AuditTest", "com.example.api.LegacyCounterTest"));
+    assertRejected(outcome, SealRejection.CONFLICTS_WITH_EXISTING_TESTS, expected, 2);
+    assertThat(event("seal_rejected").data())
+        .containsEntry("reason", "conflicts_with_existing_tests");
+    assertThat(outcome.comment())
+        .doesNotContain("incrementAddsTwo")
+        .doesNotContain("logsIncrement")
+        .doesNotContain("noir.holdout");
+    assertThat(agent.requests()).hasSize(3);
+  }
+
+  @Test
   void rejectionCleansPartialFiles() {
     for (int i = 0; i < 3; i++) {
       checkResults.add((in, out) -> SealArtifactsFixture.vacuous(out));
@@ -523,6 +547,11 @@ class ApprovalSealerTest {
             "noir could not produce a hidden test suite that passes its checks after 3"
                 + " attempts:\n\n- p\n- q\n\nThis usually means a requirement is ambiguous or"
                 + " untestable as written. Revise the spec, then add `noir:ready` again.");
+    assertThat(ApprovalComments.conflictsWithExistingTests(List.of("A", "B")))
+        .isEqualTo(
+            "noir did not seal this issue: the requested change breaks existing tests that this"
+                + " spec does not allow to change: `A`, `B`. If those expectations should change,"
+                + " list their files under `## Tests to update` and add `noir:ready` again.");
     assertThat(ApprovalComments.sealed("c", "b", "s"))
         .isEqualTo("noir commitment `c` (commitmentVersion 2, base `b`, issue body sha256 `s`)");
   }

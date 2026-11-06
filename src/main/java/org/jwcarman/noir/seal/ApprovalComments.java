@@ -40,6 +40,15 @@ public final class ApprovalComments {
         + READY_AGAIN;
   }
 
+  public static String conflictsWithExistingTests(List<String> classes) {
+    return "noir did not seal this issue: the requested change breaks existing tests that this"
+        + " spec does not allow to change: "
+        + String.join(", ", classes.stream().map(c -> "`" + c + "`").toList())
+        + ". If those expectations should change, list their files under `## Tests to update`"
+        + " and "
+        + READY_AGAIN;
+  }
+
   public static String sealed(String sha, String baseSha, String bodySha) {
     return "noir commitment `"
         + sha
