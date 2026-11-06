@@ -53,4 +53,12 @@ class BuilderPromptTest {
                 + " files. noir rejects an attempt that modifies, deletes or renames any other"
                 + " existing file.");
   }
+
+  @Test
+  void systemPromptExplainsSpecProblemReports() {
+    assertThat(BuilderPrompt.system())
+        .contains("## When the spec cannot be satisfied")
+        .contains("`/work/SPEC-PROBLEMS.json`")
+        .contains("never disable, skip or weaken a test you may not change");
+  }
 }

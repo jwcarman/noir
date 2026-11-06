@@ -49,10 +49,12 @@ import org.jwcarman.noir.measure.MeasureOutcome;
 import org.jwcarman.noir.measure.MeasureRunner;
 import org.jwcarman.noir.measure.TestInventory;
 import org.jwcarman.noir.render.StubSource;
+import org.jwcarman.noir.seal.ApprovalSealer;
 import org.jwcarman.noir.seal.ApprovalSealing;
 import org.jwcarman.noir.seal.SealOutcome;
 import org.jwcarman.noir.spec.Spec;
 import org.jwcarman.noir.spec.SpecJson;
+import org.jwcarman.noir.spec.SpecProblems;
 import org.jwcarman.noir.spec.Specs;
 import org.jwcarman.noir.store.Event;
 import org.jwcarman.noir.store.Store;
@@ -248,6 +250,105 @@ class FactoryTest {
     assertThat(build.calls.get(1).commitMessage()).isEqualTo(spec.title() + " (#1), attempt 2");
     assertThat(delivery.labels)
         .containsExactly("noir:building", "noir:building", "noir:building", "noir:pr-open");
+  }
+
+  static final String R1_REPORT =
+      "{\"problems\":[{\"requirement\":\"R1\",\"explanation\":\"R1 contradicts a locked"
+          + " test.\"}]}";
+
+  @Test
+  void builderReportStopsTheItem() {
+    build.report = n -> R1_REPORT;
+    build.produces = n -> false;
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.DRAFT);
+    assertThat(build.calls).hasSize(1);
+    assertThat(gh.issue(1).labels()).containsExactly("noir:draft");
+    assertThat(gh.comments(1))
+        .containsExactly(
+            org.jwcarman.noir.seal.SpecProblemComment.render(
+                "builder",
+                new SpecProblems(
+                    List.of(
+                        new SpecProblems.Problem(
+                            "R1", List.of(), "R1 contradicts a locked test.")))));
+    assertThat(eventTypes()).containsSubsequence("build_attempt", "spec_problems", "transition");
+    assertThat(gh.pullRequests()).isEmpty();
+  }
+
+  @Test
+  void builderReportWinsOverCommits() {
+    build.report = n -> R1_REPORT;
+
+    assertThat(drive().state()).isEqualTo(State.DRAFT);
+    assertThat(measure.calls).isZero();
+    assertThat(gh.pullRequests()).isEmpty();
+  }
+
+  @Test
+  void invalidBuilderReportIsIgnored() {
+    build.report =
+        n -> n == 1 ? "{\"problems\":[{\"requirement\":\"R9\",\"explanation\":\"x\"}]}" : null;
+
+    assertThat(drive().state()).isEqualTo(State.PR_OPEN);
+    assertThat(eventTypes()).contains("spec_problems_invalid").doesNotContain("spec_problems");
+    assertThat(
+            store.readEvents(Specs.ID).stream()
+                .filter(e -> e.type().equals("spec_problems_invalid"))
+                .findFirst()
+                .orElseThrow()
+                .data())
+        .hasEntrySatisfying("reason", r -> assertThat((String) r).contains("R9"));
+  }
+
+  @Test
+  void fileReferenceWithoutBaseFileListIsInvalid() {
+    build.report =
+        n -> n == 1 ? "{\"problems\":[{\"files\":[\"pom.xml\"],\"explanation\":\"x\"}]}" : null;
+
+    assertThat(drive().state()).isEqualTo(State.PR_OPEN);
+    assertThat(eventTypes()).contains("spec_problems_invalid");
+  }
+
+  @Test
+  void fileReferenceIsCheckedAgainstTheBaseFileList() throws IOException {
+    Files.writeString(itemDir.resolve(ApprovalSealer.BASE_FILES), "pom.xml\n");
+    build.report = n -> "{\"problems\":[{\"files\":[\"pom.xml\"],\"explanation\":\"x\"}]}";
+
+    assertThat(drive().state()).isEqualTo(State.DRAFT);
+  }
+
+  @Test
+  void reportWithASecretBlocksAndPostsNothing() {
+    build.report =
+        n -> "{\"problems\":[{\"requirement\":\"R1\",\"explanation\":\"key " + SECRET + "\"}]}";
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.BLOCKED);
+    assertThat(item.blockReason()).isEqualTo(BlockReason.SECRET_FOUND);
+    assertThat(gh.comments(1)).isEmpty();
+    assertThat(store.readEvents(Specs.ID).toString()).doesNotContain(SECRET);
+  }
+
+  @Test
+  void reapprovedItemStartsOverFromTheBase() {
+    build.report = n -> n == 1 ? R1_REPORT : null;
+    var drafted = drive();
+    assertThat(drafted.state()).isEqualTo(State.DRAFT);
+
+    Transitions.applyExternal(
+        store, clock, (i, s) -> {}, drafted, new org.jwcarman.noir.lifecycle.Trigger.Approved());
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.PR_OPEN);
+    assertThat(item.attempt()).isEqualTo(1);
+    assertThat(build.calls).hasSize(2);
+    assertThat(build.calls.get(1).inputBundle()).isEqualTo(itemDir.resolve("base.bundle"));
+    assertThat(build.calls.get(1).feedback()).isEmpty();
+    assertThat(itemDir.resolve("runs/1/attempts/1")).isDirectory();
   }
 
   @Test
@@ -1012,6 +1113,9 @@ class FactoryTest {
     String model = "claude-test";
     IntFunction<AgentResult> agent = null;
 
+    /** The SPEC-PROBLEMS.json each attempt writes, or null for none. */
+    IntFunction<String> report = n -> null;
+
     @Override
     public BuildOutcome run(
         Spec spec,
@@ -1022,6 +1126,10 @@ class FactoryTest {
         Optional<String> feedback,
         Path attemptDir) {
       calls.add(new BuildCall(inputBundle, commitMessage, feedback, attemptDir));
+      var problems = report.apply(calls.size());
+      if (problems != null) {
+        write(attemptDir.resolve("SPEC-PROBLEMS.json"), problems);
+      }
       var bundle = attemptDir.resolve("out.bundle");
       write(bundle, "# v2 git bundle\nattempt " + calls.size() + "\n");
       var result =

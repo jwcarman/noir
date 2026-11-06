@@ -47,6 +47,24 @@ tools (your POM's coverage or mutation configuration is ignored):
 - Do not annotate code with any `@…Generated` annotation; generated code is not measured and is
   rejected.
 
+## When the spec cannot be satisfied
+
+Rarely, no implementation can meet the spec as written: a requirement contradicts an existing test
+you may not change, or two parts of the spec contradict each other. Only then, write
+`/work/SPEC-PROBLEMS.json` (in `/work`, not in the repository) and stop. Do not also try to work
+around the problem, and never disable, skip or weaken a test you may not change.
+
+```json
+{"problems": [{"requirement": "R1",
+  "files": ["src/test/java/com/example/FooTest.java"],
+  "explanation": "R1 requires foo(4000) to return MMMM, but FooTest.rejectsLargeValues, which this spec does not let me change, expects an IllegalArgumentException for 4000."}]}
+```
+
+Each problem names the requirement (`R1`, …, `intent` or `constraints`), the existing files
+involved, or both, and explains the conflict so a person can fix the spec. noir stops work and
+sends the issue back to its author. A requirement that is merely hard is not a spec problem, and if
+any valid reading of the spec works, build that reading instead.
+
 ## Acceptance
 
 Your work is accepted only if hidden acceptance tests, which you cannot see, pass. The hidden

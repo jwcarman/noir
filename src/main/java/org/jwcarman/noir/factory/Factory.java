@@ -46,14 +46,17 @@ import org.jwcarman.noir.measure.MeasureOutcome;
 import org.jwcarman.noir.measure.MeasureRunner;
 import org.jwcarman.noir.measure.TestInventory;
 import org.jwcarman.noir.render.SpecRenderer;
+import org.jwcarman.noir.seal.ApprovalSealer;
 import org.jwcarman.noir.seal.ApprovalSealing;
 import org.jwcarman.noir.seal.SealOutcome;
+import org.jwcarman.noir.seal.SpecProblemComment;
 import org.jwcarman.noir.seal.SuiteSealer;
 import org.jwcarman.noir.spec.ItemId;
 import org.jwcarman.noir.spec.QualityBar;
 import org.jwcarman.noir.spec.Requirement;
 import org.jwcarman.noir.spec.Spec;
 import org.jwcarman.noir.spec.SpecJson;
+import org.jwcarman.noir.spec.SpecProblems;
 import org.jwcarman.noir.store.AtomicFiles;
 import org.jwcarman.noir.store.Event;
 import org.jwcarman.noir.store.Store;
@@ -308,9 +311,47 @@ public final class Factory implements ItemDriver {
     data.put("agentError", agent.error());
     data.put("timedOut", agent.timedOut());
     event(ctx.item().id(), "build_attempt", n, data);
+    var report =
+        SpecProblems.read(
+            ctx.attempt().build().resolve(SPEC_PROBLEMS_FILE),
+            ctx.spec(),
+            ApprovalSealer.baseFiles(ctx.itemDir()));
+    switch (report) {
+      case SpecProblems.Valid v -> {
+        event(ctx.item().id(), "spec_problems", n, Map.of("problems", problemMaps(v.report())));
+        return new Step(
+            new Trigger.SpecProblemReported(),
+            null,
+            SpecProblemComment.render("builder", v.report()));
+      }
+      case SpecProblems.Invalid i ->
+          event(ctx.item().id(), "spec_problems_invalid", n, Map.of("reason", mask(i.reason())));
+      case SpecProblems.Absent a -> {}
+    }
     boolean produced = outcome.producedCommits();
     return new Step(
         new Trigger.AgentExited(produced), produced ? null : new FeedbackInput.NoOutput());
+  }
+
+  /** Where the builder writes a spec-problem report: {@code /work}, outside the repository. */
+  static final String SPEC_PROBLEMS_FILE = "SPEC-PROBLEMS.json";
+
+  private List<Map<String, Object>> problemMaps(SpecProblems report) {
+    var list = new ArrayList<Map<String, Object>>();
+    for (var p : report.problems()) {
+      var m = new LinkedHashMap<String, Object>();
+      if (p.requirement() != null) {
+        m.put("requirement", mask(p.requirement()));
+      }
+      m.put("files", p.files().stream().map(this::mask).toList());
+      m.put("explanation", mask(p.explanation()));
+      list.add(m);
+    }
+    return list;
+  }
+
+  private String mask(String text) {
+    return Secrets.mask(text, secrets);
   }
 
   /**
