@@ -4,7 +4,9 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Modifier;
+import com.github.javaparser.ast.body.AnnotationDeclaration;
 import com.github.javaparser.ast.body.BodyDeclaration;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.CompactConstructorDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.EnumDeclaration;
@@ -28,11 +30,13 @@ import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.Spec;
 
 /**
- * The Repository API section of the Examiner's prompt: the declarations and Javadoc of the
- * repository's main sources, without method bodies, field initializers, private members or
- * non-Javadoc comments. One {@code ### <path>} heading and {@code java} fence per file. Files
- * declaring a type the spec names come first, then the rest, each group by path. A file that does
- * not fit the cap is left out whole, never cut, and a final line counts the files left out.
+ * The Repository API section of the Examiner's prompt: the public declarations and Javadoc of the
+ * repository's main sources (public types and their public constructors, methods, fields and nested
+ * types; interface and annotation members are implicitly public), without method bodies, field
+ * initializers or non-Javadoc comments. A file without a public type is not shown. One {@code ###
+ * <path>} heading and {@code java} fence per file. Files declaring a type the spec names come
+ * first, then the rest, each group by path. A file that does not fit the cap is left out whole,
+ * never cut, and a final line counts the files left out.
  */
 public final class RepositoryApi {
   private static final Pattern WORD = Pattern.compile("[A-Za-z_$][A-Za-z0-9_$]*");
@@ -61,6 +65,9 @@ public final class RepositoryApi {
       }
       var cu = parsed.getResult().get();
       strip(cu);
+      if (cu.getTypes().isEmpty()) {
+        continue;
+      }
       var isNamed =
           cu.findAll(TypeDeclaration.class).stream()
               .anyMatch(t -> words.contains(t.getNameAsString()));
@@ -129,7 +136,7 @@ public final class RepositoryApi {
     return words;
   }
 
-  /** Reduces {@code cu} to its non-private declarations and Javadoc. */
+  /** Reduces {@code cu} to its public declarations and Javadoc. */
   private static void strip(CompilationUnit cu) {
     for (Comment c : cu.getAllContainedComments()) {
       if (!(c instanceof JavadocComment)) {
@@ -137,14 +144,18 @@ public final class RepositoryApi {
       }
     }
     cu.getComment().filter(c -> !(c instanceof JavadocComment)).ifPresent(c -> cu.removeComment());
-    cu.getTypes().forEach(RepositoryApi::stripType);
+    for (TypeDeclaration<?> type : new ArrayList<>(cu.getTypes())) {
+      if (type.hasModifier(Modifier.Keyword.PUBLIC)) {
+        stripType(type);
+      } else {
+        type.remove();
+      }
+    }
   }
 
   private static void stripType(TypeDeclaration<?> type) {
     for (BodyDeclaration<?> member : new ArrayList<>(type.getMembers())) {
-      if (member instanceof InitializerDeclaration
-          || (member instanceof NodeWithModifiers<?> m
-              && m.hasModifier(Modifier.Keyword.PRIVATE))) {
+      if (!isPublic(member, type)) {
         member.remove();
       } else if (member instanceof MethodDeclaration method) {
         method.removeBody();
@@ -161,5 +172,20 @@ public final class RepositoryApi {
     if (type instanceof EnumDeclaration e) {
       e.getEntries().forEach(constant -> constant.getClassBody().clear());
     }
+  }
+
+  /**
+   * Whether {@code member} of {@code owner} is public: declared so, or a non-private member of an
+   * interface or annotation (implicitly public). Initializers never are.
+   */
+  private static boolean isPublic(BodyDeclaration<?> member, TypeDeclaration<?> owner) {
+    if (member instanceof InitializerDeclaration || !(member instanceof NodeWithModifiers<?> m)) {
+      return false;
+    }
+    var implicitlyPublic =
+        owner instanceof AnnotationDeclaration
+            || (owner instanceof ClassOrInterfaceDeclaration c && c.isInterface());
+    return m.hasModifier(Modifier.Keyword.PUBLIC)
+        || (implicitlyPublic && !m.hasModifier(Modifier.Keyword.PRIVATE));
   }
 }

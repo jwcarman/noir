@@ -56,6 +56,18 @@ class RepositoryApiTest {
 
         private static final class Secret {}
 
+        int packageCount;
+
+        Counter(String name) {
+          this(0);
+        }
+
+        void packageMethod() {}
+
+        protected static final class Guarded {}
+
+        static final class Hidden {}
+
         /** A nested public type. */
         public interface Listener {
           /** Called on change. */
@@ -76,7 +88,7 @@ class RepositoryApiTest {
   }
 
   @Test
-  void stripsBodiesAndPrivateMembers() {
+  void stripsBodiesAndNonPublicMembers() {
     var api =
         RepositoryApi.render(
             Map.of(COUNTER_PATH, COUNTER), specNaming("nothing"), List.of(), 60_000);
@@ -91,7 +103,6 @@ class RepositoryApiTest {
         .contains("Creates a counter at {@code start}.")
         .contains("public Counter(int start) {")
         .contains("public void increment();")
-        .contains("protected List<Integer> history();")
         .contains("public interface Listener {")
         .contains("void changed(int count);")
         .contains("default void reset();");
@@ -101,6 +112,13 @@ class RepositoryApiTest {
         .doesNotContain("computeMax")
         .doesNotContain("private")
         .doesNotContain("Secret")
+        .doesNotContain("history")
+        .doesNotContain("protected")
+        .doesNotContain("packageCount")
+        .doesNotContain("Counter(String name)")
+        .doesNotContain("packageMethod")
+        .doesNotContain("Guarded")
+        .doesNotContain("Hidden")
         .doesNotContain("loaded")
         .doesNotContain("a line comment")
         .doesNotContain("changed(0)")
@@ -159,6 +177,23 @@ class RepositoryApiTest {
             60_000);
     assertThat(api).contains("### " + COUNTER_PATH).doesNotContain("Bad.java");
     assertThat(api).endsWith("(… 1 more files omitted)\n");
+  }
+
+  /** Package-private top-level types are not API; a file left with no type is not shown. */
+  @Test
+  void packagePrivateTopLevelTypesAreLeftOut() {
+    var sources =
+        Map.of(
+            "src/main/java/com/example/api/Internal.java",
+            "package com.example.api;\n\nfinal class Internal {\n  public void run() {}\n}\n",
+            "src/main/java/com/example/api/Mixed.java",
+            "package com.example.api;\n\npublic class Mixed {}\n\nclass Helper {}\n");
+    var api = RepositoryApi.render(sources, specNaming("nothing"), List.of(), 60_000);
+    assertThat(api)
+        .contains("public class Mixed {")
+        .doesNotContain("Helper")
+        .doesNotContain("Internal")
+        .doesNotContain("omitted");
   }
 
   @Test
