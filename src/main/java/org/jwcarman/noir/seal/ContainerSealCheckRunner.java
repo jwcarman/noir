@@ -33,6 +33,9 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
   /** Working state the script keeps in the output dir; removed afterwards. */
   static final List<String> SCRATCH = List.of("repo", "m2", "deps", "holdout-classes");
 
+  /** Written by the inventory phase, with the reason, when it lists nothing on purpose. */
+  static final String INVENTORY_EMPTY = "inventory-empty.txt";
+
   private final ContainerPort docker;
   private final NoirConfig config;
 
@@ -115,10 +118,12 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
   }
 
   /**
-   * Runs the {@code inventory} phase against the base commit alone (no stubs, no suite). Throws
-   * {@link DockerException} when the container timed out, the clone failed or the listing never
-   * finished, so the seal is retried or blocked. A listing Maven failed (a broken or multi-module
-   * pom) is an empty inventory: the seal checks reject such a repository as before.
+   * Runs the {@code inventory} phase against the base commit alone (no stubs, no suite). The
+   * inventory is empty only for a repository the seal checks reject anyway (no pom.xml at its root,
+   * or a multi-module pom), which the script marks with {@value #INVENTORY_EMPTY}. Throws {@link
+   * DockerException} when the container timed out, the clone failed, or the listing failed or never
+   * finished (Maven could not reach a repository, a dependency did not resolve), so the seal is
+   * retried or blocked rather than sealed against an empty inventory.
    */
   @Override
   public RepoInventoryFiles inventory(Path bundle, String baseSha, Path outDir) {
@@ -150,8 +155,11 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
       throw inventoryFailed("the listing never finished", artifacts, "inventory");
     }
     if (listed.get() != 0) {
-      // Maven could not list the repository's dependencies (a broken or multi-module pom): the
-      // seal checks reject that as they always have, so the inventory is just empty. Its log stays.
+      throw inventoryFailed(
+          "the listing failed (exit " + listed.get() + ")", artifacts, "inventory");
+    }
+    if (Files.isRegularFile(outDir.resolve(INVENTORY_EMPTY), LinkOption.NOFOLLOW_LINKS)) {
+      // The seal checks reject this repository as they always have: nothing is listed.
       try {
         Files.writeString(outDir.resolve(RepoInventoryFiles.LIBRARIES), "");
         Files.writeString(outDir.resolve(RepoInventoryFiles.PACKAGES), "");

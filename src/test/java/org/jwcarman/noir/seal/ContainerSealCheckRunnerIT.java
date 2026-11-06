@@ -1,6 +1,7 @@
 package org.jwcarman.noir.seal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.jwcarman.noir.build.BuildFixtures;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.DockerCli;
+import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.docker.Images;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.git.GitCli;
@@ -602,11 +604,12 @@ class ContainerSealCheckRunnerIT {
   }
 
   /**
-   * A pom whose dependencies cannot be resolved is the repository's problem: the inventory is empty
-   * (its log kept) and the seal checks go on to reject it as they always have.
+   * A pom whose dependencies cannot be resolved may be a transient Maven failure as much as the
+   * repository's problem: the inventory is an infrastructure failure (the seal is retried, then
+   * blocked), never an empty inventory.
    */
   @Test
-  void unresolvablePomGivesAnEmptyInventoryAndTheChecksReject(@TempDir Path tmp) throws Exception {
+  void unresolvablePomIsAnInfrastructureFailure(@TempDir Path tmp) throws Exception {
     var pom =
         BuildFixtures.POM_WITH_JUNIT
             .formatted("")
@@ -627,23 +630,37 @@ class ContainerSealCheckRunnerIT {
     var head = git.revParse(clone, "origin/main");
     var b = tmp.resolve("broken.bundle");
     git.bundle(clone, head, b);
-    var runner = new ContainerSealCheckRunner(docker, config);
 
     var inventoryDir = tmp.resolve("inventory");
-    var files = runner.inventory(b, head, inventoryDir);
+    assertThatThrownBy(
+            () -> new ContainerSealCheckRunner(docker, config).inventory(b, head, inventoryDir))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("listing failed");
+    assertThat(new SealArtifacts(inventoryDir).exit("inventory")).isPresent().get().isNotEqualTo(0);
+    assertThat(new SealArtifacts(inventoryDir).logTail("inventory", 80)).contains("does-not-exist");
+  }
+
+  /** A multi-module pom, which the seal checks reject, has an empty inventory. */
+  @Test
+  void inventoryOfAMultiModuleRepositoryIsEmpty(@TempDir Path tmp) throws Exception {
+    var pom =
+        BuildFixtures.POM_WITH_JUNIT
+            .formatted("<modules><module>core</module></modules>")
+            .replace(
+                "<version>1.0.0</version>",
+                "<version>1.0.0</version>\n  <packaging>pom</packaging>");
+    var origin =
+        GitFixtures.originWithFiles(
+            tmp.resolve("remotes"), "jwcarman/multi", java.util.Map.of("pom.xml", pom));
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("multi-clone"));
+    var head = git.revParse(clone, "origin/main");
+    var b = tmp.resolve("multi.bundle");
+    git.bundle(clone, head, b);
+
+    var files = new ContainerSealCheckRunner(docker, config).inventory(b, head, out);
 
     assertThat(files).isEqualTo(new RepoInventoryFiles(List.of(), List.of()));
-    assertThat(new SealArtifacts(inventoryDir).exit("inventory")).isPresent().get().isNotEqualTo(0);
-    assertThat(new SealArtifacts(inventoryDir).logTail("inventory", 40)).contains("does-not-exist");
-
-    var inputs =
-        SealInputs.of(
-            Specs.valid().withBaseSha(head),
-            b,
-            fixture("stubs"),
-            fixture("holdout-good"),
-            fixture("reference"));
-    assertThat(SealJudge.judge(runner.run(inputs, out), config.sealDiscrimination())).isNotEmpty();
+    assertThat(out.resolve("inventory-empty.txt")).content().contains("<modules>");
   }
 
   /** A one-commit repository whose test scope holds the engine fixture (a JUnit service jar). */

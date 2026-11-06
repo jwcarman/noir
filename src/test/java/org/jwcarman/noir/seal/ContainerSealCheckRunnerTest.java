@@ -172,15 +172,53 @@ class ContainerSealCheckRunnerTest {
   }
 
   /**
-   * A listing Maven could not produce (a broken or multi-module pom) is the repository's problem,
-   * which the seal checks reject later: the inventory is empty and its log kept.
+   * A repository the seal checks reject anyway (no pom at its root, or a multi-module pom) has an
+   * empty inventory: the script says why in inventory-empty.txt and lists nothing.
    */
   @Test
-  void failedListingIsAnEmptyInventory() throws Exception {
+  void repositoryTheChecksRejectHasAnEmptyInventory() throws Exception {
+    for (var reason :
+        new String[] {"no pom.xml at the repository root\n", "the pom declares <modules>\n"}) {
+      var docker =
+          new FakeContainerPort(spec -> {
+            inventoryWritten(spec);
+            var out = spec.mounts().getLast().host();
+            try {
+              Files.writeString(out.resolve("libraries.txt"), "");
+              Files.writeString(out.resolve("packages.txt"), "");
+              Files.writeString(out.resolve("inventory-empty.txt"), reason);
+            } catch (java.io.IOException e) {
+              throw new java.io.UncheckedIOException(e);
+            }
+            return new ContainerResult(0, "", "", false, "id");
+          });
+      assertThat(inventory(docker))
+          .as(reason)
+          .isEqualTo(new RepoInventoryFiles(List.of(), List.of()));
+      assertThat(tmp.resolve("inventory/inventory-empty.txt")).hasContent(reason.strip());
+    }
+  }
+
+  /** The marker wins over anything else left in the listing files. */
+  @Test
+  void emptyInventoryMarkerIgnoresStrayListings() throws Exception {
+    var docker = inventoryWith("inventory-empty.txt", "the pom declares <modules>\n", false);
+    assertThat(inventory(docker)).isEqualTo(new RepoInventoryFiles(List.of(), List.of()));
+    assertThat(tmp.resolve("inventory/libraries.txt")).isEmptyFile();
+    assertThat(tmp.resolve("inventory/packages.txt")).isEmptyFile();
+  }
+
+  /**
+   * Any other failed listing (Maven could not reach a repository, a dependency did not resolve) is
+   * an infrastructure failure: the seal is retried, then blocked, never sealed on an empty
+   * inventory.
+   */
+  @Test
+  void failedListingIsAnInfrastructureFailure() throws Exception {
     var docker = inventoryWith("inventory.exit", "1\n", false);
-    var files = inventory(docker);
-    assertThat(files).isEqualTo(new RepoInventoryFiles(List.of(), List.of()));
-    assertThat(tmp.resolve("inventory/inventory.exit")).hasContent("1");
+    assertThatThrownBy(() -> inventory(docker))
+        .isInstanceOf(DockerException.class)
+        .hasMessageContaining("listing failed");
   }
 
   @Test

@@ -7,7 +7,8 @@
 #        seal-check.sh check     (network off) holdout compile/run, reference build/runs, PIT,
 #                                              existing tests against the reference
 #        seal-check.sh inventory (network on)  the base commit's libraries and their packages:
-#                                              libraries.txt and packages.txt
+#                                              libraries.txt and packages.txt (or, for a
+#                                              repository the checks reject, inventory-empty.txt)
 # State shared between phases lives in /work/out (repo, Maven cache, dependency jars).
 #
 # Inputs (read-only mounts): /work/base.bundle, /work/stubs, for "prepare" also /work/updated-tests
@@ -84,10 +85,18 @@ drop_flagged_jars() {
 # The repository's runtime and test-scope libraries at the base commit, without the stubs:
 # libraries.txt (group:artifact:version, sorted) and packages.txt (the package of every class in
 # their jars, sorted), both without the jars a hidden-test classpath leaves out (JUnit's own and
-# those ForbiddenScan flags). A repository without a pom has neither.
+# those ForbiddenScan flags). A repository the seal checks reject anyway (no pom.xml at its root,
+# or a multi-module pom) has neither; inventory-empty.txt says why.
 inventory() {
   : >"$OUT/libraries.txt" && : >"$OUT/packages.txt" && cd "$REPO" || return 1
-  [ -f pom.xml ] || return 0
+  if [ ! -f pom.xml ]; then
+    echo "no pom.xml at the repository root" >"$OUT/inventory-empty.txt"
+    return 0
+  fi
+  if grep -q "<modules>" pom.xml; then
+    echo "the pom declares <modules>" >"$OUT/inventory-empty.txt"
+    return 0
+  fi
   local listing=/tmp/noir-dependencies.txt dropped=/tmp/noir-dropped-jars.txt scope jar
   rm -f "$listing"
   for scope in runtime test; do
