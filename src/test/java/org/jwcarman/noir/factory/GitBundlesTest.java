@@ -1,12 +1,14 @@
 package org.jwcarman.noir.factory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.jwcarman.noir.git.GitFixtures.git;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.jwcarman.noir.deliver.FileChange;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.git.GitFixtures;
 
@@ -112,6 +114,45 @@ class GitBundlesTest {
     try (var left = Files.list(tmp.resolve("scratch"))) {
       assertThat(left).isEmpty();
     }
+  }
+
+  @Test
+  void fileChangesReportsRenameWithModification() throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("origin"), "o/r");
+    var src = GitFixtures.cloneOf(origin, tmp.resolve("src"));
+    Files.writeString(src.resolve("old.txt"), "1\n2\n3\n4\n5\n6\n7\n8\n");
+    git(src, "add", ".");
+    git(src, "commit", "-q", "-m", "setup");
+    var base = git(src, "rev-parse", "HEAD").trim();
+    git(src, "checkout", "-q", "-b", "noir/1-x");
+    git(src, "mv", "old.txt", "new.txt");
+    Files.writeString(src.resolve("new.txt"), "1\n2\n3\n4\n5\n6\n7\nEIGHT\nnine\n");
+    git(src, "add", "-A");
+    git(src, "commit", "-q", "-m", "rename+edit");
+    var bundle = tmp.resolve("out.bundle");
+    git(src, "bundle", "create", "-q", bundle.toString(), "refs/heads/noir/1-x");
+
+    var changes =
+        new GitBundles(new ProcessCommandRunner(), tmp.resolve("scratch"))
+            .fileChanges(bundle, base, "noir/1-x");
+
+    assertThat(changes)
+        .containsExactly(new FileChange(FileChange.Status.RENAMED, "new.txt", "old.txt", 2, 1));
+  }
+
+  @Test
+  void fileChangesTruncatedDiffThrows() throws Exception {
+    var bundle = tmp.resolve("fake.bundle");
+    Files.writeString(bundle, "# v2 git bundle\n");
+    org.jwcarman.noir.exec.CommandRunner runner =
+        cmd -> {
+          var truncated = cmd.argv().contains("diff");
+          return new org.jwcarman.noir.exec.CommandResult(0, "", "", false, truncated);
+        };
+    assertThatThrownBy(
+            () -> new GitBundles(runner, tmp.resolve("scratch")).fileChanges(bundle, "a", "b"))
+        .isInstanceOf(org.jwcarman.noir.git.GitException.class)
+        .hasMessageContaining("truncated");
   }
 
   @Test

@@ -2,6 +2,7 @@ package org.jwcarman.noir.factory;
 
 import java.nio.file.Path;
 import java.util.List;
+import org.jwcarman.noir.deliver.FileChange;
 
 /** Reads an attempt's git bundle (never the builder's repository). */
 public interface Bundles {

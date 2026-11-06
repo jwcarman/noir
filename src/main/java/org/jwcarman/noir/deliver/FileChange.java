@@ -1,4 +1,4 @@
-package org.jwcarman.noir.factory;
+package org.jwcarman.noir.deliver;
 
 /**
  * One file changed by an attempt. {@code oldPath} is null unless the status is {@code RENAMED};

@@ -75,14 +75,29 @@ public final class GitCli implements GitPort {
 
   @Override
   public Optional<String> show(Path repoDir, String rev, String path) {
+    var env = java.util.Map.of("GIT_TERMINAL_PROMPT", "0", "LC_ALL", "C");
+    var resolved =
+        runner.run(
+            Command.of(
+                    List.of("git", "-C", repoDir.toString(), "cat-file", "-e", rev + "^{commit}"))
+                .withEnv(env));
+    if (!resolved.ok()) {
+      throw new GitException("git show failed: cannot resolve " + rev + ": " + resolved.tail(20));
+    }
     var result =
         runner.run(
             Command.of(List.of("git", "-C", repoDir.toString(), "show", rev + ":" + path))
-                .withEnv(java.util.Map.of("GIT_TERMINAL_PROMPT", "0")));
+                .withEnv(env));
     if (result.ok()) {
+      if (result.truncated()) {
+        throw new GitException("git show output for " + path + " was truncated");
+      }
       return Optional.of(result.stdout());
     }
-    if (result.exitCode() == 128 && !result.timedOut()) {
+    if (result.exitCode() == 128
+        && !result.timedOut()
+        && (result.stderr().contains("does not exist in")
+            || result.stderr().contains("exists on disk, but not in"))) {
       return Optional.empty();
     }
     throw new GitException("git show failed: " + result.tail(20));

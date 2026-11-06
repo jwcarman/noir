@@ -3,6 +3,7 @@ package org.jwcarman.noir.factory;
 import java.nio.file.Path;
 import java.util.List;
 import org.jwcarman.noir.deliver.BundleRepo;
+import org.jwcarman.noir.deliver.FileChange;
 import org.jwcarman.noir.exec.CommandRunner;
 
 /** {@link Bundles} backed by a fresh noir-owned bare repository per read ({@link BundleRepo}). */

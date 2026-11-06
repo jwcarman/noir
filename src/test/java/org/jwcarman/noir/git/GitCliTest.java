@@ -73,6 +73,34 @@ class GitCliTest {
   }
 
   @Test
+  void showBogusRevisionThrows(@TempDir Path tmp) throws Exception {
+    var origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), "jwcarman/demo");
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("clone"));
+    assertThatThrownBy(() -> gitPort.show(clone, "no-such-rev", "README.md"))
+        .isInstanceOf(GitException.class);
+  }
+
+  @Test
+  void showNotARepoThrows(@TempDir Path tmp) {
+    assertThatThrownBy(() -> gitPort.show(tmp, "HEAD", "a.txt")).isInstanceOf(GitException.class);
+  }
+
+  @Test
+  void showTruncatedOutputThrows() {
+    var runner =
+        new org.jwcarman.noir.exec.FakeCommandRunner()
+            .whenArgvStartsWith(
+                java.util.List.of("git", "-C", "/r", "cat-file"),
+                new org.jwcarman.noir.exec.CommandResult(0, "", "", false, false))
+            .whenArgvStartsWith(
+                java.util.List.of("git", "-C", "/r", "show"),
+                new org.jwcarman.noir.exec.CommandResult(0, "tail", "", false, true));
+    assertThatThrownBy(() -> new GitCli(runner).show(Path.of("/r"), "HEAD", "a"))
+        .isInstanceOf(GitException.class)
+        .hasMessageContaining("truncated");
+  }
+
+  @Test
   void neverPromptsForCredentials() {
     var runner =
         new org.jwcarman.noir.exec.FakeCommandRunner()
