@@ -91,7 +91,12 @@ public final class PullRequestBody {
         .append('\n');
     sb.append("- Builder image: `").append(line(p.builderImageId())).append("`\n");
     sb.append("- Grader image: `").append(line(p.graderImageId())).append("`\n");
-    sb.append("- Cost: ").append(cost(p.builderCostUsd(), p.examinerCostUsd())).append('\n');
+    sb.append("- Cost: ")
+        .append(
+            hiddenTests
+                ? cost(p.builderCostUsd(), p.examinerCostUsd())
+                : builderOnlyCost(p.builderCostUsd()))
+        .append('\n');
     return sb.toString();
   }
 
@@ -134,6 +139,12 @@ public final class PullRequestBody {
         : "+" + f.added() + " \u2212" + f.deleted();
   }
 
+  private static String builderOnlyCost(BigDecimal builder) {
+    return builder == null
+        ? "unknown"
+        : money(builder) + " (builder only; as reported by Claude Code)";
+  }
+
   private static String cost(BigDecimal builder, BigDecimal examiner) {
     if (builder == null && examiner == null) {
       return "unknown";
@@ -155,10 +166,16 @@ public final class PullRequestBody {
 
   /** The issue comment when the item failed and no attempt has commits worth a draft PR. */
   public static String failureComment(int attempts, List<RequirementResult> results) {
+    return failureComment(attempts, results, true);
+  }
+
+  /** {@code hiddenTests} is false when the item was sealed without a hidden test suite. */
+  public static String failureComment(
+      int attempts, List<RequirementResult> results, boolean hiddenTests) {
     var sb = new StringBuilder(shortfall(attempts));
     sb.append(" No attempt produced commits that could be delivered, so no pull request was")
         .append(" opened.\n\n");
-    results(sb, results, true);
+    results(sb, results, hiddenTests);
     return sb.toString();
   }
 

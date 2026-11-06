@@ -72,7 +72,9 @@ final class AuditCommand implements Callable<Integer> {
         return 1;
       }
       var itemDir = store.itemDir(itemId);
-      if (!java.nio.file.Files.isDirectory(itemDir.resolve("holdout"))) {
+      var commitmentFile = itemDir.resolve("commitment.json");
+      if (java.nio.file.Files.isRegularFile(commitmentFile)
+          && org.jwcarman.noir.commit.Commitments.read(commitmentFile).files().isEmpty()) {
         err.println(itemId + " has no hidden tests: it was sealed with hidden tests off");
         return 1;
       }

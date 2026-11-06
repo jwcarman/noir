@@ -9,10 +9,10 @@ import java.util.List;
 import java.util.Optional;
 import org.jwcarman.noir.spec.QualityBar;
 
-/** noir configuration, loaded from {@code ~/.noir/config.yaml} (spec §9.2). */
 /**
- * {@code hiddenTests}: whether every item gets a sealed hidden test suite; off by default (an issue
- * can still opt in with the {@code noir:hidden-tests} label).
+ * noir configuration, loaded from {@code ~/.noir/config.yaml} (spec §9.2). {@code hiddenTests}:
+ * whether every item gets a sealed hidden test suite; off by default (an issue can still opt in
+ * with the {@code noir:hidden-tests} label).
  */
 public record NoirConfig(
     List<String> repos,

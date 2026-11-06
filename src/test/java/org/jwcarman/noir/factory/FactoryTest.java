@@ -148,7 +148,8 @@ class FactoryTest {
             "### Hidden tests\n\nOff for this item (enable with the noir:hidden-tests label or"
                 + " hiddenTests: true).\n")
         .doesNotContain("### Holdout results")
-        .contains("Examiner model: none");
+        .contains("Examiner model: none")
+        .contains("- Cost: $1.25 (builder only; as reported by Claude Code)");
   }
 
   static void deleteTree(Path root) throws IOException {

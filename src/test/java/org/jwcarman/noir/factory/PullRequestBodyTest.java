@@ -185,4 +185,11 @@ class PullRequestBodyTest {
         PullRequestBody.render(1, Optional.empty(), RESULTS, PROV, List.of(), List.of(), false);
     assertThat(body).doesNotContain("### Files");
   }
+
+  @Test
+  void failureCommentWithoutHiddenTestsSaysSo() {
+    assertThat(PullRequestBody.failureComment(3, List.of(), false))
+        .contains("### Hidden tests\n\nOff for this item")
+        .doesNotContain("Holdout results");
+  }
 }

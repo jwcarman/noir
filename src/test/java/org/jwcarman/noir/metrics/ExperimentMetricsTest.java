@@ -76,6 +76,17 @@ class ExperimentMetricsTest {
     assertThat(r.byState()).containsEntry(State.PR_OPEN, 3);
   }
 
+  /** With hidden tests off, attempt 1's grade is "skipped" after measurement passed: a pass. */
+  @Test
+  void skippedGradeOnAttemptOneIsAFirstPass() {
+    var r =
+        ExperimentMetrics.compute(
+            List.of(
+                item("a", State.PR_OPEN, 0, grade("a", 1, "skipped")),
+                item("b", State.PR_OPEN, 0, grade("b", 1, "passed"))));
+    assertThat(r.firstPassRate()).isEqualTo(1.0);
+  }
+
   @Test
   void cancelledBeforeGradeIsExcludedFromFirstPass() {
     var r =

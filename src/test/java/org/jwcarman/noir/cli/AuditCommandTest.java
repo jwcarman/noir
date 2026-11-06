@@ -63,6 +63,9 @@ class AuditCommandTest {
         java.nio.file.Files.delete(p);
       }
     }
+    org.jwcarman.noir.commit.Commitments.write(
+        org.jwcarman.noir.commit.Commitments.create(Specs.valid(), store.itemDir(ID), null, "body"),
+        store.itemDir(ID).resolve("commitment.json"));
     assertThat(run("audit", ID)).isEqualTo(1);
     assertThat(err.toString())
         .contains(ID + " has no hidden tests: it was sealed with hidden tests off");

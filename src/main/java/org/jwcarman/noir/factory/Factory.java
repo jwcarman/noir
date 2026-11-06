@@ -580,7 +580,11 @@ public final class Factory implements ItemDriver {
         return;
       }
     }
-    var comment = PullRequestBody.failureComment(next.attempt(), latestResults(events, null));
+    var comment =
+        PullRequestBody.failureComment(
+            next.attempt(),
+            latestResults(events, null),
+            !Commitments.read(ctx.itemDir().resolve("commitment.json")).files().isEmpty());
     guard("comment", comment);
     retry.run(() -> delivery.comment(next, comment));
     event(next.id(), "delivered", next.attempt(), Map.of("comment", true));

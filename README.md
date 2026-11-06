@@ -15,7 +15,7 @@ seals and builds the spec in that issue. The **desktop** only writes specs
 
 ## How it works
 
-<p align="center"><img src="docs/how-it-works.svg" alt="noir pipeline: you write and approve a spec; the server seals hidden tests, builds, measures and grades with no human in the loop, then opens a pull request" width="100%"></p>
+<p align="center"><img src="docs/how-it-works.svg" alt="noir pipeline: you write and approve a spec; the server seals it (optionally with hidden tests), builds and measures it, grades it when hidden tests are on, with no human in the loop, then opens a pull request" width="100%"></p>
 
 1. **Spec.** A work item is a GitHub issue whose body is the spec: `## Intent`,
    `## API contract` (the public API stubs), numbered `## Requirements`
@@ -30,10 +30,11 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    change only the files the spec lists (modify targets and tests to update)
    plus new files; any other change (including deleting or renaming an allowed
    file) is a violation and sends the attempt back as a contract-violation
-   rework. In modified files only the changed lines are measured. If the
-   change breaks existing tests that are not listed, sealing is rejected with
-   `conflicts_with_existing_tests`; list those tests under
-   `## Tests to update` and add `noir:ready` again. Check a spec against
+   rework. In modified files only the changed lines are measured. List under
+   `## Tests to update` every existing test the change will break: with hidden
+   tests on, sealing rejects a spec that breaks an unlisted test
+   (`conflicts_with_existing_tests`); with them off, nothing checks this
+   before the build, and the build fails because it may not change that test. Check a spec against
    a local clone with `noir spec check <file> --title <t> --repo .`.
 2. **Approve.** A human reviews the issue and adds `noir:ready`. Only humans
    add that label; it is the approval.

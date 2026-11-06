@@ -20,6 +20,8 @@ import org.jwcarman.noir.store.Event;
 
 /** Folds item event logs into experiment metrics. Pure: no I/O. */
 public final class ExperimentMetrics {
+  private static final java.util.Set<Object> PASSED_GRADES = java.util.Set.of("passed", "skipped");
+
   static final int REQUIRED_COMPLETED = 20;
   static final double REQUIRED_RATE = 0.90;
 
@@ -55,6 +57,7 @@ public final class ExperimentMetrics {
       }
 
       // First pass counts items graded on attempt 1, plus FAILED items (failed before any grade).
+      // A "skipped" grade (hidden tests off) follows a passed measurement, so it is a pass.
       boolean firstGrade =
           events.stream().anyMatch(e -> e.type().equals("grade") && e.attempt() == 1);
       if (firstGrade || state == State.FAILED) {
@@ -64,7 +67,7 @@ public final class ExperimentMetrics {
                 .anyMatch(e ->
                     e.type().equals("grade")
                         && e.attempt() == 1
-                        && "passed".equals(e.data().get("result")));
+                        && PASSED_GRADES.contains(e.data().get("result")));
         if (passed) {
           firstPassed++;
         }
