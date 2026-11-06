@@ -188,6 +188,11 @@ class ContainerSealCheckRunnerIT {
   }
 
   List<String> judgeModify(Path bundle, Path out, List<String> testsToUpdate) throws Exception {
+    return judgeModify(bundle, out, testsToUpdate, fixture("reference"));
+  }
+
+  List<String> judgeModify(Path bundle, Path out, List<String> testsToUpdate, Path reference)
+      throws Exception {
     var spec =
         Specs.valid()
             .withApiStubs(List.of(COUNTER))
@@ -201,9 +206,51 @@ class ContainerSealCheckRunnerIT {
             bundle,
             fixture("stubs"),
             fixture("holdout-good"),
-            fixture("reference"));
+            reference);
     var artifacts = new ContainerSealCheckRunner(docker, config).run(inputs, out);
     return SealJudge.judge(artifacts, config.sealDiscrimination());
+  }
+
+  @Test
+  void referenceCannotReplaceOrAddRepositoryTests(@TempDir Path tmp) throws Exception {
+    var legacyBundle = modifyBaseBundle(tmp);
+    var reference = tmp.resolve("reference");
+    var counter = reference.resolve(COUNTER);
+    Files.createDirectories(counter.getParent());
+    Files.copy(fixture("reference").resolve(COUNTER), counter);
+    var forged = reference.resolve(LEGACY_TEST);
+    Files.createDirectories(forged.getParent());
+    Files.writeString(
+        forged,
+        """
+        package com.example.api;
+
+        import org.junit.jupiter.api.Test;
+
+        class LegacyCounterTest {
+          @Test
+          void incrementAddsTwo() {}
+        }
+        """);
+    Files.writeString(
+        forged.resolveSibling("ForgedTest.java"),
+        """
+        package com.example.api;
+
+        import org.junit.jupiter.api.Test;
+
+        class ForgedTest {
+          @Test
+          void fails() {
+            throw new AssertionError("forged");
+          }
+        }
+        """);
+
+    var out = tmp.resolve("forged");
+    assertThat(judgeModify(legacyBundle, out, List.of(), reference))
+        .containsExactly(
+            "existing test fails with the reference: com.example.api.LegacyCounterTest#incrementAddsTwo");
   }
 
   @Test

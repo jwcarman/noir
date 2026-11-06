@@ -20,8 +20,8 @@ public final class SealProblems {
   static final String REF_FAILED = "the reference implementation failed the hidden tests";
   static final String MUTATION = "mutation score below the required threshold";
   static final String EXISTING_FAILED = "existing tests fail with the reference implementation: ";
-  static final String EXISTING_COMPILE =
-      "the existing tests do not compile with the reference implementation";
+  static final String EXISTING_COULD_NOT_RUN =
+      "the existing tests could not run with the reference implementation";
   static final String STRUCTURE = "the hidden tests did not meet noir's structural rules";
   static final String INCOMPLETE = "a seal check did not complete";
   static final String OTHER = "other check failures";
@@ -52,7 +52,7 @@ public final class SealProblems {
     REF_FAILED,
     MUTATION,
     EXISTING_FAILED,
-    EXISTING_COMPILE,
+    EXISTING_COULD_NOT_RUN,
     STRUCTURE,
     INCOMPLETE,
     OTHER
@@ -96,7 +96,7 @@ public final class SealProblems {
             case REF_FAILED -> REF_FAILED;
             case MUTATION -> MUTATION;
             case EXISTING_FAILED -> EXISTING_FAILED + codeList(existing);
-            case EXISTING_COMPILE -> EXISTING_COMPILE;
+            case EXISTING_COULD_NOT_RUN -> EXISTING_COULD_NOT_RUN;
             case STRUCTURE -> STRUCTURE;
             case INCOMPLETE -> INCOMPLETE;
             case OTHER, PASSTHROUGH -> OTHER;
@@ -127,8 +127,8 @@ public final class SealProblems {
     if (existingTestClass(p).isPresent()) {
       return Kind.EXISTING_FAILED;
     }
-    if (p.startsWith(SealJudge.EXISTING_TESTS_DO_NOT_COMPILE + ":")) {
-      return Kind.EXISTING_COMPILE;
+    if (p.startsWith(SealJudge.EXISTING_TESTS_COULD_NOT_RUN + ":")) {
+      return Kind.EXISTING_COULD_NOT_RUN;
     }
     if (p.startsWith("API stubs do not compile")) {
       return Kind.STUBS;

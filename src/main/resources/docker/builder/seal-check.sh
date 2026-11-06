@@ -80,6 +80,15 @@ ref_build() {
     && mvn -B -o -Dmaven.repo.local="$M2" -DskipTests compile
 }
 
+# Restores src/test to the base commit: the stubs and the reference are overlaid on the whole
+# repository, and must not replace, add or remove the repository's own tests.
+restore_tests() {
+  if git -C "$REPO" cat-file -e "$BASE_SHA:src/test" 2>/dev/null; then
+    git -C "$REPO" checkout -q "$BASE_SHA" -- src/test || return 1
+  fi
+  git -C "$REPO" clean -fdxq -- src/test
+}
+
 # Deletes the EXCLUDE_TESTS files (the spec's tests to update) from the repository.
 exclude_tests() {
   local path
@@ -97,17 +106,20 @@ exclude_tests() {
 # provider only when it finds test classes to run (-DskipTests, or a class filter matching
 # nothing, skips that), so it runs every test class here with a method filter matching nothing.
 test_deps() {
+  restore_tests || return 1
   exclude_tests
   cd "$REPO" && mvn -B -Dmaven.repo.local="$M2" test \
     '-Dtest=*#noirResolveProvidersOnly' -Dsurefire.failIfNoSpecifiedTests=false
 }
 
-# The repository's own tests with the reference in place, minus the tests to update.
+# The repository's own tests (as of the base commit) with the reference in place, minus the
+# tests to update. A test fork still running after 600 seconds is killed.
 existing_tests() {
+  restore_tests || return 1
   exclude_tests
   cd "$REPO" || return 1
   rm -rf target/surefire-reports
-  mvn -B -o -Dmaven.repo.local="$M2" test
+  mvn -B -o -Dmaven.repo.local="$M2" -Dsurefire.timeout=600 test
   local rc=$?
   if [ -d target/surefire-reports ]; then
     cp -R target/surefire-reports "$OUT/existing-tests"

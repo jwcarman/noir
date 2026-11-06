@@ -171,9 +171,9 @@ class SealProblemsTest {
   }
 
   @Test
-  void existingTestCompileFailureIsAFixedPhrase() {
-    assertThat(summary("existing tests do not compile with the reference:\n[ERROR] Secret.java"))
-        .containsExactly("the existing tests do not compile with the reference implementation");
+  void existingTestsThatCouldNotRunIsAFixedPhrase() {
+    assertThat(summary("existing tests could not run with the reference:\n[ERROR] Secret.java"))
+        .containsExactly("the existing tests could not run with the reference implementation");
   }
 
   @Test

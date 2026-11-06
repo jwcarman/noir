@@ -318,7 +318,7 @@ class SuiteSealerTest {
   }
 
   @Test
-  void existingTestsThatDoNotCompileAreNotAConflict() {
+  void existingTestsThatCouldNotRunAreNotAConflict() {
     for (int i = 0; i < 3; i++) {
       checkResults.add((in, out) -> {
         SealArtifactsFixture.good(out);
@@ -331,7 +331,7 @@ class SuiteSealerTest {
     assertThat(e.problems())
         .singleElement()
         .asString()
-        .startsWith("existing tests do not compile with the reference:");
+        .startsWith("existing tests could not run with the reference:");
     assertThat(e.conflictingTests()).isEmpty();
   }
 

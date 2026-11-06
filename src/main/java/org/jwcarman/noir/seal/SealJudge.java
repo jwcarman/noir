@@ -19,8 +19,9 @@ public final class SealJudge {
   /** Prefix of the check-4 problem: {@code <prefix><ClassName>#<method>}. */
   public static final String EXISTING_TEST_FAILS = "existing test fails with the reference: ";
 
-  static final String EXISTING_TESTS_DO_NOT_COMPILE =
-      "existing tests do not compile with the reference";
+  /** Check 4 could not run: a build, dependency or fork failure with no failed test. */
+  static final String EXISTING_TESTS_COULD_NOT_RUN =
+      "existing tests could not run with the reference";
 
   private SealJudge() {}
 
@@ -92,7 +93,7 @@ public final class SealJudge {
       }
     }
     if (!failed && a.exit(step).orElseThrow() != 0) {
-      problems.add(EXISTING_TESTS_DO_NOT_COMPILE + ":\n" + a.logTail(step, TAIL));
+      problems.add(EXISTING_TESTS_COULD_NOT_RUN + ":\n" + a.logTail(step, TAIL));
     }
   }
 

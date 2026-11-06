@@ -229,13 +229,24 @@ class SealJudgeTest {
   }
 
   @Test
-  void existingTestsThatDoNotCompileAreNotAConflict() {
+  void existingTestsThatCouldNotRunAreNotAConflict() {
     exit("existing-tests", 1);
     log("existing-tests", "[ERROR] LegacyCounterTest.java: cannot find symbol");
     assertThat(judge())
         .containsExactly(
-            "existing tests do not compile with the reference:\n"
+            "existing tests could not run with the reference:\n"
                 + "[ERROR] LegacyCounterTest.java: cannot find symbol");
+  }
+
+  @Test
+  void failedTestDependencyDownloadIsNeutralNotAConflict() {
+    exit("test-deps", 1);
+    exit("existing-tests", 1);
+    log("existing-tests", "[ERROR] Cannot access central in offline mode");
+    assertThat(judge())
+        .containsExactly(
+            "existing tests could not run with the reference:\n"
+                + "[ERROR] Cannot access central in offline mode");
   }
 
   @Test
