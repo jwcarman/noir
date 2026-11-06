@@ -298,6 +298,31 @@ class SuiteSealerTest {
   }
 
   @Test
+  void referenceMayWriteListedTestPaths() {
+    var helper = "src/test/java/com/example/api/Counters.java";
+    var reference = tmp.resolve("ref-listed");
+    write(reference.resolve(helper), "package com.example.api;\nfinal class Counters {}\n");
+    var withListed = spec.withTestsToUpdate(List.of(helper));
+
+    assertThat(SuiteSealer.strayReferenceFiles(withListed, reference)).isEmpty();
+  }
+
+  @Test
+  void referenceMayNotWriteOtherTestPaths() {
+    var listed = "src/test/java/com/example/api/Counters.java";
+    var other = "src/test/java/com/example/api/Other.java";
+    var reference = tmp.resolve("ref-other");
+    write(reference.resolve(listed), "package com.example.api;\nfinal class Counters {}\n");
+    write(reference.resolve(other), "package com.example.api;\nclass Other {}\n");
+    var withListed = spec.withTestsToUpdate(List.of(listed));
+
+    assertThat(SuiteSealer.strayReferenceFiles(withListed, reference))
+        .containsExactly(SuiteSealer.STRAY_REFERENCE + other);
+    assertThat(SuiteSealer.strayReferenceFiles(spec.withTestsToUpdate(List.of()), reference))
+        .containsExactly(SuiteSealer.STRAY_REFERENCE + listed, SuiteSealer.STRAY_REFERENCE + other);
+  }
+
+  @Test
   void referenceFileOutsideTheStubPathsIsFedBackWithoutRunningChecks() {
     var strays = new ArrayDeque<>(List.of("src/main/java/com/example/api/Helper.java"));
     var a =

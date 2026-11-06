@@ -60,15 +60,19 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
             "EXCLUDE_TESTS", String.join(",", in.spec().testsToUpdate()));
     var log = new StringBuilder();
 
+    var updatedTests = stageUpdatedTests(in);
     var prepareMounts =
         List.of(
             Mount.ro(in.bundle(), "/work/base.bundle"),
             Mount.ro(in.stubsDir(), "/work/stubs"),
+            Mount.ro(updatedTests, "/work/updated-tests"),
             Mount.rw(outDir, "/work/out"));
     var prepare = docker.run(spec("prepare", prepareMounts, env, true));
     record(log, "prepare", prepare);
+    deleteRecursively(updatedTests);
 
     var checkMounts = new ArrayList<>(prepareMounts);
+    checkMounts.removeIf(m -> m.container().equals("/work/updated-tests"));
     checkMounts.add(Mount.ro(in.holdoutDir(), "/work/holdout"));
     checkMounts.add(Mount.ro(in.referenceDir(), "/work/reference"));
     var check = docker.run(spec("check", checkMounts, env, false));
@@ -81,6 +85,33 @@ public final class ContainerSealCheckRunner implements SealCheckRunner {
     }
     SCRATCH.forEach(d -> deleteRecursively(outDir.resolve(d)));
     return new SealArtifacts(outDir);
+  }
+
+  /**
+   * Only the reference's updated versions of the spec's tests to update, in a scratch directory:
+   * the online prepare phase compiles them with the repository's tests, but never sees the rest of
+   * the reference.
+   */
+  private static Path stageUpdatedTests(SealInputs in) {
+    try {
+      var staged = Files.createTempDirectory("noir-updated-tests");
+      for (var path : in.spec().testsToUpdate()) {
+        var source = in.referenceDir().resolve(path).normalize();
+        if (path.isEmpty()
+            || path.startsWith("/")
+            || path.contains("..")
+            || !source.startsWith(in.referenceDir())
+            || !Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
+          continue;
+        }
+        var target = staged.resolve(path);
+        Files.createDirectories(target.getParent());
+        Files.copy(source, target);
+      }
+      return staged;
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   /**

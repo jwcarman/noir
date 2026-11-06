@@ -184,9 +184,13 @@ public final class SuiteSealer {
     return SealJudge.judge(artifacts, config.sealDiscrimination(), changedLines);
   }
 
-  /** A problem for each reference {@code .java} file whose path is not one of the API stubs. */
+  /**
+   * A problem for each reference {@code .java} file whose path is neither an API stub nor one of
+   * the spec's tests to update (the Examiner's updated versions of those).
+   */
   static List<String> strayReferenceFiles(Spec spec, Path referenceDir) {
-    var allowed = Set.copyOf(spec.apiStubs());
+    var allowed = new HashSet<>(spec.apiStubs());
+    allowed.addAll(spec.testsToUpdate());
     var problems = new ArrayList<String>();
     try (var paths = Files.walk(referenceDir)) {
       for (var p : paths.filter(Files::isRegularFile).sorted().toList()) {

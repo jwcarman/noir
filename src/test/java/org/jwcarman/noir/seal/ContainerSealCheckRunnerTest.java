@@ -42,7 +42,8 @@ class ContainerSealCheckRunnerTest {
     assertThat(prepare.network()).isTrue();
     assertThat(prepare.mounts())
         .extracting(Mount::container)
-        .doesNotContain("/work/holdout", "/work/reference");
+        .doesNotContain("/work/holdout", "/work/reference")
+        .contains("/work/updated-tests");
     assertThat(check.command()).containsExactly("/opt/noir/bin/seal-check.sh", "check");
     assertThat(check.network()).isFalse();
     assertThat(check.mounts())

@@ -88,33 +88,36 @@ class ContainerSealCheckRunnerIT {
   /** A test helper, not a test class, that another existing test uses. */
   static final String HELPER = "src/test/java/com/example/api/Counters.java";
 
+  private static String modifyPom() {
+    return """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <project xmlns="http://maven.apache.org/POM/4.0.0">
+      <modelVersion>4.0.0</modelVersion>
+      <groupId>com.example</groupId>
+      <artifactId>demo</artifactId>
+      <version>1.0.0</version>
+      <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+      </properties>
+      <dependencies>
+        <dependency>
+          <groupId>org.junit.jupiter</groupId>
+          <artifactId>junit-jupiter</artifactId>
+          <version>5.11.4</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </project>
+    """;
+  }
+
   /**
    * A base whose {@code Counter} counts by two, with a test pinning that (which the reference,
    * counting by one, breaks) and a test the reference keeps passing.
    */
   static Path modifyBaseBundle(Path tmp) {
-    var pom =
-        """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <project xmlns="http://maven.apache.org/POM/4.0.0">
-          <modelVersion>4.0.0</modelVersion>
-          <groupId>com.example</groupId>
-          <artifactId>demo</artifactId>
-          <version>1.0.0</version>
-          <properties>
-            <maven.compiler.release>21</maven.compiler.release>
-            <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-          </properties>
-          <dependencies>
-            <dependency>
-              <groupId>org.junit.jupiter</groupId>
-              <artifactId>junit-jupiter</artifactId>
-              <version>5.11.4</version>
-              <scope>test</scope>
-            </dependency>
-          </dependencies>
-        </project>
-        """;
+    var pom = modifyPom();
     var counter =
         """
         package com.example.api;
@@ -209,6 +212,12 @@ class ContainerSealCheckRunnerIT {
 
   List<String> judgeModify(Path bundle, Path out, List<String> testsToUpdate, Path reference)
       throws Exception {
+    return judgeModify(bundle, out, testsToUpdate, reference, fixture("stubs"));
+  }
+
+  List<String> judgeModify(
+      Path bundle, Path out, List<String> testsToUpdate, Path reference, Path stubs)
+      throws Exception {
     var spec =
         Specs.valid()
             .withApiStubs(List.of(COUNTER))
@@ -220,7 +229,7 @@ class ContainerSealCheckRunnerIT {
         SealInputs.of(
             spec.withBaseSha(git.revParse(clone, "origin/main")),
             bundle,
-            fixture("stubs"),
+            stubs,
             fixture("holdout-good"),
             reference);
     var artifacts = new ContainerSealCheckRunner(docker, config).run(inputs, out);
@@ -301,6 +310,172 @@ class ContainerSealCheckRunnerIT {
     assertThat(listed.resolve("existing-tests/TEST-com.example.api.CounterBasicsTest.xml"))
         .exists();
     assertThat(listed.resolve("existing-tests/TEST-com.example.api.LegacyCounterTest.xml"))
+        .doesNotExist();
+  }
+
+  static final String SINK_FAKE = "src/test/java/com/example/api/RecordingSink.java";
+
+  private static final String SINK_COUNTER =
+      """
+      package com.example.api;
+
+      /** A counter that starts at zero. */
+      public class Counter {
+        /** Receives each new count. */
+        public interface Sink {
+          /** Called with the new count. */
+          void accept(int count);
+          %s
+        }
+
+        private int count;
+
+        /** Adds one to the count. */
+        public void increment() {
+          count++;
+        }
+
+        /** Returns the current count. */
+        public int get() {
+          return count;
+        }
+
+        /** Sets the count back to zero. */
+        public void reset() {
+          count = 0;
+        }
+      }
+      """;
+
+  private static final String SINK_FAKE_SOURCE =
+      """
+      package com.example.api;
+
+      final class RecordingSink implements Counter.Sink {
+        int last = -1;
+
+        @Override
+        public void accept(int count) {
+          last = count;
+        }
+        %s
+      }
+      """;
+
+  /** A base whose {@code Counter.Sink} has one method, a test fake of it and a test using it. */
+  static Path sinkBaseBundle(Path tmp) {
+    var sinkTest =
+        """
+        package com.example.api;
+
+        import static org.junit.jupiter.api.Assertions.assertEquals;
+
+        import org.junit.jupiter.api.Test;
+
+        class SinkTest {
+          @Test
+          void fakeRecordsCounts() {
+            var sink = new RecordingSink();
+            sink.accept(3);
+            assertEquals(3, sink.last);
+          }
+        }
+        """;
+    var origin =
+        GitFixtures.originWithFiles(
+            tmp.resolve("remotes"),
+            "jwcarman/sink",
+            java.util.Map.of(
+                "pom.xml",
+                modifyPom(),
+                COUNTER,
+                SINK_COUNTER.formatted(""),
+                SINK_FAKE,
+                SINK_FAKE_SOURCE.formatted(""),
+                "src/test/java/com/example/api/SinkTest.java",
+                sinkTest));
+    var clone = GitFixtures.cloneOf(origin, tmp.resolve("legacy-clone"));
+    var b = tmp.resolve("legacy.bundle");
+    git.bundle(clone, git.revParse(clone, "origin/main"), b);
+    return b;
+  }
+
+  /** The API stubs: {@code Counter} as the reference shapes it, {@code Sink.close()} included. */
+  private static Path sinkStubs(Path tmp) throws Exception {
+    var stubs = tmp.resolve("sink-stubs");
+    Files.createDirectories(stubs.resolve(COUNTER).getParent());
+    var stub = Files.readString(fixture("stubs").resolve(COUNTER));
+    Files.writeString(
+        stubs.resolve(COUNTER),
+        stub.replace(
+            "public class Counter {",
+            "public class Counter {\n  /** Receives each new count. */\n"
+                + "  public interface Sink {\n    /** Called with the new count. */\n"
+                + "    void accept(int count);\n\n    void close();\n  }\n"));
+    return stubs;
+  }
+
+  /** A reference whose {@code Counter.Sink} gains an abstract method, with the fake updated. */
+  private static Path sinkReference(Path tmp, boolean updateFake) throws Exception {
+    var reference = tmp.resolve("sink-reference");
+    Files.createDirectories(reference.resolve(COUNTER).getParent());
+    Files.writeString(reference.resolve(COUNTER), SINK_COUNTER.formatted("void close();"));
+    if (updateFake) {
+      Files.createDirectories(reference.resolve(SINK_FAKE).getParent());
+      Files.writeString(
+          reference.resolve(SINK_FAKE),
+          SINK_FAKE_SOURCE.formatted("@Override\n  public void close() {}"));
+    }
+    return reference;
+  }
+
+  /** The Examiner's updated fake is what the existing tests compile and run against. */
+  @Test
+  void updatedHelperIsUsedByExistingTests(@TempDir Path tmp) throws Exception {
+    var sinkBundle = sinkBaseBundle(tmp);
+    var stubs = sinkStubs(tmp);
+
+    var stale = tmp.resolve("stale");
+    assertThat(judgeModify(sinkBundle, stale, List.of(), sinkReference(tmp, false), stubs))
+        .isNotEmpty();
+    assertThat(new SealArtifacts(stale).exit("existing-tests")).contains(1);
+
+    var updated = tmp.resolve("updated");
+    assertThat(
+            judgeModify(sinkBundle, updated, List.of(SINK_FAKE), sinkReference(tmp, true), stubs))
+        .isEmpty();
+    assertThat(new SealArtifacts(updated).exit("existing-tests")).contains(0);
+    assertThat(updated.resolve("existing-tests/TEST-com.example.api.SinkTest.xml")).exists();
+  }
+
+  /** An updated version of a listed test class is compiled in but its tests are not run. */
+  @Test
+  void updatedListedTestClassIsStillSkipped(@TempDir Path tmp) throws Exception {
+    var legacyBundle = modifyBaseBundle(tmp);
+    var reference = tmp.resolve("reference");
+    Files.createDirectories(reference.resolve(COUNTER).getParent());
+    Files.copy(fixture("reference").resolve(COUNTER), reference.resolve(COUNTER));
+    Files.createDirectories(reference.resolve(LEGACY_TEST).getParent());
+    Files.writeString(
+        reference.resolve(LEGACY_TEST),
+        """
+        package com.example.api;
+
+        import org.junit.jupiter.api.Test;
+
+        class LegacyCounterTest {
+          @Test
+          void updatedFails() {
+            throw new AssertionError("must not run");
+          }
+        }
+        """);
+
+    var out = tmp.resolve("skipped");
+    assertThat(judgeModify(legacyBundle, out, List.of(LEGACY_TEST), reference)).isEmpty();
+    assertThat(new SealArtifacts(out).exit("existing-tests")).contains(0);
+    assertThat(out.resolve("existing-tests/TEST-com.example.api.CounterBasicsTest.xml")).exists();
+    assertThat(out.resolve("existing-tests/TEST-com.example.api.LegacyCounterTest.xml"))
         .doesNotExist();
   }
 

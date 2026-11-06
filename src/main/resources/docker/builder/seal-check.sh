@@ -10,8 +10,9 @@
 #                                              libraries.txt and packages.txt
 # State shared between phases lives in /work/out (repo, Maven cache, dependency jars).
 #
-# Inputs (read-only mounts): /work/base.bundle, /work/stubs, and for "check" also
-# /work/holdout and /work/reference. "inventory" reads only /work/base.bundle.
+# Inputs (read-only mounts): /work/base.bundle, /work/stubs, for "prepare" also /work/updated-tests
+# (the reference's listed test files only), and for "check" also /work/holdout and /work/reference.
+# "inventory" reads only /work/base.bundle.
 # Env: BASE_SHA, HOLDOUT_PKG, TARGET_CLASSES (comma-separated), TEST_TIMEOUT (e.g. 10s), RERUNS,
 #      EXISTING_TESTS (yes|no: run the repository's tests against the reference) and
 #      EXCLUDE_TESTS (comma-separated repository paths of test files left out of that run)
@@ -155,11 +156,31 @@ exclude_tests() {
   done
 }
 
+# Copies the Examiner's updated versions of the listed test files (EXCLUDE_TESTS) from the
+# reference into the repository, after restore_tests; no other reference path reaches src/test.
+# The listed test classes stay excluded from the run; an updated helper is what the other tests
+# compile and run against. A listed path the reference does not contain keeps its base version.
+copy_updated_tests() {
+  local path dir=/work/reference
+  local -a listed=()
+  [ -d "$dir" ] || dir=/work/updated-tests # prepare: only the listed files, staged by noir
+  IFS=, read -ra listed <<<"${EXCLUDE_TESTS:-}"
+  for path in "${listed[@]}"; do
+    case "$path" in
+      "" | /* | *..*) continue ;;
+    esac
+    if [ -f "$dir/$path" ]; then
+      mkdir -p "$(dirname "$REPO/$path")" && cp "$dir/$path" "$REPO/$path" || return 1
+    fi
+  done
+}
+
 # Downloads what the offline existing-tests run needs. Surefire resolves its test-framework
 # provider only when it finds test classes to run (-DskipTests, or a class filter matching
 # nothing, skips that), so it runs every test class here with a method filter matching nothing.
 test_deps() {
   restore_tests || return 1
+  copy_updated_tests || return 1
   exclude_tests
   cd "$REPO" && mvn -B "${MVN_REPO[@]}" test "-Dsurefire.excludesFile=$EXCLUDES_FILE" \
     '-Dtest=*#noirResolveProvidersOnly' -Dsurefire.failIfNoSpecifiedTests=false
@@ -169,6 +190,7 @@ test_deps() {
 # tests to update. A test fork still running after 600 seconds is killed.
 existing_tests() {
   restore_tests || return 1
+  copy_updated_tests || return 1
   exclude_tests
   cd "$REPO" || return 1
   rm -rf target/surefire-reports
