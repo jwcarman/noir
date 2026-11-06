@@ -91,7 +91,7 @@ section. A spec with no modified files and no tests to update renders exactly as
 already depends on. The result is the full file plus the lists of added and changed member
 signatures.
 
-For each fragment member, the *signature* is the name plus the erased parameter types as written.
+For each fragment member, the *signature* is the name plus the parameter types as written, with whitespace removed.
 - **Changed member:** the target type has a member with the same signature. Its Javadoc is
   replaced by the fragment's. Its **body is kept as it is at the base commit**. Its return type,
   modifiers, type parameters and `throws` clause must equal the fragment's, or the splice fails.
