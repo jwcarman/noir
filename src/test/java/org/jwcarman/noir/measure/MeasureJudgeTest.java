@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -406,5 +408,152 @@ class MeasureJudgeTest {
     classFile("com/example/Marker$Inner.class");
     var r = MeasureJudge.judge(a, BAR, List.of("com.example.Calc", "com.example.Marker"));
     assertThat(r).isInstanceOf(MeasureOutcome.Passed.class);
+  }
+
+  /** Calc: {@code simple()} at line 3 (covered), {@code hairy()} at 6..14 (uncovered). */
+  private static final String CALC_CLASS =
+      "<class name='com/example/Calc' sourcefilename='Calc.java'>"
+          + "<method name='simple' desc='()V' line='3'><counter type='LINE' missed='0' covered='1'/>"
+          + "<counter type='COMPLEXITY' missed='0' covered='1'/></method>"
+          + "<method name='hairy' desc='()V' line='6'><counter type='LINE' missed='9' covered='0'/>"
+          + "<counter type='COMPLEXITY' missed='10' covered='0'/></method>"
+          + "<counter type='LINE' missed='9' covered='1'/></class>";
+
+  private static String calcSource() {
+    var b = new StringBuilder("<sourcefile name='Calc.java'><line nr='3' mi='0' ci='1'/>");
+    for (int nr = 6; nr <= 14; nr++) {
+      b.append("<line nr='").append(nr).append("' mi='1' ci='0'/>");
+    }
+    return b.append("</sourcefile>").toString();
+  }
+
+  private void calcReport(String extraClasses, String extraSources) throws IOException {
+    write(
+        "jacoco.xml",
+        "<report name='x'><package name='com/example'>"
+            + CALC_CLASS
+            + extraClasses
+            + calcSource()
+            + extraSources
+            + "</package></report>");
+  }
+
+  private static String mutant(String cls, int line, boolean detected) {
+    return "<mutation detected='"
+        + detected
+        + "'><mutatedClass>"
+        + cls
+        + "</mutatedClass><lineNumber>"
+        + line
+        + "</lineNumber></mutation>";
+  }
+
+  @Test
+  void modifyTargetCountsOnlyChangedLines() throws IOException {
+    calcReport("", "");
+    write(
+        "mutations.xml",
+        "<mutations>"
+            + mutant("com.example.Calc", 3, true)
+            + mutant("com.example.Calc", 7, false)
+            + "</mutations>");
+    // Whole class: 10% covered, half the mutants survive.
+    assertThat(MeasureJudge.judge(a, BAR, CHANGED)).isInstanceOf(MeasureOutcome.Shortfall.class);
+    // Changed lines 3 and 4 (4 is not instrumentable): 100% covered, every mutant killed.
+    var r = MeasureJudge.judge(a, BAR, CHANGED, Map.of("com.example.Calc", Set.of(3, 4)));
+    assertThat(r).isInstanceOf(MeasureOutcome.Passed.class);
+    assertThat(r.m().lineCoverage()).isEqualTo(1.0);
+    assertThat(r.m().mutationScore()).isEqualTo(1.0);
+    assertThat(r.m().maxCrap()).isEqualTo(1.0);
+    // Lines 3 and 7: one of two changed lines covered, one of two mutants killed.
+    var half = MeasureJudge.judge(a, BAR, CHANGED, Map.of("com.example.Calc", Set.of(3, 7)));
+    assertThat(half.m().lineCoverage()).isEqualTo(0.5);
+    assertThat(half.m().mutationScore()).isEqualTo(0.5);
+  }
+
+  @Test
+  void crapCountsOnlyMethodsContainingChangedLines() throws IOException {
+    calcReport("", "");
+    write("mutations.xml", "<mutations/>");
+    var bar = new QualityBar(0.0, 0.0, 30);
+    // Line 5 is not instrumentable but lies in simple() (3..5).
+    var simple = MeasureJudge.judge(a, bar, CHANGED, Map.of("com.example.Calc", Set.of(5)));
+    assertThat(simple).isInstanceOf(MeasureOutcome.Passed.class);
+    assertThat(simple.m().maxCrap()).isEqualTo(1.0);
+    // Line 14 is the class's last reported line, so it lies in hairy() (6..14).
+    var hairy =
+        (MeasureOutcome.Shortfall)
+            MeasureJudge.judge(a, bar, CHANGED, Map.of("com.example.Calc", Set.of(14)));
+    var q = (FeedbackInput.QualityShortfall) hairy.input();
+    assertThat(q.crapViolations()).extracting(MethodCrap::method).containsExactly("hairy()");
+    assertThat(hairy.m().maxCrap()).isEqualTo(Crap.score(10, 0.0));
+    // Line 2 precedes the first method and line 20 follows the last reported line.
+    var none = MeasureJudge.judge(a, bar, CHANGED, Map.of("com.example.Calc", Set.of(2, 20)));
+    assertThat(none).isInstanceOf(MeasureOutcome.Passed.class);
+    assertThat(none.m().maxCrap()).isEqualTo(0.0);
+  }
+
+  @Test
+  void deletionOnlyChangeAddsNoMetrics() {
+    var strict = new QualityBar(0.9, 0.9, 5);
+    // The whole class fails this bar on coverage and CRAP.
+    assertThat(MeasureJudge.judge(a, strict, CHANGED)).isInstanceOf(MeasureOutcome.Shortfall.class);
+    var r = MeasureJudge.judge(a, strict, CHANGED, Map.of("com.example.Calc", Set.of()));
+    assertThat(r).isInstanceOf(MeasureOutcome.Passed.class);
+    assertThat(r.m().lineCoverage()).isEqualTo(1.0);
+    assertThat(r.m().mutationScore()).isEqualTo(1.0);
+    assertThat(r.m().maxCrap()).isEqualTo(0.0);
+    assertThat(r.m().changedClasses()).isEqualTo(CHANGED);
+  }
+
+  @Test
+  void newFilesStillCountWhole() throws IOException {
+    calcReport(
+        "<class name='com/example/Fresh' sourcefilename='Fresh.java'>"
+            + "<method name='f' desc='()V' line='3'><counter type='LINE' missed='3' covered='1'/>"
+            + "<counter type='COMPLEXITY' missed='0' covered='1'/></method>"
+            + "<counter type='LINE' missed='3' covered='1'/></class>",
+        "<sourcefile name='Fresh.java'><line nr='3' mi='0' ci='1'/><line nr='4' mi='1' ci='0'/>"
+            + "<line nr='5' mi='1' ci='0'/><line nr='6' mi='1' ci='0'/></sourcefile>");
+    write(
+        "mutations.xml",
+        "<mutations>"
+            + mutant("com.example.Calc", 7, false)
+            + mutant("com.example.Fresh", 3, true)
+            + mutant("com.example.Fresh", 4, false)
+            + "</mutations>");
+    var changed = List.of("com.example.Calc", "com.example.Fresh");
+    var s =
+        (MeasureOutcome.Shortfall)
+            MeasureJudge.judge(a, BAR, changed, Map.of("com.example.Calc", Set.of(3)));
+    var q = (FeedbackInput.QualityShortfall) s.input();
+    assertThat(q.classes()).extracting(c -> c.className()).containsExactly("com.example.Fresh");
+    assertThat(q.classes().get(0).lineCoverage()).isEqualTo(0.25);
+    // Calc line 3 (covered) plus Fresh's four lines (one covered).
+    assertThat(s.m().lineCoverage()).isEqualTo(2 / 5.0);
+    // Calc has no mutant on line 3; Fresh counts both of its mutants.
+    assertThat(s.m().mutationScore()).isEqualTo(0.5);
+  }
+
+  @Test
+  void changedLinesInNestedClassesCountTowardTheTopLevelClass() throws IOException {
+    calcReport(
+        "<class name='com/example/Calc$Inner' sourcefilename='Calc.java'>"
+            + "<method name='g' desc='()V' line='20'><counter type='LINE' missed='0' covered='1'/>"
+            + "<counter type='COMPLEXITY' missed='0' covered='1'/></method>"
+            + "<counter type='LINE' missed='0' covered='1'/></class>",
+        "");
+    write(
+        "jacoco.xml",
+        Files.readString(out.resolve("jacoco.xml"))
+            .replace("</sourcefile>", "<line nr='20' mi='0' ci='1'/></sourcefile>"));
+    write(
+        "mutations.xml",
+        "<mutations>" + mutant("com.example.Calc$Inner", 20, true) + "</mutations>");
+    var r = MeasureJudge.judge(a, BAR, CHANGED, Map.of("com.example.Calc", Set.of(20)));
+    assertThat(r).isInstanceOf(MeasureOutcome.Passed.class);
+    assertThat(r.m().lineCoverage()).isEqualTo(1.0);
+    assertThat(r.m().mutationScore()).isEqualTo(1.0);
+    assertThat(r.m().maxCrap()).isEqualTo(1.0);
   }
 }

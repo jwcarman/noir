@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.jwcarman.noir.feedback.ClassQuality;
 import org.jwcarman.noir.feedback.FeedbackInput;
 import org.jwcarman.noir.reports.PitSummary;
@@ -19,6 +20,14 @@ public final class MeasureJudge {
 
   public static MeasureOutcome judge(
       MeasureArtifacts a, QualityBar bar, List<String> changedClasses) {
+    return judge(a, bar, changedClasses, Map.of());
+  }
+
+  public static MeasureOutcome judge(
+      MeasureArtifacts a,
+      QualityBar bar,
+      List<String> changedClasses,
+      Map<String, Set<Integer>> changedLinesByClass) {
     int build = a.requireExit("build");
     int holdoutStep = a.requireExit("holdout-sources");
     int forbiddenStep = a.requireExit("forbidden");
@@ -94,7 +103,7 @@ public final class MeasureJudge {
               "Mutation testing failed:\n" + a.logTail("pit", BUILD_LOG_LINES)),
           MeasureOutcome.Metrics.empty());
     }
-    return quality(a, bar, changedClasses);
+    return quality(a, bar, changedClasses, changedLinesByClass);
   }
 
   private static void requireInfra(String step, int exit) {
@@ -103,14 +112,26 @@ public final class MeasureJudge {
     }
   }
 
+  /**
+   * The classes measured together: one top-level class of a new file (counted whole), or every
+   * top-level class of a modify target's source file, counted on {@code changedLines} only.
+   */
+  private record Unit(String name, List<ClassCoverage> classes, Set<Integer> changedLines) {}
+
   private static MeasureOutcome quality(
-      MeasureArtifacts a, QualityBar bar, List<String> changedClasses) {
+      MeasureArtifacts a,
+      QualityBar bar,
+      List<String> changedClasses,
+      Map<String, Set<Integer>> changedLinesByClass) {
     Map<String, ClassCoverage> coverage = Map.of();
     Map<String, PitSummary> pit = Map.of();
+    Map<String, List<PitByClass.Mutant>> mutantLines = Map.of();
     if (!changedClasses.isEmpty()) {
       try {
         coverage = JacocoReport.parse(a.requireReport("jacoco.xml"));
-        pit = PitByClass.parse(a.requireReport("mutations.xml"));
+        var mutations = a.requireReport("mutations.xml");
+        pit = PitByClass.parse(mutations);
+        mutantLines = PitByClass.parseLines(mutations);
       } catch (RuntimeException e) {
         return new MeasureOutcome.Shortfall(
             new FeedbackInput.BuildFailed("Coverage or mutation report missing or unreadable"),
@@ -118,6 +139,7 @@ public final class MeasureJudge {
       }
     }
     var measured = new LinkedHashMap<String, ClassCoverage>();
+    var units = new ArrayList<Unit>();
     boolean anyClassFile = false;
     var unmatched = new ArrayList<String>();
     var changedPackages = new java.util.HashSet<String>();
@@ -129,7 +151,18 @@ public final class MeasureJudge {
           coverage.values().stream()
               .filter(c -> c.packageName().equals(pkg) && c.sourceFile().equals(source))
               .toList();
-      found.forEach(c -> measured.putIfAbsent(c.className(), c));
+      var fresh = new ArrayList<ClassCoverage>();
+      for (var c : found) {
+        if (measured.putIfAbsent(c.className(), c) == null) {
+          fresh.add(c);
+        }
+      }
+      var changedLines = changedLinesByClass.get(name);
+      if (changedLines == null) {
+        fresh.forEach(c -> units.add(new Unit(c.className(), List.of(c), null)));
+      } else if (!fresh.isEmpty()) {
+        units.add(new Unit(name, List.copyOf(fresh), Set.copyOf(changedLines)));
+      }
       changedPackages.add(pkg);
       if (found.isEmpty()) {
         if (hasClassFiles(a, pkg, name.substring(dot + 1))) {
@@ -167,22 +200,52 @@ public final class MeasureJudge {
     int detected = 0;
     int mutants = 0;
     double maxCrap = 0;
-    for (var cov : measured.values()) {
-      double lineCov = cov.lineCoverage();
-      int classLines = cov.linesCovered() + cov.linesMissed();
-      covered += cov.linesCovered();
-      lines += classLines;
-      var summary = pit.get(cov.className());
-      double score;
-      if (summary == null || summary.total() == 0) {
-        score = 1.0;
+    for (var unit : units) {
+      int unitCovered;
+      int unitLines;
+      int unitDetected = 0;
+      int unitMutants = 0;
+      List<MethodCrap> methods;
+      if (unit.changedLines() == null) {
+        var cov = unit.classes().get(0);
+        unitCovered = cov.linesCovered();
+        unitLines = cov.linesCovered() + cov.linesMissed();
+        var summary = pit.get(cov.className());
+        if (summary != null) {
+          unitDetected = summary.detected();
+          unitMutants = summary.total();
+        }
+        methods = cov.methods();
       } else {
-        score = summary.score();
-        detected += summary.detected();
-        mutants += summary.total();
+        var changed = unit.changedLines();
+        var sourceLines = unit.classes().get(0).lines();
+        unitCovered = 0;
+        unitLines = 0;
+        for (int line : changed) {
+          var hit = sourceLines.get(line);
+          if (hit != null) {
+            unitLines++;
+            unitCovered += hit ? 1 : 0;
+          }
+        }
+        for (var cov : unit.classes()) {
+          for (var m : mutantLines.getOrDefault(cov.className(), List.of())) {
+            if (changed.contains(m.line())) {
+              unitMutants++;
+              unitDetected += m.detected() ? 1 : 0;
+            }
+          }
+        }
+        methods = methodsContaining(unit.classes(), sourceLines, changed);
       }
+      covered += unitCovered;
+      lines += unitLines;
+      detected += unitDetected;
+      mutants += unitMutants;
+      double lineCov = unitLines == 0 ? 1.0 : unitCovered / (double) unitLines;
+      double score = unitMutants == 0 ? 1.0 : unitDetected / (double) unitMutants;
       boolean bad = lineCov < bar.lineCoverage() || score < bar.mutationScore();
-      for (var m : cov.methods()) {
+      for (var m : methods) {
         maxCrap = Math.max(maxCrap, m.crap());
         if (m.crap() > bar.maxCrap()) {
           violations.add(m);
@@ -190,7 +253,7 @@ public final class MeasureJudge {
         }
       }
       if (bad) {
-        failing.add(new ClassQuality(cov.className(), lineCov, score));
+        failing.add(new ClassQuality(unit.name(), lineCov, score));
       }
     }
     var metrics =
@@ -204,6 +267,32 @@ public final class MeasureJudge {
     }
     return new MeasureOutcome.Shortfall(
         new FeedbackInput.QualityShortfall(bar, failing, violations), metrics);
+  }
+
+  /**
+   * The methods whose span holds a changed line. A method spans its {@code firstLine} up to the
+   * next method's {@code firstLine} − 1 (methods of every class in the file, nested ones included,
+   * ordered by line), the last one up to the file's last reported line. Methods without a line
+   * number are never counted.
+   */
+  private static List<MethodCrap> methodsContaining(
+      List<ClassCoverage> classes, Map<Integer, Boolean> sourceLines, Set<Integer> changed) {
+    var all =
+        classes.stream()
+            .flatMap(c -> c.methods().stream())
+            .filter(m -> m.firstLine() > 0)
+            .sorted(java.util.Comparator.comparingInt(MethodCrap::firstLine))
+            .toList();
+    int lastLine = sourceLines.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+    var result = new ArrayList<MethodCrap>();
+    for (int k = 0; k < all.size(); k++) {
+      int from = all.get(k).firstLine();
+      int to = k + 1 < all.size() ? all.get(k + 1).firstLine() - 1 : Math.max(from, lastLine);
+      if (changed.stream().anyMatch(l -> l >= from && l <= to)) {
+        result.add(all.get(k));
+      }
+    }
+    return result;
   }
 
   /**

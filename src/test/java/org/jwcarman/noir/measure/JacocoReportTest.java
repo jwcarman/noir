@@ -27,6 +27,36 @@ class JacocoReportTest {
   }
 
   @Test
+  void parsesLinesAndMethodFirstLine() {
+    var calc = JacocoReport.parse(XML).get("com.example.Calc");
+    assertThat(calc.lines())
+        .containsExactly(
+            java.util.Map.entry(5, true),
+            java.util.Map.entry(6, true),
+            java.util.Map.entry(9, true),
+            java.util.Map.entry(10, false),
+            java.util.Map.entry(11, false),
+            java.util.Map.entry(12, false),
+            java.util.Map.entry(20, true),
+            java.util.Map.entry(21, false));
+    assertThat(calc.methods()).extracting(MethodCrap::firstLine).containsExactly(5, 9, 20);
+  }
+
+  @Test
+  void classWithoutSourcefileElementHasNoLines(@org.junit.jupiter.api.io.TempDir Path dir)
+      throws Exception {
+    var xml = dir.resolve("r.xml");
+    java.nio.file.Files.writeString(
+        xml,
+        "<report><package name='a'><class name='a/B' sourcefilename='B.java'>"
+            + "<method name='m' desc='()V'><counter type='LINE' missed='1' covered='0'/></method>"
+            + "</class></package></report>");
+    var b = JacocoReport.parse(xml).get("a.B");
+    assertThat(b.lines()).isEmpty();
+    assertThat(b.methods().get(0).firstLine()).isZero();
+  }
+
+  @Test
   void noLinesMeansFullCoverage() {
     assertThat(new ClassCoverage("X", 0, 0, java.util.List.of()).lineCoverage()).isEqualTo(1.0);
   }

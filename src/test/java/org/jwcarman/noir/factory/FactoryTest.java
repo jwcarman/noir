@@ -14,6 +14,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.IntFunction;
@@ -221,6 +222,46 @@ class FactoryTest {
             "You modified `pom.xml`. This spec allows changes only to: new files. Restore those"
                 + " files and make the change another way.");
     assertThat(measure.calls).isZero();
+  }
+
+  @Test
+  void modifyTargetIsMeasuredOnlyOnItsChangedLines() throws IOException {
+    var calc = "src/main/java/com/example/Calc.java";
+    spec = spec.withModifies(List.of(calc));
+    SpecJson.write(spec, itemDir.resolve("spec.json"));
+    Commitments.write(
+        Commitments.create(spec, itemDir, "examiner-model", "body"),
+        itemDir.resolve("commitment.json"));
+    bundles.changes = List.of(new FileChange(FileChange.Status.MODIFIED, calc, null, 1, 0));
+    // Only line 5 (covered in the fixture) changes; the whole class is below the 80% bar.
+    bundles.patch =
+        "commit c0ffee\n\n    msg\n\ndiff --git a/"
+            + calc
+            + " b/"
+            + calc
+            + "\nindex 1..2 100644\n--- a/"
+            + calc
+            + "\n+++ b/"
+            + calc
+            + "\n@@ -4,2 +4,3 @@\n a\n+b\n c\n";
+    measure.modes = n -> MeasureMode.SHORTFALL;
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.PR_OPEN);
+    assertThat(item.attempt()).isEqualTo(1);
+  }
+
+  @Test
+  void changedLinesAreKeyedByClassName() {
+    var patch =
+        "diff --git a/src/main/java/a/b/C.java b/src/main/java/a/b/C.java\n"
+            + "--- a/src/main/java/a/b/C.java\n+++ b/src/main/java/a/b/C.java\n"
+            + "@@ -1 +1,2 @@\n x\n+y\n";
+    assertThat(
+            Factory.changedLinesByClass(
+                patch, List.of("src/main/java/a/b/C.java", "src/main/java/a/D.java", "README.md")))
+        .isEqualTo(Map.of("a.b.C", Set.of(2), "a.D", Set.of()));
   }
 
   @Test

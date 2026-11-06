@@ -39,6 +39,7 @@ import org.jwcarman.noir.lifecycle.Lifecycle;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.lifecycle.Transition;
 import org.jwcarman.noir.lifecycle.Trigger;
+import org.jwcarman.noir.measure.DiffLines;
 import org.jwcarman.noir.measure.MeasureArtifacts;
 import org.jwcarman.noir.measure.MeasureJudge;
 import org.jwcarman.noir.measure.MeasureOutcome;
@@ -351,6 +352,27 @@ public final class Factory implements ItemDriver {
     }
   }
 
+  private static final String MAIN_JAVA = "src/main/java/";
+
+  /**
+   * The lines the attempt added or changed in each modify target, keyed by the class FQN its path
+   * names ({@code src/main/java/a/b/C.java} becomes {@code a.b.C}). Targets outside {@code
+   * src/main/java} or not ending in {@code .java} are left out.
+   */
+  static Map<String, Set<Integer>> changedLinesByClass(String patch, List<String> modifies) {
+    var byClass = new LinkedHashMap<String, Set<Integer>>();
+    DiffLines.added(patch, Set.copyOf(modifies))
+        .forEach((path, lines) -> {
+          if (path.startsWith(MAIN_JAVA) && path.endsWith(".java")) {
+            var fqn =
+                path.substring(MAIN_JAVA.length(), path.length() - ".java".length())
+                    .replace('/', '.');
+            byClass.put(fqn, lines);
+          }
+        });
+    return byClass;
+  }
+
   private Step measure(Ctx ctx) {
     var spec = ctx.spec();
     var paths = ctx.attempt();
@@ -389,7 +411,12 @@ public final class Factory implements ItemDriver {
                 spec, bundle, ctx.branch(), ctx.itemDir().resolve("stubs"), paths.measure()));
     MeasureOutcome outcome;
     try {
-      outcome = MeasureJudge.judge(artifacts, bar(spec), artifacts.changedClasses());
+      outcome =
+          MeasureJudge.judge(
+              artifacts,
+              bar(spec),
+              artifacts.changedClasses(),
+              changedLinesByClass(patch, spec.modifies()));
     } catch (IllegalStateException e) {
       throw new InfraFailure(e); // an incomplete measurement is noir's fault, not the builder's
     }

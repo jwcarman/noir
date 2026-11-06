@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import org.jwcarman.noir.reports.Xml;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -42,12 +43,49 @@ public final class JacocoReport {
         }
       }
     }
+    var sourceLines = sourceLines(doc);
     var result = new LinkedHashMap<String, ClassCoverage>();
-    covered.forEach((name, c) ->
-        result.put(
-            name,
-            new ClassCoverage(
-                name, c[0], c[1], methods.get(name), sources.get(name), noDebug.contains(name))));
+    covered.forEach((name, c) -> {
+      int dot = name.lastIndexOf('.');
+      var key = (dot < 0 ? "" : name.substring(0, dot)) + "/" + sources.get(name);
+      result.put(
+          name,
+          new ClassCoverage(
+              name,
+              c[0],
+              c[1],
+              methods.get(name),
+              sources.get(name),
+              noDebug.contains(name),
+              sourceLines.getOrDefault(key, Map.of())));
+    });
+    return result;
+  }
+
+  /**
+   * Line to covered ({@code ci > 0}) for each {@code <sourcefile>}, keyed by dotted package, "/",
+   * and source file name.
+   */
+  private static Map<String, Map<Integer, Boolean>> sourceLines(org.w3c.dom.Document doc) {
+    var result = new LinkedHashMap<String, Map<Integer, Boolean>>();
+    var files = doc.getElementsByTagName("sourcefile");
+    for (int i = 0; i < files.getLength(); i++) {
+      var file = (Element) files.item(i);
+      var pkg =
+          file.getParentNode() instanceof Element p && p.getTagName().equals("package")
+              ? p.getAttribute("name").replace('/', '.')
+              : "";
+      var lines =
+          result.computeIfAbsent(pkg + "/" + file.getAttribute("name"), k -> new TreeMap<>());
+      for (Node n = file.getFirstChild(); n != null; n = n.getNextSibling()) {
+        if (n instanceof Element e && e.getTagName().equals("line")) {
+          int nr = count(e, "nr");
+          if (nr > 0) {
+            lines.merge(nr, count(e, "ci") > 0, Boolean::logicalOr);
+          }
+        }
+      }
+    }
     return result;
   }
 
@@ -86,7 +124,8 @@ public final class JacocoReport {
         simplify(m.getAttribute("name"), m.getAttribute("desc")),
         complexity,
         coverage,
-        Crap.score(complexity, coverage));
+        Crap.score(complexity, coverage),
+        count(m, "line"));
   }
 
   private static int count(Element e, String attr) {
