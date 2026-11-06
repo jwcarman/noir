@@ -27,6 +27,7 @@ import org.jwcarman.noir.agent.ScriptedAgent;
 import org.jwcarman.noir.commit.Commitments;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
+import org.jwcarman.noir.factory.Retry;
 import org.jwcarman.noir.git.GitCli;
 import org.jwcarman.noir.git.GitFixtures;
 import org.jwcarman.noir.git.GitPort;
@@ -102,7 +103,13 @@ class ApprovalSealerTest {
             github,
             new RepoMirror(git, home.repos()),
             git,
-            new SuiteSealer(store, new Examiner(agent, config), checks, config, clock),
+            new SuiteSealer(
+                store,
+                new Examiner(agent, config),
+                checks,
+                config,
+                clock,
+                Retry.forConfig(config, d -> {})),
             config,
             clock,
             Set.of(SECRET));

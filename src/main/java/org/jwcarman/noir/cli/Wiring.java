@@ -83,7 +83,8 @@ final class Wiring {
                 new Examiner(new ClaudeContainerAgent(docker, auth), config),
                 new ContainerSealCheckRunner(docker, config),
                 config,
-                clock),
+                clock,
+                Retry.forConfig(config, sleeper)),
             config,
             clock,
             secrets);

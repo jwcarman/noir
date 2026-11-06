@@ -93,7 +93,13 @@ class ReapprovalFlowTest {
             gh,
             new RepoMirror(git, home.repos()),
             git,
-            new SuiteSealer(store, new Examiner(examiner, config), checks, config, clock),
+            new SuiteSealer(
+                store,
+                new Examiner(examiner, config),
+                checks,
+                config,
+                clock,
+                Retry.forConfig(config, d -> {})),
             config,
             clock,
             Set.of(SECRET));

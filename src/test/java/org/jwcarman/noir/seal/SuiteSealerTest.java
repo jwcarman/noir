@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
@@ -25,6 +26,9 @@ import org.jwcarman.noir.agent.AgentRequest;
 import org.jwcarman.noir.agent.AgentResult;
 import org.jwcarman.noir.agent.ScriptedAgent;
 import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.docker.DockerException;
+import org.jwcarman.noir.factory.InfraFailure;
+import org.jwcarman.noir.factory.Retry;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.ItemId;
 import org.jwcarman.noir.spec.Spec;
@@ -94,7 +98,13 @@ class SuiteSealerTest {
             new Examiner(agent, NoirConfig.defaults()),
             checks,
             NoirConfig.defaults(),
-            clock);
+            clock,
+            retry());
+  }
+
+  /** Three tries, no waiting. */
+  static Retry retry() {
+    return new Retry(3, Duration.ZERO, Duration.ZERO, d -> {});
   }
 
   static void write(Path p, String content) {
@@ -154,6 +164,62 @@ class SuiteSealerTest {
   }
 
   @Test
+  void transientCheckFailureRetriesOnlyTheChecks() {
+    checkResults.add((in, out) -> {
+      throw new DockerException("docker daemon went away");
+    });
+    var e = examine();
+    assertThat(e).isEqualTo(new SuiteSealer.Examination("scripted", null));
+    assertThat(agent.requests()).hasSize(1);
+    assertThat(checkCalls).hasSize(2);
+    assertThat(store.readEvents(itemDir))
+        .singleElement()
+        .satisfies(ev -> assertThat(ev.data()).containsEntry("ok", true));
+  }
+
+  @Test
+  void transientExaminerContainerFailureRetriesThatAttemptOnly() {
+    var flaky =
+        new AgentPort() {
+          int calls;
+
+          @Override
+          public AgentResult run(AgentRequest r) {
+            if (++calls == 1) {
+              throw new DockerException("cannot start examiner container");
+            }
+            return agent.run(r);
+          }
+        };
+    var s =
+        new SuiteSealer(
+            store,
+            new Examiner(flaky, NoirConfig.defaults()),
+            checks,
+            NoirConfig.defaults(),
+            clock,
+            retry());
+    var e = s.examine(spec, List.of(STUB), itemDir, bundle);
+    assertThat(e.problems()).isNull();
+    assertThat(flaky.calls).isEqualTo(2);
+    assertThat(store.readEvents(itemDir))
+        .singleElement()
+        .satisfies(ev -> assertThat(ev.data()).containsEntry("attempt", 1));
+  }
+
+  @Test
+  void checksThatKeepFailingBlockWithoutReExamining() {
+    for (int i = 0; i < 3; i++) {
+      checkResults.add((in, out) -> {
+        throw new DockerException("docker daemon went away");
+      });
+    }
+    assertThatThrownBy(this::examine).isInstanceOf(InfraFailure.class);
+    assertThat(agent.requests()).hasSize(1);
+    assertThat(checkCalls).hasSize(3);
+  }
+
+  @Test
   void staticAnalysisProblemsSkipContainerChecks() {
     holdoutSources.add(UNTAGGED_TEST);
     var e = examine();
@@ -189,7 +255,8 @@ class SuiteSealerTest {
             new Examiner(failing, NoirConfig.defaults()),
             (in, out) -> SealArtifactsFixture.good(out),
             NoirConfig.defaults(),
-            Clock.systemUTC());
+            Clock.systemUTC(),
+            retry());
     assertThatThrownBy(() -> s.examine(spec, List.of(STUB), itemDir, bundle))
         .isInstanceOf(ExaminerFailedException.class)
         .hasMessage("Examiner agent failed: Invalid API key · Fix external API key");

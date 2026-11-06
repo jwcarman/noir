@@ -19,6 +19,7 @@ import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.docker.Images;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
+import org.jwcarman.noir.factory.Retry;
 import org.jwcarman.noir.git.GitCli;
 import org.jwcarman.noir.git.GitFixtures;
 import org.jwcarman.noir.git.LocalOriginGit;
@@ -95,7 +96,12 @@ class SealEndToEndIT {
             new RepoMirror(git, home.repos()),
             git,
             new SuiteSealer(
-                store, examiner, new ContainerSealCheckRunner(docker, config), config, clock),
+                store,
+                examiner,
+                new ContainerSealCheckRunner(docker, config),
+                config,
+                clock,
+                Retry.forConfig(config, d -> {})),
             config,
             clock,
             Set.of());

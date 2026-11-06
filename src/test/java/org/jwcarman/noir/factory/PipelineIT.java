@@ -444,7 +444,8 @@ class PipelineIT {
                 new Examiner(examinerAgent, cfg),
                 new ContainerSealCheckRunner(docker, cfg),
                 cfg,
-                clock),
+                clock,
+                Retry.forConfig(cfg, d -> {})),
             cfg,
             clock,
             Set.of(SECRET));

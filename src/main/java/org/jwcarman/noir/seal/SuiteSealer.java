@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import org.jwcarman.noir.commit.SealedFileException;
 import org.jwcarman.noir.config.NoirConfig;
+import org.jwcarman.noir.factory.Retry;
 import org.jwcarman.noir.holdout.HoldoutAnalyzer;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.Spec;
@@ -19,6 +20,11 @@ import org.jwcarman.noir.store.Store;
 /**
  * Runs the Examiner until its holdout suite passes the static and container seal checks, or the
  * attempts run out (spec §5.3). Writes {@code holdout/} and {@code reference/} into the item dir.
+ *
+ * <p>Infrastructure failures are retried here, per step: a failed container check re-runs only the
+ * checks against the suite already written, and a failed Examiner container re-runs only that
+ * attempt. So earlier, already-paid Examiner attempts are never repeated. When the retries run out
+ * this throws {@link org.jwcarman.noir.factory.InfraFailure}, which the factory blocks on.
  */
 public final class SuiteSealer {
   private static final Pattern PACKAGE = Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
@@ -28,14 +34,21 @@ public final class SuiteSealer {
   private final SealCheckRunner checks;
   private final NoirConfig config;
   private final Clock clock;
+  private final Retry retry;
 
   public SuiteSealer(
-      Store store, Examiner examiner, SealCheckRunner checks, NoirConfig config, Clock clock) {
+      Store store,
+      Examiner examiner,
+      SealCheckRunner checks,
+      NoirConfig config,
+      Clock clock,
+      Retry retry) {
     this.store = store;
     this.examiner = examiner;
     this.checks = checks;
     this.config = config;
     this.clock = clock;
+    this.retry = retry;
   }
 
   /** Examiner outcome: the model that produced the sealed suite, or the last problems. */
@@ -48,7 +61,8 @@ public final class SuiteSealer {
       var attemptDir = itemDir.resolve("examiner/attempt-" + attempt);
       ExaminerOutput out;
       try {
-        out = examiner.attempt(spec, stubs, problems, attemptDir, itemDir);
+        var previous = problems;
+        out = retry.call(() -> examiner.attempt(spec, stubs, previous, attemptDir, itemDir));
         problems = checkSuite(spec, itemDir, bundle, stubPackages, out, attemptDir);
       } catch (SealedFileException e) {
         out = null;
@@ -87,7 +101,7 @@ public final class SuiteSealer {
     }
     var inputs =
         SealInputs.of(spec, bundle, itemDir.resolve("stubs"), out.holdoutDir(), out.referenceDir());
-    var artifacts = checks.run(inputs, attemptDir.resolve("checks"));
+    var artifacts = retry.call(() -> checks.run(inputs, attemptDir.resolve("checks")));
     return SealJudge.judge(artifacts, config.sealDiscrimination());
   }
 
