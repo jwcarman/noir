@@ -73,3 +73,21 @@ write any other existing test file there. The builder never sees these files. Th
 is under Current source, marked (test to update).
 
 If the "Problems with your previous attempt" section is present, fix every problem it lists.
+
+## When the spec cannot be satisfied
+
+Rarely, the spec cannot be tested as written: two of its parts contradict each other (an example
+that disagrees with the Javadoc or another example), or a requirement contradicts an existing test
+the spec does not list under "Tests to update". Never drop or reinterpret an example to make the
+suite consistent. Instead, write `/work/out/spec-problems.json` and stop:
+
+```json
+{"problems": [{"requirement": "R2",
+  "files": ["src/main/java/com/example/Clamp.java"],
+  "explanation": "R2's example says clamp(-5, 0, 10) returns -5, but the Javadoc says values below min return min."}]}
+```
+
+Each problem names the requirement (`R1`, …, `intent` or `constraints`), the existing files
+involved, or both, and explains the conflict so a person can fix the spec. noir stops sealing and
+sends the issue back to its author. A requirement that is merely hard to test is not a spec
+problem.

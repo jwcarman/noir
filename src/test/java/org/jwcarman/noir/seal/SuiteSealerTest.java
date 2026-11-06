@@ -67,6 +67,10 @@ class SuiteSealerTest {
   Deque<BiFunction<SealInputs, Path, SealArtifacts>> checkResults;
   List<SealInputs> checkCalls;
   ScriptedAgent agent;
+
+  /** The spec-problem report the Examiner writes on every attempt, or null. */
+  String report;
+
   SealCheckRunner checks;
   Clock clock;
   SuiteSealer suiteSealer;
@@ -83,6 +87,9 @@ class SuiteSealerTest {
     checkCalls = new ArrayList<>();
     agent =
         new ScriptedAgent((n, work) -> {
+          if (report != null) {
+            write(work.resolve("out/spec-problems.json"), report);
+          }
           var src = holdoutSources.isEmpty() ? GOOD_TEST : holdoutSources.pop();
           write(work.resolve("out/holdout/noir/holdout/T.java"), src);
           write(
@@ -521,5 +528,30 @@ class SuiteSealerTest {
     var e = examine();
     assertThat(e.conflictingTests()).containsExactly("com.example.a.ATest");
     assertThat(agent.requests()).hasSize(1);
+  }
+
+  @Test
+  void validReportEndsExaminingWithoutChecks() {
+    report =
+        "{\"problems\":[{\"requirement\":\"R1\",\"explanation\":\"R1 contradicts its example.\"}]}";
+    var e = examine();
+    assertThat(e.specProblems()).isNotNull();
+    assertThat(e.specProblems().problems()).hasSize(1);
+    assertThat(agent.requests()).hasSize(1);
+    assertThat(checkCalls).isEmpty();
+    assertThat(store.readEvents(itemDir))
+        .singleElement()
+        .satisfies(ev -> assertThat(ev.data()).containsEntry("specProblems", 1));
+  }
+
+  @Test
+  void invalidReportIsIgnored() {
+    report = "{\"problems\":[]}";
+    var e = examine();
+    assertThat(e).isEqualTo(new SuiteSealer.Examination("scripted", null, List.of()));
+    assertThat(checkCalls).isNotEmpty();
+    assertThat(store.readEvents(itemDir))
+        .extracting(org.jwcarman.noir.store.Event::type)
+        .contains("spec_problems_invalid", "examiner_attempt");
   }
 }

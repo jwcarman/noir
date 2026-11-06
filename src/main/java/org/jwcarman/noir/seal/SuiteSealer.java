@@ -24,6 +24,7 @@ import org.jwcarman.noir.holdout.HoldoutAnalyzer;
 import org.jwcarman.noir.measure.DiffLines;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.Spec;
+import org.jwcarman.noir.spec.SpecProblems;
 import org.jwcarman.noir.store.Event;
 import org.jwcarman.noir.store.Store;
 
@@ -78,9 +79,17 @@ public final class SuiteSealer {
    * conflictingTests} are the existing test classes (sorted) the reference broke, when those were
    * an attempt's only problems (sealing stops at that attempt); empty otherwise.
    */
-  public record Examination(String model, List<String> problems, List<String> conflictingTests) {
+  public record Examination(
+      String model,
+      List<String> problems,
+      List<String> conflictingTests,
+      SpecProblems specProblems) {
     public Examination {
       conflictingTests = List.copyOf(conflictingTests);
+    }
+
+    public Examination(String model, List<String> problems, List<String> conflictingTests) {
+      this(model, problems, conflictingTests, null);
     }
   }
 
@@ -127,6 +136,26 @@ public final class SuiteSealer {
         out =
             retry.call(() ->
                 examiner.attempt(spec, contract, stubs, inventory, previous, attemptDir, itemDir));
+        if (out.specProblems() instanceof SpecProblems.Valid v) {
+          var data = new LinkedHashMap<String, Object>();
+          data.put("attempt", attempt);
+          data.put("ok", false);
+          data.put("specProblems", v.report().problems().size());
+          data.put("model", out.agent().model());
+          data.put("costUsd", out.agent().costUsd());
+          store.appendEvent(itemDir, Event.of(clock, spec.id(), "examiner_attempt", attempt, data));
+          return new Examination(out.agent().model(), null, List.of(), v.report());
+        }
+        if (out.specProblems() instanceof SpecProblems.Invalid i) {
+          store.appendEvent(
+              itemDir,
+              Event.of(
+                  clock,
+                  spec.id(),
+                  "spec_problems_invalid",
+                  attempt,
+                  Map.of("reason", i.reason())));
+        }
         problems =
             checkSuite(
                 spec, baseSources, itemDir, bundle, stubPackages, inventory, out, attemptDir);

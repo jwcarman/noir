@@ -240,6 +240,17 @@ public final class ApprovalSealer implements ApprovalSealing {
             spec, parsed.stubs(), mainSources(repoDir, baseSha), testSources, itemDir, bundle);
     var examination =
         suiteSealer.examine(spec, parsed.stubs(), stubs, baseSources, itemDir, bundle, inventory);
+    if (examination.specProblems() != null) {
+      var report = examination.specProblems();
+      return reject(
+          item,
+          itemDir,
+          SealRejection.SPEC_PROBLEM,
+          SpecProblemComment.render("Examiner", report),
+          report.problems().stream()
+              .map(p -> (p.requirement() == null ? "" : p.requirement() + ": ") + p.explanation())
+              .toList());
+    }
     if (examination.problems() != null && !examination.conflictingTests().isEmpty()) {
       return reject(
           item,

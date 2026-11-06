@@ -13,6 +13,7 @@ import org.jwcarman.noir.commit.SealedFileException;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.Spec;
+import org.jwcarman.noir.spec.SpecProblems;
 
 /** Runs the Examiner agent and collects its holdout tests and reference implementation. */
 public final class Examiner {
@@ -67,6 +68,13 @@ public final class Examiner {
               + "\n\n"
               + result.resultText()
               + "\n");
+      // A valid report ends the attempt whatever else the Examiner wrote or how it exited.
+      var report =
+          SpecProblems.read(
+              attemptDir.resolve("out/spec-problems.json"), spec, ApprovalSealer.baseFiles(outDir));
+      if (report instanceof SpecProblems.Valid) {
+        return new ExaminerOutput(result, null, null, report);
+      }
       if (result.error() && !hasJavaFiles(attemptDir.resolve("out"))) {
         throw new ExaminerFailedException(
             "Examiner agent failed: "
@@ -76,7 +84,7 @@ public final class Examiner {
       var reference = outDir.resolve("reference");
       replace(attemptDir.resolve("out/holdout"), holdout, "holdout");
       replace(attemptDir.resolve("out/reference"), reference, "reference");
-      return new ExaminerOutput(result, holdout, reference);
+      return new ExaminerOutput(result, holdout, reference, report);
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }

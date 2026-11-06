@@ -327,4 +327,12 @@ class ExaminerPromptTest {
         .contains("update a listed test helper")
         .contains("The builder never sees these files");
   }
+
+  @Test
+  void systemPromptExplainsSpecProblemReports() {
+    assertThat(ExaminerPrompt.system())
+        .contains("## When the spec cannot be satisfied")
+        .contains("`/work/out/spec-problems.json`")
+        .contains("Never drop or reinterpret an example");
+  }
 }

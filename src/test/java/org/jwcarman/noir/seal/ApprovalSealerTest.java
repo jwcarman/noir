@@ -94,6 +94,7 @@ class ApprovalSealerTest {
 
   List<String> baselineCalls = new ArrayList<>();
   List<Integer> examinerRequestsAtBaseline = new ArrayList<>();
+  String examinerReport;
   ScriptedAgent agent;
   ApprovalSealer sealer;
   int issue;
@@ -112,6 +113,9 @@ class ApprovalSealerTest {
     inventoryCallsSeenByExaminer = new ArrayList<>();
     agent =
         new ScriptedAgent((n, work) -> {
+          if (examinerReport != null) {
+            write(work.resolve("out/spec-problems.json"), examinerReport);
+          }
           inventoryCallsSeenByExaminer.add(inventoryCalls.size());
           write(work.resolve("out/holdout/noir/holdout/T.java"), GOOD_TEST);
           write(work.resolve("out/reference/" + referencePath), referenceSource);
@@ -918,5 +922,22 @@ class ApprovalSealerTest {
         ApprovalComments.stubExists(List.of(placeholder)),
         1);
     assertThat(agent.requests()).isEmpty();
+  }
+
+  @Test
+  void examinerReportRejects() {
+    examinerReport =
+        "{\"problems\":[{\"requirement\":\"R1\",\"explanation\":\"R1 contradicts its example.\"}]}";
+
+    var outcome = sealer.seal(item);
+
+    var report =
+        new org.jwcarman.noir.spec.SpecProblems(
+            List.of(
+                new org.jwcarman.noir.spec.SpecProblems.Problem(
+                    "R1", List.of(), "R1 contradicts its example.")));
+    assertRejected(
+        outcome, SealRejection.SPEC_PROBLEM, SpecProblemComment.render("Examiner", report), 1);
+    assertThat(agent.requests()).hasSize(1);
   }
 }

@@ -147,4 +147,39 @@ class ExaminerTest {
     assertThat(req.systemPrompt()).isEqualTo(ExaminerPrompt.system());
     assertThat(attemptDir.resolve("PROMPT.md")).hasContent(req.prompt());
   }
+
+  @Test
+  void reportIsReturnedEvenWithNoJavaFiles() {
+    var agent =
+        new ScriptedAgent((n, work) ->
+            write(
+                work.resolve("out/spec-problems.json"),
+                "{\"problems\":[{\"requirement\":\"R1\",\"explanation\":\"R1 contradicts its example.\"}]}"));
+    var out =
+        new Examiner(agent, NoirConfig.defaults())
+            .attempt(
+                Specs.valid(),
+                List.of(),
+                List.of(),
+                EMPTY_INVENTORY,
+                List.of(),
+                tmp.resolve("attempt-1"),
+                tmp.resolve("draft"));
+    assertThat(out.specProblems()).isInstanceOf(org.jwcarman.noir.spec.SpecProblems.Valid.class);
+  }
+
+  @Test
+  void noReportIsAbsent() {
+    var out =
+        new Examiner(new ScriptedAgent((n, work) -> {}), NoirConfig.defaults())
+            .attempt(
+                Specs.valid(),
+                List.of(),
+                List.of(),
+                EMPTY_INVENTORY,
+                List.of(),
+                tmp.resolve("attempt-1"),
+                tmp.resolve("draft"));
+    assertThat(out.specProblems()).isInstanceOf(org.jwcarman.noir.spec.SpecProblems.Absent.class);
+  }
 }
