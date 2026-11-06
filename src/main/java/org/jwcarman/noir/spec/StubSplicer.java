@@ -338,7 +338,19 @@ public final class StubSplicer {
           && !(callable instanceof CompactConstructorDeclaration)) {
         throw notAllowed(path, describeMember(callable));
       }
-      if (!isUoeBody(callable)) {
+      if (!isAbstractMethod(fragmentType, callable) && !isUoeBody(callable)) {
+        if (callable instanceof MethodDeclaration method
+            && method.getBody().isEmpty()
+            && fragmentType instanceof ClassOrInterfaceDeclaration type
+            && !type.isInterface()
+            && !type.isAbstract()) {
+          throw fail(
+              path,
+              display(callable)
+                  + " has no body in the fragment, but only interfaces and abstract classes can"
+                  + " declare a method without a body",
+              "Give it a body of '" + UOE + "' or declare it in an interface or abstract class.");
+        }
         throw fail(
             path,
             "the body of " + display(callable) + " in the fragment is not exactly '" + UOE + "'",
@@ -372,6 +384,23 @@ public final class StubSplicer {
             + " this way.");
   }
 
+  /**
+   * Whether {@code member} is a method without a body that its type allows: any interface method
+   * that is not {@code default}, {@code static} or {@code private}, or an {@code abstract} method
+   * of an abstract class.
+   */
+  private static boolean isAbstractMethod(TypeDeclaration<?> type, BodyDeclaration<?> member) {
+    if (!(member instanceof MethodDeclaration method)
+        || method.getBody().isPresent()
+        || !(type instanceof ClassOrInterfaceDeclaration declared)) {
+      return false;
+    }
+    if (declared.isInterface()) {
+      return !method.isDefault() && !method.isStatic() && !method.isPrivate();
+    }
+    return declared.isAbstract() && method.isAbstract();
+  }
+
   private static boolean isUoeBody(BodyDeclaration<?> callable) {
     Optional<BlockStmt> body =
         switch (callable) {
@@ -398,6 +427,17 @@ public final class StubSplicer {
       String path, BodyDeclaration<?> base, BodyDeclaration<?> fragment) {
     var signature = display(fragment);
     var hint = "Make it match the file, or give the new behavior a new signature.";
+    if (base instanceof MethodDeclaration baseMethod
+        && fragment instanceof MethodDeclaration fragmentMethod
+        && baseMethod.getBody().isEmpty() != fragmentMethod.getBody().isEmpty()) {
+      var inFragment = fragmentMethod.getBody().isEmpty();
+      throw fail(
+          path,
+          signature
+              + " is abstract in the "
+              + (inFragment ? "fragment but not in the file" : "file but not in the fragment"),
+          hint);
+    }
     if (base instanceof MethodDeclaration baseMethod
         && fragment instanceof MethodDeclaration fragmentMethod
         && !strip(baseMethod.getType()).equals(strip(fragmentMethod.getType()))) {

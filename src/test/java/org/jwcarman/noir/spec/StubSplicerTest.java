@@ -914,4 +914,84 @@ class StubSplicerTest {
     assertRejected(
         BASE, csvFragment(method("void a()")) + "class Other {}\n", "exactly one top-level type");
   }
+
+  // ---- Abstract members ----
+
+  static final String REPO_BASE =
+      "package com.example;\n\nimport java.util.List;\n\npublic interface Repo {\n"
+          + "  /** Old. */\n  List<String> findAll();\n\n"
+          + "  default int size() {\n    return 0;\n  }\n}\n";
+
+  static String repoFragment(String body) {
+    return "package com.example;\n\nimport java.util.List;\nimport java.util.Optional;\n\n"
+        + "public interface Repo {\n"
+        + body
+        + "}\n";
+  }
+
+  @Test
+  void abstractInterfaceMethodIsAdded() {
+    var result =
+        StubSplicer.splice(
+            PATH,
+            REPO_BASE,
+            repoFragment("  /** By tag. */\n  Optional<String> findByTag(String tag);\n"));
+
+    assertThat(result.added()).containsExactly("findByTag(String)");
+    assertThat(result.content())
+        .contains("  /** By tag. */\n  Optional<String> findByTag(String tag);\n}\n")
+        .doesNotContain("UnsupportedOperationException");
+  }
+
+  @Test
+  void abstractMethodInAbstractClassIsAdded() {
+    var base = "package com.example;\n\npublic abstract class A {\n  void a() {}\n}\n";
+    var frag = "package com.example;\n\npublic abstract class A {\n  abstract void b();\n}\n";
+
+    var result = StubSplicer.splice(PATH, base, frag);
+
+    assertThat(result.added()).containsExactly("b()");
+    assertThat(result.content()).contains("  abstract void b();\n}\n");
+  }
+
+  @Test
+  void changedAbstractMethodKeepsDeclarationTakesJavadoc() {
+    var result =
+        StubSplicer.splice(
+            PATH, REPO_BASE, repoFragment("  /** New docs. */\n  List<String> findAll();\n"));
+
+    assertThat(result.changed()).containsExactly("findAll()");
+    assertThat(result.content())
+        .contains("  /** New docs. */\n  List<String> findAll();")
+        .doesNotContain("Old.");
+  }
+
+  @Test
+  void abstractVersusConcreteMismatchRejected() {
+    assertThatThrownBy(() -> StubSplicer.splice(PATH, REPO_BASE, repoFragment("  int size();\n")))
+        .isInstanceOf(SpliceException.class)
+        .hasMessageContaining("is abstract in the fragment but not in the file");
+    assertThatThrownBy(() ->
+            StubSplicer.splice(
+                PATH, REPO_BASE, repoFragment("  List<String> findAll() {\n" + UOE + "  }\n")))
+        .isInstanceOf(SpliceException.class)
+        .hasMessageContaining("is abstract in the file but not in the fragment");
+  }
+
+  @Test
+  void abstractMemberInConcreteClassRejected() {
+    assertThatThrownBy(() ->
+            StubSplicer.splice(PATH, BASE, csvFragment("  public static int count(String t);\n")))
+        .isInstanceOf(SpliceException.class)
+        .hasMessageContaining(
+            "only interfaces and abstract classes can declare a method without a body");
+  }
+
+  @Test
+  void bodylessStaticMethodInInterfaceRejected() {
+    assertThatThrownBy(
+            () -> StubSplicer.splice(PATH, REPO_BASE, repoFragment("  static int other();\n")))
+        .isInstanceOf(SpliceException.class)
+        .hasMessageContaining("is not exactly");
+  }
 }
