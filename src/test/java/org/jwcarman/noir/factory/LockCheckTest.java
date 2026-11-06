@@ -137,8 +137,10 @@ class LockCheckTest {
     assertThat(text)
         .contains(
             "You modified `pom.xml`, added `.mvn/maven.config` and deleted `B.java`. This spec"
-                + " allows changes only to: `A.java`, and new files. Restore those files and make"
-                + " the change another way.");
+                + " allows changes only to: `A.java`, and new files outside `.mvn/`,"
+                + " `src/test/resources/junit-platform.properties` and"
+                + " `src/test/resources/META-INF/services/`. Undo those changes and make the"
+                + " change another way.");
   }
 
   @Test

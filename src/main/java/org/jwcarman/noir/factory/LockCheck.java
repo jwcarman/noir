@@ -70,8 +70,21 @@ final class LockCheck {
     var joined = clauses.isEmpty() ? last : String.join(", ", clauses) + " and " + last;
     var sb = new StringBuilder("You ").append(joined).append(". ");
     sb.append("This spec allows changes only to: ");
-    sb.append(allowed.isEmpty() ? "new files" : list(allowed) + ", and new files");
-    sb.append(". Restore those files and make the change another way.");
+    // When the attempt added a locked new file, "and new files" alone would contradict the
+    // feedback, so the exceptions are named.
+    var newFiles =
+        added.isEmpty()
+            ? "new files"
+            : "new files outside `.mvn/`, `"
+                + TEST_RESOURCES
+                + "junit-platform.properties` and `"
+                + TEST_RESOURCES
+                + "META-INF/services/`";
+    sb.append(allowed.isEmpty() ? newFiles : list(allowed) + ", and " + newFiles);
+    sb.append(
+        added.isEmpty()
+            ? ". Restore those files and make the change another way."
+            : ". Undo those changes and make the change another way.");
     return Optional.of(sb.toString());
   }
 
