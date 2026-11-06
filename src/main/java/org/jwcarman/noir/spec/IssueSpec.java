@@ -15,14 +15,25 @@ public record IssueSpec(
     List<Requirement> requirements,
     List<String> constraints,
     QualityBar qualityBar,
-    List<StubSource> stubs) {
+    List<StubSource> stubs,
+    List<String> modifies,
+    List<String> testsToUpdate) {
 
   private static final String PLACEHOLDER_ID = "nr-01JBX4ZQ8K3V0M7N2P5R6S9T1W";
   private static final String PLACEHOLDER_REPO = "owner/repo";
   private static final String PLACEHOLDER_SHA = "0123456789abcdef0123456789abcdef01234567";
 
   private static final List<String> SECTIONS =
-      List.of("Intent", "API contract", "Requirements", "Constraints", "Quality bar");
+      List.of(
+          "Intent",
+          "API contract",
+          "Requirements",
+          "Tests to update",
+          "Constraints",
+          "Quality bar");
+  private static final String OPTIONAL_SECTION = "Tests to update";
+  private static final String MODIFY_SUFFIX = " (modify)";
+  private static final Pattern TEST_ENTRY = Pattern.compile("^- `([^`]+)`$");
   private static final Pattern FENCE_OPEN = Pattern.compile("^(`{3,})java$");
   private static final Pattern REQ_HEADING = Pattern.compile("^### (R\\d+)$");
   private static final String EXAMPLE_PREFIX = "- **Given**";
@@ -43,6 +54,8 @@ public record IssueSpec(
     requirements = requirements == null ? List.of() : List.copyOf(requirements);
     constraints = constraints == null ? List.of() : List.copyOf(constraints);
     stubs = stubs == null ? List.of() : List.copyOf(stubs);
+    modifies = modifies == null ? List.of() : List.copyOf(modifies);
+    testsToUpdate = testsToUpdate == null ? List.of() : List.copyOf(testsToUpdate);
   }
 
   /**
@@ -87,10 +100,14 @@ public record IssueSpec(
     return line.substring(0, end);
   }
 
-  /** Builds the full {@link Spec} (schemaVersion 1, apiStubs = stub paths in order). */
+  /**
+   * Builds the full {@link Spec} (apiStubs = stub paths in order; schemaVersion 2 when it modifies
+   * files or lists tests).
+   */
   public Spec toSpec(String id, String repo, String baseSha) {
+    boolean v2 = !modifies.isEmpty() || !testsToUpdate.isEmpty();
     return new Spec(
-        1,
+        v2 ? 2 : 1,
         id,
         repo,
         baseSha,
@@ -99,7 +116,9 @@ public record IssueSpec(
         requirements,
         constraints,
         qualityBar,
-        stubs.stream().map(StubSource::path).toList());
+        stubs.stream().map(StubSource::path).toList(),
+        modifies,
+        testsToUpdate);
   }
 
   /**
@@ -192,6 +211,7 @@ public record IssueSpec(
     private final String title;
     private final List<String> problems = new ArrayList<>();
     private final List<Heading> headings = new ArrayList<>();
+    private final List<String> modifies = new ArrayList<>();
 
     Parser(List<String> lines, String title) {
       this.lines = lines;
@@ -211,6 +231,7 @@ public record IssueSpec(
       List<StubSource> stubs = List.of();
       List<Requirement> reqs = List.of();
       List<String> constraints = List.of();
+      List<String> tests = List.of();
       QualityBar bar = null;
       for (int i = 0; i < headings.size(); i++) {
         var h = headings.get(i);
@@ -223,6 +244,7 @@ public record IssueSpec(
           case "Intent" -> intent = String.join("\n", lines.subList(from, to)).strip();
           case "API contract" -> stubs = parseStubs(from, to);
           case "Requirements" -> reqs = parseRequirements(from, to);
+          case "Tests to update" -> tests = parseTests(from, to);
           case "Constraints" -> constraints = parseConstraints(h.line(), from, to);
           case "Quality bar" -> bar = parseBar(h.line(), from, to);
           default -> {}
@@ -231,7 +253,7 @@ public record IssueSpec(
       if (!problems.isEmpty()) {
         throw new IssueSpecException(problems);
       }
-      return new IssueSpec(title, intent, reqs, constraints, bar, stubs);
+      return new IssueSpec(title, intent, reqs, constraints, bar, stubs, modifies, tests);
     }
 
     /** Finds {@code ## } headings outside code fences. Returns false after an unclosed fence. */
@@ -293,7 +315,7 @@ public record IssueSpec(
       }
       for (int idx = 0; idx < SECTIONS.size(); idx++) {
         var name = SECTIONS.get(idx);
-        if (!seen.contains(name)) {
+        if (!seen.contains(name) && !name.equals(OPTIONAL_SECTION)) {
           int at = lines.size();
           for (var h : headings) {
             if (SECTIONS.indexOf(h.name()) > idx) {
@@ -320,6 +342,10 @@ public record IssueSpec(
             problem(pathLine, "expected a ```java code fence after ### " + path);
           }
           path = line.substring(4).strip();
+          if (path.endsWith(MODIFY_SUFFIX)) {
+            path = path.substring(0, path.length() - MODIFY_SUFFIX.length()).strip();
+            modifies.add(path);
+          }
           pathLine = i;
           continue;
         }
@@ -396,6 +422,25 @@ public record IssueSpec(
         }
       }
       return new Requirement(id, String.join("\n", statement).strip(), examples);
+    }
+
+    private List<String> parseTests(int from, int to) {
+      var out = new ArrayList<String>();
+      for (int i = from; i < to; i++) {
+        var line = lines.get(i);
+        if (line.isBlank()) {
+          continue;
+        }
+        var m = TEST_ENTRY.matcher(line);
+        if (m.matches()) {
+          out.add(m.group(1));
+        } else {
+          problem(
+              i,
+              "expected - `<path>` (the path in backticks), for example - `src/test/java/a/BTest.java`");
+        }
+      }
+      return out;
     }
 
     private List<String> parseConstraints(int headingLine, int from, int to) {

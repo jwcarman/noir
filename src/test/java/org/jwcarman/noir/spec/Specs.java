@@ -32,7 +32,9 @@ public final class Specs {
                         "an empty cache", "put(\"\", 1)", "throws IllegalArgumentException")))),
         List.of("no new dependencies"),
         new QualityBar(0.80, 0.70, 30),
-        List.of("src/main/java/com/example/api/Foo.java"));
+        List.of("src/main/java/com/example/api/Foo.java"),
+        List.of(),
+        List.of());
   }
 
   public static Spec counter() {
@@ -41,6 +43,17 @@ public final class Specs {
         .withIntent("A thread-safe counter.\n\nIt counts up from zero.")
         .withApiStubs(List.of("src/main/java/com/example/Counter.java"))
         .withConstraints(List.of());
+  }
+
+  public static Spec withModifyAndTests() {
+    return valid()
+        .withApiStubs(
+            List.of("src/main/java/com/example/New.java", "src/main/java/com/example/Old.java"))
+        .withModifies(List.of("src/main/java/com/example/Old.java"))
+        .withTestsToUpdate(
+            List.of(
+                "src/test/java/com/example/OldTest.java", "src/test/java/com/example/AaTest.java"))
+        .withSchemaVersion(2);
   }
 
   public static List<Spec> all() {

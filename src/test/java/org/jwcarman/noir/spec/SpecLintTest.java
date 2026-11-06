@@ -13,8 +13,8 @@ class SpecLintTest {
 
   @Test
   void requiresSchemaVersion1() {
-    assertThat(SpecLint.lint(Specs.valid().withSchemaVersion(2)))
-        .containsExactly("schemaVersion must be 1");
+    assertThat(SpecLint.lint(Specs.valid().withSchemaVersion(3)))
+        .containsExactly("schemaVersion must be 1 or 2");
   }
 
   @Test
@@ -93,5 +93,68 @@ class SpecLintTest {
   void lintContentSkipsIdentityRules() {
     var spec = Specs.valid().withId(null).withRepo(null).withBaseSha(null);
     assertThat(SpecLint.lintContent(spec)).isEmpty();
+  }
+
+  private static Spec withMods(List<String> modifies, List<String> tests) {
+    return Specs.valid()
+        .withModifies(modifies)
+        .withTestsToUpdate(tests)
+        .withApiStubs(
+            List.of("src/main/java/com/example/api/Foo.java", "src/main/java/com/example/B.java"));
+  }
+
+  @Test
+  void modifyPathMustBeMainJava() {
+    assertThat(SpecLint.lint(withMods(List.of("src/test/java/X.java"), List.of())))
+        .anyMatch(p -> p.contains("src/test/java/X.java") && p.contains("src/main/java/"));
+    assertThat(SpecLint.lint(withMods(List.of("src/main/java/com/example/B.txt"), List.of())))
+        .isNotEmpty();
+  }
+
+  @Test
+  void testPathMustBeTestJava() {
+    assertThat(SpecLint.lint(withMods(List.of(), List.of("src/main/java/X.java"))))
+        .anyMatch(p -> p.contains("Tests to update") && p.contains("src/test/java/"));
+    assertThat(SpecLint.lint(withMods(List.of(), List.of("src/test/java/XTest.txt")))).isNotEmpty();
+    assertThat(SpecLint.lint(withMods(List.of(), List.of("src/test/java/../../x.java"))))
+        .isNotEmpty();
+  }
+
+  @Test
+  void duplicatesAreRejected() {
+    var m = "src/main/java/com/example/B.java";
+    var t = "src/test/java/com/example/BTest.java";
+    assertThat(SpecLint.lint(withMods(List.of(m, m), List.of())))
+        .anyMatch(p -> p.contains("API contract") && p.contains("more than once"));
+    assertThat(SpecLint.lint(withMods(List.of(), List.of(t, t))))
+        .anyMatch(p -> p.contains("Tests to update") && p.contains("more than once"));
+  }
+
+  @Test
+  void pathInBothListsIsRejected() {
+    var p = "src/main/java/com/example/B.java";
+    assertThat(SpecLint.lint(withMods(List.of(p), List.of(p)))).anyMatch(x -> x.contains(p));
+  }
+
+  @Test
+  void validModifyAndTestsHaveNoProblems() {
+    assertThat(
+            SpecLint.lint(
+                withMods(
+                    List.of("src/main/java/com/example/B.java"),
+                    List.of("src/test/java/com/example/BTest.java"))))
+        .isEmpty();
+  }
+
+  @Test
+  void lintMessagesUseIssueWording() {
+    var m = "src/main/java/com/example/B.java";
+    var all = new java.util.ArrayList<String>();
+    all.addAll(SpecLint.lint(withMods(List.of("x", "x"), List.of("y", "y"))));
+    all.addAll(SpecLint.lint(withMods(List.of(m), List.of(m))));
+    assertThat(all).isNotEmpty();
+    assertThat(all)
+        .noneMatch(
+            p -> p.contains("modifies") || p.contains("testsToUpdate") || p.contains("apiStubs"));
   }
 }

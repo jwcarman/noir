@@ -194,7 +194,9 @@ class IssueSpecTest {
             parsed.requirements(),
             parsed.constraints(),
             null,
-            java.util.List.of(new org.jwcarman.noir.render.StubSource("lib/Foo.txt", "x\n")));
+            java.util.List.of(new org.jwcarman.noir.render.StubSource("lib/Foo.txt", "x\n")),
+            null,
+            null);
     var bad =
         new IssueSpec(
             "t",
@@ -202,7 +204,9 @@ class IssueSpecTest {
             parsed.requirements(),
             parsed.constraints(),
             new QualityBar(0, 2, 0),
-            parsed.stubs());
+            parsed.stubs(),
+            null,
+            null);
 
     var problems = new java.util.ArrayList<>(IssueSpec.lint(broken));
     problems.addAll(IssueSpec.lint(bad));
@@ -212,6 +216,8 @@ class IssueSpecTest {
         .noneMatch(p ->
             p.contains("qualityBar")
                 || p.contains("apiStubs")
+                || p.contains("modifies")
+                || p.contains("testsToUpdate")
                 || p.contains("schemaVersion")
                 || p.contains("requirements["));
   }
@@ -225,5 +231,71 @@ class IssueSpecTest {
     assertThat(problems)
         .noneMatch(p -> p.contains(Specs.ID) || p.contains("demo") || p.contains("0123456789"));
     assertThat(problems).noneMatch(p -> p.contains("owner/") || p.contains("nr-"));
+  }
+
+  private static final String OLD = "src/main/java/a/B.java";
+  private static final String TEST = "src/test/java/a/BTest.java";
+
+  @Test
+  void parsesModifyHeading() {
+    var b =
+        body().replace("### src/main/java/com/example/Counter.java", "### " + OLD + " (modify)");
+    var parsed = IssueSpec.parse("t", b);
+    assertThat(parsed.modifies()).containsExactly(OLD);
+    assertThat(parsed.stubs()).extracting(s -> s.path()).containsExactly(OLD);
+  }
+
+  @Test
+  void parsesTestsToUpdate() {
+    var b =
+        body()
+            .replace("## Constraints", "## Tests to update\n\n- `" + TEST + "`\n\n## Constraints");
+    assertThat(IssueSpec.parse("t", b).testsToUpdate()).containsExactly(TEST);
+  }
+
+  @Test
+  void testsToUpdateOutOfOrderIsAProblem() {
+    var b =
+        body()
+            .replace("## Quality bar", "## Tests to update\n\n- `" + TEST + "`\n\n## Quality bar");
+    assertThat(fail(b).problems())
+        .anyMatch(p -> p.matches("line \\d+: ## Constraints must come after ## Tests to update"));
+  }
+
+  @Test
+  void testsToUpdateEntryMustBeBacktickedPath() {
+    var b =
+        body().replace("## Constraints", "## Tests to update\n\n- " + TEST + "\n\n## Constraints");
+    assertThat(fail(b).problems()).anyMatch(p -> p.contains("line ") && p.contains("- `<path>`"));
+  }
+
+  @Test
+  void roundTripWithModifyAndTests() {
+    var spec = Specs.withModifyAndTests();
+    var stubs = Specs.stubsFor(spec);
+    var body = SpecRenderer.issueBody(spec, stubs);
+    assertThat(body).contains("### src/main/java/com/example/Old.java (modify)\n");
+    assertThat(body).doesNotContain("New.java (modify)");
+    assertThat(body).contains("## Tests to update\n\n- `src/test/java/com/example/OldTest.java`\n");
+    var parsed = IssueSpec.parse(spec.title(), body);
+    assertThat(parsed.toSpec(spec.id(), spec.repo(), spec.baseSha())).isEqualTo(spec);
+    assertThat(parsed.stubs()).isEqualTo(stubs);
+    assertThat(SpecRenderer.specBody(spec, stubs))
+        .contains("(modify)")
+        .contains("## Tests to update");
+  }
+
+  @Test
+  void newFileOnlySpecRendersAsBefore() {
+    var spec = Specs.counter();
+    assertThat(body()).doesNotContain("(modify)").doesNotContain("Tests to update");
+    assertThat(
+            IssueSpec.parse("t", body())
+                .toSpec(spec.id(), spec.repo(), spec.baseSha())
+                .schemaVersion())
+        .isEqualTo(1);
+    assertThat(body())
+        .contains("## Requirements\n\n### R1")
+        .contains("\n\n## Constraints\n\n_None._\n\n## Quality bar\n");
   }
 }

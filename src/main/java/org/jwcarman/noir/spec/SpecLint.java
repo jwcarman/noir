@@ -16,8 +16,8 @@ public final class SpecLint {
 
   public static List<String> lint(Spec spec) {
     var problems = new ArrayList<String>();
-    if (spec.schemaVersion() != 1) {
-      problems.add("schemaVersion must be 1");
+    if (spec.schemaVersion() != 1 && spec.schemaVersion() != 2) {
+      problems.add("schemaVersion must be 1 or 2");
     }
     if (!ItemId.isValid(spec.id())) {
       problems.add("id must be a valid noir item id");
@@ -40,6 +40,7 @@ public final class SpecLint {
     lintRequirements(spec.requirements(), problems);
     lintQualityBar(spec.qualityBar(), problems);
     lintStubs(spec.apiStubs(), problems);
+    lintModifies(spec, problems);
     return problems;
   }
 
@@ -97,6 +98,49 @@ public final class SpecLint {
                 + " must be a relative path under src/main/java/ ending in .java");
       }
     }
+  }
+
+  private static void lintModifies(Spec spec, List<String> problems) {
+    var seen = new java.util.HashSet<String>();
+    for (var m : spec.modifies()) {
+      if (!StubLint.isWellFormed(m)) {
+        problems.add(
+            "API contract (modify) entry "
+                + m
+                + " must be a relative path under src/main/java/ ending in .java");
+      }
+      if (!seen.add(m)) {
+        problems.add("API contract lists " + m + " as (modify) more than once");
+      }
+    }
+    var tests = new java.util.HashSet<String>();
+    for (var t : spec.testsToUpdate()) {
+      if (!isTestPath(t)) {
+        problems.add(
+            "Tests to update entry "
+                + t
+                + " must be a relative path under src/test/java/ ending in .java");
+      }
+      if (!tests.add(t)) {
+        problems.add("Tests to update lists " + t + " more than once");
+      }
+    }
+    for (var m : seen) {
+      if (tests.contains(m)) {
+        problems.add(
+            m + " cannot be both an API contract (modify) entry and a Tests to update entry");
+      }
+    }
+  }
+
+  private static boolean isTestPath(String p) {
+    return p != null
+        && p.startsWith("src/test/java/")
+        && p.endsWith(".java")
+        && p.length() > "src/test/java/.java".length()
+        && !p.contains("\\")
+        && java.util.Arrays.stream(p.split("/", -1))
+            .noneMatch(seg -> seg.isEmpty() || seg.equals(".") || seg.equals(".."));
   }
 
   private static void notBlank(String value, String field, List<String> problems) {

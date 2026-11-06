@@ -13,17 +13,32 @@ public record Spec(
     List<Requirement> requirements,
     List<String> constraints,
     QualityBar qualityBar,
-    List<String> apiStubs) {
+    List<String> apiStubs,
+    List<String> modifies,
+    List<String> testsToUpdate) {
 
   public Spec {
     requirements = requirements == null ? List.of() : List.copyOf(requirements);
     constraints = constraints == null ? List.of() : List.copyOf(constraints);
     apiStubs = apiStubs == null ? List.of() : List.copyOf(apiStubs);
+    modifies = modifies == null ? List.of() : List.copyOf(modifies);
+    testsToUpdate = testsToUpdate == null ? List.of() : List.copyOf(testsToUpdate);
   }
 
   public Spec withSchemaVersion(int v) {
     return new Spec(
-        v, id, repo, baseSha, title, intent, requirements, constraints, qualityBar, apiStubs);
+        v,
+        id,
+        repo,
+        baseSha,
+        title,
+        intent,
+        requirements,
+        constraints,
+        qualityBar,
+        apiStubs,
+        modifies,
+        testsToUpdate);
   }
 
   public Spec withId(String v) {
@@ -37,7 +52,9 @@ public record Spec(
         requirements,
         constraints,
         qualityBar,
-        apiStubs);
+        apiStubs,
+        modifies,
+        testsToUpdate);
   }
 
   public Spec withRepo(String v) {
@@ -51,12 +68,25 @@ public record Spec(
         requirements,
         constraints,
         qualityBar,
-        apiStubs);
+        apiStubs,
+        modifies,
+        testsToUpdate);
   }
 
   public Spec withBaseSha(String v) {
     return new Spec(
-        schemaVersion, id, repo, v, title, intent, requirements, constraints, qualityBar, apiStubs);
+        schemaVersion,
+        id,
+        repo,
+        v,
+        title,
+        intent,
+        requirements,
+        constraints,
+        qualityBar,
+        apiStubs,
+        modifies,
+        testsToUpdate);
   }
 
   public Spec withTitle(String v) {
@@ -70,7 +100,9 @@ public record Spec(
         requirements,
         constraints,
         qualityBar,
-        apiStubs);
+        apiStubs,
+        modifies,
+        testsToUpdate);
   }
 
   public Spec withIntent(String v) {
@@ -84,26 +116,104 @@ public record Spec(
         requirements,
         constraints,
         qualityBar,
-        apiStubs);
+        apiStubs,
+        modifies,
+        testsToUpdate);
   }
 
   public Spec withRequirements(List<Requirement> v) {
     return new Spec(
-        schemaVersion, id, repo, baseSha, title, intent, v, constraints, qualityBar, apiStubs);
+        schemaVersion,
+        id,
+        repo,
+        baseSha,
+        title,
+        intent,
+        v,
+        constraints,
+        qualityBar,
+        apiStubs,
+        modifies,
+        testsToUpdate);
   }
 
   public Spec withConstraints(List<String> v) {
     return new Spec(
-        schemaVersion, id, repo, baseSha, title, intent, requirements, v, qualityBar, apiStubs);
+        schemaVersion,
+        id,
+        repo,
+        baseSha,
+        title,
+        intent,
+        requirements,
+        v,
+        qualityBar,
+        apiStubs,
+        modifies,
+        testsToUpdate);
   }
 
   public Spec withQualityBar(QualityBar v) {
     return new Spec(
-        schemaVersion, id, repo, baseSha, title, intent, requirements, constraints, v, apiStubs);
+        schemaVersion,
+        id,
+        repo,
+        baseSha,
+        title,
+        intent,
+        requirements,
+        constraints,
+        v,
+        apiStubs,
+        modifies,
+        testsToUpdate);
   }
 
   public Spec withApiStubs(List<String> v) {
     return new Spec(
-        schemaVersion, id, repo, baseSha, title, intent, requirements, constraints, qualityBar, v);
+        schemaVersion,
+        id,
+        repo,
+        baseSha,
+        title,
+        intent,
+        requirements,
+        constraints,
+        qualityBar,
+        v,
+        modifies,
+        testsToUpdate);
+  }
+
+  public Spec withModifies(List<String> v) {
+    return new Spec(
+        schemaVersion,
+        id,
+        repo,
+        baseSha,
+        title,
+        intent,
+        requirements,
+        constraints,
+        qualityBar,
+        apiStubs,
+        v,
+        testsToUpdate);
+  }
+
+  public Spec withTestsToUpdate(List<String> v) {
+    return new Spec(
+        schemaVersion,
+        id,
+        repo,
+        baseSha,
+        title,
+        intent,
+        requirements,
+        constraints,
+        qualityBar,
+        apiStubs,
+        modifies,
+        v);
   }
 }

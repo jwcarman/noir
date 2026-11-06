@@ -12,7 +12,11 @@ public final class SpecJson {
 
   public static Spec read(Path path) {
     try {
-      return Json.mapper().readValue(path.toFile(), Spec.class);
+      var spec = Json.mapper().readValue(path.toFile(), Spec.class);
+      if (spec.schemaVersion() != 1 && spec.schemaVersion() != 2) {
+        throw new IOException("unsupported schemaVersion " + spec.schemaVersion());
+      }
+      return spec;
     } catch (IOException e) {
       throw new UncheckedIOException("Cannot read spec " + path + ": " + e.getMessage(), e);
     }

@@ -34,6 +34,7 @@ public final class SpecRenderer {
       var fence = fenceFor(stub.content());
       sb.append("### ")
           .append(stub.path())
+          .append(spec.modifies().contains(stub.path()) ? " (modify)" : "")
           .append("\n\n")
           .append(fence)
           .append("java\n")
@@ -54,6 +55,11 @@ public final class SpecRenderer {
             .append(e.then())
             .append('\n');
       }
+      sb.append('\n');
+    }
+    if (!spec.testsToUpdate().isEmpty()) {
+      sb.append("## Tests to update\n\n");
+      spec.testsToUpdate().forEach(t -> sb.append("- `").append(t).append("`\n"));
       sb.append('\n');
     }
     sb.append("## Constraints\n\n");
@@ -96,7 +102,9 @@ public final class SpecRenderer {
                     List.of(new Example("TODO given", "TODO when", "TODO then")))),
             List.of("TODO"),
             new QualityBar(0.80, 0.70, 30),
-            List.of(path));
+            List.of(path),
+            List.of(),
+            List.of());
     return issueBody(
         spec, List.of(new StubSource(path, "// TODO: declare the public API surface here.\n")));
   }
