@@ -177,7 +177,8 @@ export_artifacts() {
   copy_tree "$BUILD/repo/target/classes" "$OUT/export/classes" \
     && copy_tree "$BUILD/runtime-deps" "$OUT/export/deps" \
     && copy_tree "$BUILD/test-deps" "$OUT/export/deps" \
-    && drop_junit_jars "$OUT/export/deps"
+    && drop_junit_jars "$OUT/export/deps" \
+    && drop_flagged_jars "$OUT/export/deps"
 }
 
 # The grader's classpath is the runtime and test-scope jars, de-duplicated by file name (the second
@@ -185,6 +186,13 @@ export_artifacts() {
 # supplies JUnit.
 drop_junit_jars() {
   rm -f -- "$1"/junit-*.jar "$1"/opentest4j-*.jar "$1"/apiguardian-api-*.jar
+}
+
+# Nor do jars ForbiddenScan would reject (a test engine's JUnit service registration, a manifest
+# Class-Path, ...): the seal checks leave them out the same way. The builder's classes are still
+# scanned (forbidden step). Prints the names of the jars it deleted.
+drop_flagged_jars() {
+  java /opt/noir/bin/ForbiddenScan.java --drop-flagged-jars "$1"
 }
 
 holdout_sources() {

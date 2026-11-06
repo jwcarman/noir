@@ -64,6 +64,7 @@ stub_build() {
     && mvn -B "${MVN_REPO[@]}" "$DEPENDENCY_PLUGIN:copy-dependencies" \
       -DincludeScope=test -DoutputDirectory="$OUT/deps" \
     && drop_junit_jars "$OUT/deps" \
+    && drop_flagged_jars "$OUT/deps" \
     && ls "$OUT/deps" >"$OUT/deps.txt"
 }
 
@@ -73,13 +74,21 @@ drop_junit_jars() {
   mkdir -p "$1" && rm -f -- "$1"/junit-*.jar "$1"/opentest4j-*.jar "$1"/apiguardian-api-*.jar
 }
 
+# Neither do jars the grader's ForbiddenScan would reject (a test engine's JUnit service
+# registration, a manifest Class-Path, ...): grading leaves them out the same way. Prints the
+# names of the jars it deleted.
+drop_flagged_jars() {
+  java /opt/noir/bin/ForbiddenScan.java --drop-flagged-jars "$1"
+}
+
 # The repository's runtime and test-scope libraries at the base commit, without the stubs:
 # libraries.txt (group:artifact:version, sorted) and packages.txt (the package of every class in
-# their jars, sorted), both without JUnit's own jars. A repository without a pom has neither.
+# their jars, sorted), both without the jars a hidden-test classpath leaves out (JUnit's own and
+# those ForbiddenScan flags). A repository without a pom has neither.
 inventory() {
   : >"$OUT/libraries.txt" && : >"$OUT/packages.txt" && cd "$REPO" || return 1
   [ -f pom.xml ] || return 0
-  local listing=/tmp/noir-dependencies.txt scope jar
+  local listing=/tmp/noir-dependencies.txt dropped=/tmp/noir-dropped-jars.txt scope jar
   rm -f "$listing"
   for scope in runtime test; do
     mvn -B "${MVN_REPO[@]}" "$DEPENDENCY_PLUGIN:list" -DincludeScope="$scope" \
@@ -88,12 +97,19 @@ inventory() {
       -DoutputDirectory="$OUT/deps" || return 1
   done
   drop_junit_jars "$OUT/deps" || return 1
+  drop_flagged_jars "$OUT/deps" >"$dropped" || return 1
+  cat "$dropped"
   # Lines look like "   group:artifact:type[:classifier]:version:scope[ -- module ...]"; the
-  # artifact and version name the jar, so JUnit's are dropped by the same file-name patterns.
+  # artifact, version and classifier name the jar (artifact-version[-classifier].jar), so a library
+  # is left out by the same file-name patterns as JUnit's jars, or when its jar was dropped.
   sed -e 's/ -- .*//' -e 's/^[[:space:]]*//' "$listing" \
-    | awk -F: 'NF >= 5 { print $1 ":" $2 ":" $(NF - 1) }' \
-    | awk -F: '{ jar = $2 "-" $3 ".jar" }
-        jar !~ /^(junit-|opentest4j-|apiguardian-api-)/ { print }' \
+    | awk -F: 'NF >= 5 {
+        jar = $2 "-" $(NF - 1) (NF >= 6 ? "-" $4 : "") ".jar"
+        print $1 ":" $2 ":" $(NF - 1) "\t" jar
+      }' \
+    | awk -F'\t' 'FILENAME == ARGV[1] { dropped[$0] = 1; next }
+        !($2 in dropped) && $2 !~ /^(junit-|opentest4j-|apiguardian-api-)/ { print $1 }' \
+      "$dropped" - \
     | LC_ALL=C sort -u >"$OUT/libraries.txt" || return 1
   local entries=/tmp/noir-jar-entries.txt
   : >"$entries"

@@ -645,4 +645,58 @@ class ContainerSealCheckRunnerIT {
             fixture("reference"));
     assertThat(SealJudge.judge(runner.run(inputs, out), config.sealDiscrimination())).isNotEmpty();
   }
+
+  /** A one-commit repository whose test scope holds the engine fixture (a JUnit service jar). */
+  static Path engineBundle(Path tmp) throws Exception {
+    var work = Files.createDirectories(tmp.resolve("engine-work"));
+    GitFixtures.git(work, "init", "-q", "-b", "main");
+    BuildFixtures.write(
+        work,
+        java.util.Map.of(
+            "pom.xml",
+            BuildFixtures.POM_WITH_JUNIT
+                .formatted(BuildFixtures.ENGINE_FIXTURE_REPOSITORY)
+                .replace("</dependencies>\n", BuildFixtures.ENGINE_FIXTURE_DEPENDENCY),
+            "src/main/java/com/example/api/Placeholder.java",
+            "package com.example.api;\n\npublic final class Placeholder {}\n"));
+    BuildFixtures.writeEngineFixtureRepository(work);
+    GitFixtures.git(work, "add", ".");
+    GitFixtures.git(work, "commit", "-q", "-m", "initial");
+    var b = tmp.resolve("engine.bundle");
+    git.bundle(work, git.revParse(work, "HEAD"), b);
+    return b;
+  }
+
+  /**
+   * A test-scope jar that registers a JUnit service is left out of the hidden tests' classpath, the
+   * inventory's libraries and its packages, the same way the grader leaves it out.
+   */
+  @Test
+  void jarWithAJUnitServiceIsLeftOut(@TempDir Path tmp) throws Exception {
+    var b = engineBundle(tmp);
+    var head = git.revParse(tmp.resolve("engine-work"), "HEAD");
+
+    var inventoryDir = tmp.resolve("inventory");
+    var files = new ContainerSealCheckRunner(docker, config).inventory(b, head, inventoryDir);
+    assertThat(files.libraries())
+        .as(new SealArtifacts(inventoryDir).logTail("inventory", 40))
+        .contains("org.jspecify:jspecify:1.0.0")
+        .noneMatch(l -> l.contains("engine-fixture"));
+    assertThat(files.packages())
+        .contains("org.jspecify.annotations")
+        .doesNotContain("com.example.engine");
+
+    var inputs =
+        SealInputs.of(
+            Specs.valid().withBaseSha(head),
+            b,
+            fixture("stubs"),
+            fixture("holdout-good"),
+            fixture("reference"));
+    var artifacts = new ContainerSealCheckRunner(docker, config).run(inputs, out);
+    assertThat(artifacts.exit("stub-build")).as(artifacts.logTail("stub-build", 40)).contains(0);
+    assertThat(artifacts.read("deps.txt").lines())
+        .isNotEmpty()
+        .noneMatch(n -> n.startsWith("engine-fixture"));
+  }
 }

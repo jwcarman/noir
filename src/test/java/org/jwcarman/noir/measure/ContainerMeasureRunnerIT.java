@@ -261,6 +261,31 @@ import java.time.Duration;
     }
   }
 
+  /**
+   * A test-scope jar that registers a JUnit service (as a third-party test engine does) is left out
+   * of the exported dependencies, so the forbidden scan stays clean and measurement passes.
+   */
+  @Test
+  void jarWithAJUnitServiceIsLeftOutOfTheExport() throws Exception {
+    var files = correct();
+    files.put(
+        "pom.xml",
+        BuildFixtures.pom(BuildFixtures.ENGINE_FIXTURE_REPOSITORY)
+            .replace("</dependencies>\n", BuildFixtures.ENGINE_FIXTURE_DEPENDENCY));
+    var m = measure(attempt(files, BuildFixtures::writeEngineFixtureRepository));
+    assertThat(m.artifacts().read("forbidden.txt"))
+        .as(m.artifacts().logTail("export", 40))
+        .isEmpty();
+    assertThat(m.outcome())
+        .as(m.artifacts().logTail("build", 80))
+        .isInstanceOf(MeasureOutcome.Passed.class);
+    try (var names = Files.list(m.artifacts().exportDeps())) {
+      var jars = names.map(f -> f.getFileName().toString()).toList();
+      assertThat(jars).isNotEmpty().noneMatch(n -> n.startsWith("engine-fixture"));
+    }
+    assertThat(m.artifacts().read("export.log")).contains("engine-fixture-1.0.jar");
+  }
+
   @Test
   void missingMethodIsAContractViolation() {
     var files = correct();

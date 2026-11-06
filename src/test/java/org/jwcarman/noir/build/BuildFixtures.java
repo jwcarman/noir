@@ -144,6 +144,79 @@ public final class BuildFixtures {
     }
   }
 
+  /**
+   * A test-scope dependency like a third-party test engine: {@code
+   * com.example.noir:engine-fixture:1.0} registers a JUnit {@code TestEngine} (an empty service
+   * file, so a JUnit run that loads it finds no engine) and holds one class, {@code
+   * com.example.engine.Marker}. {@link #writeEngineFixtureRepository} writes it to a file-based
+   * Maven repository inside a project, which {@link #ENGINE_FIXTURE_REPOSITORY} declares.
+   */
+  public static final String ENGINE_FIXTURE_DEPENDENCY =
+      """
+        <dependency>
+          <groupId>com.example.noir</groupId>
+          <artifactId>engine-fixture</artifactId>
+          <version>1.0</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+      """;
+
+  public static final String ENGINE_FIXTURE_REPOSITORY =
+      """
+      <repositories>
+        <repository>
+          <id>engine-fixture</id>
+          <url>file://${project.basedir}/fixture-repo</url>
+        </repository>
+      </repositories>
+      """;
+
+  /** Writes the engine fixture's jar and pom under {@code project}/fixture-repo. */
+  public static void writeEngineFixtureRepository(Path project) {
+    var dir = project.resolve("fixture-repo/com/example/noir/engine-fixture/1.0");
+    try {
+      Files.createDirectories(dir);
+      Files.writeString(
+          dir.resolve("engine-fixture-1.0.pom"),
+          """
+          <?xml version="1.0" encoding="UTF-8"?>
+          <project xmlns="http://maven.apache.org/POM/4.0.0">
+            <modelVersion>4.0.0</modelVersion>
+            <groupId>com.example.noir</groupId>
+            <artifactId>engine-fixture</artifactId>
+            <version>1.0</version>
+          </project>
+          """);
+      try (var jar =
+          new java.util.jar.JarOutputStream(
+              Files.newOutputStream(dir.resolve("engine-fixture-1.0.jar")))) {
+        jar.putNextEntry(
+            new java.util.jar.JarEntry("META-INF/services/org.junit.platform.engine.TestEngine"));
+        jar.write("# no engine\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        jar.closeEntry();
+        jar.putNextEntry(new java.util.jar.JarEntry("com/example/engine/Marker.class"));
+        jar.write(markerClass());
+        jar.closeEntry();
+      }
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  /** {@code public final class com.example.engine.Marker {}}, compiled. */
+  private static byte[] markerClass() throws IOException {
+    var src = Files.createTempDirectory("noir-marker");
+    var file = src.resolve("Marker.java");
+    Files.writeString(file, "package com.example.engine;\n\npublic final class Marker {}\n");
+    var javac = javax.tools.ToolProvider.getSystemJavaCompiler();
+    if (javac.run(null, null, null, "--release", "21", "-d", src.toString(), file.toString())
+        != 0) {
+      throw new IllegalStateException("could not compile Marker");
+    }
+    return Files.readAllBytes(src.resolve("com/example/engine/Marker.class"));
+  }
+
   private static String read(Path p) {
     try {
       return Files.readString(p);

@@ -50,6 +50,17 @@ class ForbiddenScanTest {
     return Files.readAllLines(result);
   }
 
+  /** Runs the scan's drop mode on {@code deps}; returns what it printed. */
+  String dropFlaggedJars() throws Exception {
+    var script =
+        Path.of(ForbiddenScanTest.class.getResource("/docker/grader/ForbiddenScan.java").toURI());
+    var r =
+        new ProcessCommandRunner()
+            .run(Command.of("java", script.toString(), "--drop-flagged-jars", deps.toString()));
+    assertThat(r.ok()).as(r.tail(20)).isTrue();
+    return r.stdout();
+  }
+
   void jar(String name, Map<String, byte[]> entries) throws IOException {
     try (OutputStream out = Files.newOutputStream(deps.resolve(name));
         var zip = new ZipOutputStream(out)) {
@@ -223,5 +234,34 @@ class ForbiddenScanTest {
                 bytes("junit.jupiter.execution.timeout.mode=disabled\n")));
     assertThat(scan())
         .anyMatch(l -> l.contains("mr-slash.jar") && l.contains("junit-platform.properties"));
+  }
+
+  /**
+   * Drop mode removes every jar the scan would flag (here a JUnit engine registration and a
+   * manifest Class-Path) and keeps the rest, so the scan of what is left is clean.
+   */
+  @Test
+  void dropModeRemovesFlaggedJarsOnly() throws Exception {
+    jar("ok-1.0.jar", Map.of("a/B.class", bytes("x")));
+    jar(
+        "engine-1.0.jar",
+        Map.of(
+            "META-INF/services/org.junit.platform.engine.TestEngine", bytes("# none\n"),
+            "com/example/engine/E.class", bytes("x")));
+    jar("cp-1.0.jar", Map.of("META-INF/MANIFEST.MF", bytes(CLASS_PATH_MANIFEST)));
+
+    var printed = dropFlaggedJars();
+
+    assertThat(printed.lines()).containsExactly("cp-1.0.jar", "engine-1.0.jar");
+    try (var left = Files.list(deps)) {
+      assertThat(left.map(p -> p.getFileName().toString())).containsExactly("ok-1.0.jar");
+    }
+    assertThat(scan()).isEmpty();
+  }
+
+  @Test
+  void dropModeOnAMissingDirectoryDoesNothing() throws Exception {
+    Files.delete(deps);
+    assertThat(dropFlaggedJars()).isEmpty();
   }
 }

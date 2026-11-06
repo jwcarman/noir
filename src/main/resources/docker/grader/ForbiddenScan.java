@@ -1,4 +1,5 @@
 // noir grader pre-scan. Usage: java ForbiddenScan.java <classesDir> <depsDir> <outFile>
+//                        or: java ForbiddenScan.java --drop-flagged-jars <depsDir>
 //
 // Lists everything in the builder's classes and dependency jars that could subvert grading:
 // holdout lookalikes, JUnit service registrations, a root junit-platform.properties (each also under
@@ -10,6 +11,12 @@
 // grade.sh runs the tests only if this exits 0 and leaves an empty file. The scan fails closed:
 // anything unexpected becomes a problem line. It only reads files and zip entries and never loads
 // builder classes.
+//
+// --drop-flagged-jars deletes every plainly named jar in <depsDir> that this scan would flag (for
+// example a test engine's JUnit service registration, or a manifest Class-Path) and prints each
+// deleted file name, one per line. noir runs it on the repository's dependency jars before they
+// reach a hidden-test classpath, so such a library is left out rather than failing every grade;
+// the builder's classes are still scanned. It exits non-zero if a jar cannot be deleted.
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -29,6 +36,10 @@ public class ForbiddenScan {
   static final List<String> problems = new ArrayList<>();
 
   public static void main(String[] args) throws IOException {
+    if (args.length == 2 && args[0].equals("--drop-flagged-jars")) {
+      dropFlaggedJars(Path.of(args[1]));
+      return;
+    }
     var out = Path.of(args[2]);
     try {
       scanClasses(Path.of(args[0]));
@@ -123,7 +134,32 @@ public class ForbiddenScan {
     }
   }
 
+  static void dropFlaggedJars(Path deps) throws IOException {
+    if (!Files.isDirectory(deps, LinkOption.NOFOLLOW_LINKS)) {
+      return;
+    }
+    List<Path> entries;
+    try (var s = Files.list(deps)) {
+      entries = s.sorted().toList();
+    }
+    for (var p : entries) {
+      var name = p.getFileName().toString();
+      if (Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)
+          && JAR_NAME.matcher(name).matches()
+          && !jarProblems(p).isEmpty()) {
+        Files.delete(p);
+        System.out.println(name);
+      }
+    }
+  }
+
   static void scanJar(Path jar) {
+    problems.addAll(jarProblems(jar));
+  }
+
+  /** The problems in one dependency jar's manifest and entries; empty when it is clean. */
+  static List<String> jarProblems(Path jar) {
+    var problems = new ArrayList<String>();
     try (var jf = new JarFile(jar.toFile(), false)) {
       var manifest = jf.getManifest();
       if (manifest != null && manifest.getMainAttributes().containsKey(Attributes.Name.CLASS_PATH)) {
@@ -144,5 +180,6 @@ public class ForbiddenScan {
     } catch (Throwable t) {
       problems.add(jar + ": cannot be scanned (" + t + ")");
     }
+    return problems;
   }
 }
