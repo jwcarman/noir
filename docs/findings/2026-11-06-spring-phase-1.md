@@ -163,3 +163,16 @@ permanently disabled in Java 24, and a Spring-compatible policy would be long an
 protection rests on the builder never seeing the sealed tests, the commitment, the grader
 container (no network, read-only mounts) and the forbidden-file scan. Lost: protection against
 builder code tampering with the test JVM at run time.
+
+## Phase 2 acceptance (2026-11-06)
+
+Branch `plan-7-spring-hidden-tests`, server with the Maven mirror configured.
+
+| Spec | Hidden tests | Seal | Build | Cost | Notes |
+|---|---|---|---|---|---|
+| noir-bookmarks #7 `findByTag` (abstract repository method, Spring Data query, two fakes listed) | `@DataJpaTest`, service | attempt 1 after a fix | attempt 1, all passed | $1.56 (incl. $0.84 before the fix) | found: the Examiner never saw listed test files; fixed in `f3b2750` (they now appear under Current source) |
+| noir-bookmarks #9 search (two abstract methods, JPQL with LIKE escaping, paging) | `@DataJpaTest`, service | attempt 2 (attempt 1: a hidden test disagreed with its own reference) | attempt 1, all passed | $1.67 | |
+| noir-bookmarks #12 `PUT /bookmarks/{id}` (replaced a PATCH spec at the user's request) | `@WebMvcTest` with MockMvc, service | attempt 1 | attempt 1, all passed | $0.84 | |
+| noir-test #53 `Base62` (plain JUnit regression) | JUnit | attempt 1 | attempt 1, all passed | $0.33 | inventory lists only JUnit 6's `jspecify` |
+
+The layered changes that could not seal in Phase 1 (an abstract repository method, a JPA adapter change, a changed test fake, a web endpoint) now seal and build without shaping the code around noir.
