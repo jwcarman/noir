@@ -117,9 +117,9 @@ become the **API stubs**. Design them so the hidden tests can exercise the behav
   the API surface.
 - **The Examiner never sees the repository.** If a signature mentions an existing type, the
   Examiner knows only what the spec says about it. Prefer new types plus JDK types.
-- **Stubs are new files only.** noir rejects the spec if any stub path already exists on the
-  default branch. To extend existing behavior, design the new API as new classes (for example a
-  new class that wraps or uses an existing one) rather than adding members to an existing type.
+- **New files or changes to existing files.** A stub for a new file must not exist on the
+  default branch; to change an existing class, use a modify entry as described in "Changing
+  existing code" below.
 - **Behavior lives in methods that throw in the stub.** Every holdout test must fail against the
   stubs, so behavior cannot hide in code the stub already implements (record accessors, enum
   constants, constants, default methods with real bodies). Constructors that validate their
@@ -167,6 +167,31 @@ Also ask about **constraints**: rules the builder must respect that are not beha
 Before publishing, read the whole spec back to the user in plain language and resolve any
 contradictions or gaps.
 
+### 4d. Changing existing code
+
+Use this when the work changes a Java file that already exists on the default branch. Everything
+else stays a new-file stub. A changed file is declared with a heading `### <path> (modify)` under
+`## API contract`; noir then locks the build so that only the files the spec lists (the modify
+targets and the tests under `## Tests to update`) plus new files may change.
+
+1. Find the default branch (`gh repo view <repo> --json defaultBranchRef -q
+   .defaultBranchRef.name`), run `git fetch origin <default-branch>` once, and read each target
+   with `git show origin/<default-branch>:<path>`.
+2. Under `### <path> (modify)` write a **fragment**: the same `package` line and the enclosing
+   type, holding only the new and changed members (not the whole file), each with Javadoc and a
+   body that is only `throw new UnsupportedOperationException();`. Unchanged members are left out
+   and stay as they are.
+3. Search `src/test/java` with grep for the names of the changed members and for the type itself,
+   and **ask** the user which of the files you found belong under `## Tests to update` (a
+   section between `## Requirements` and `## Constraints`, one backticked path per bullet, such as
+   ``- `src/test/java/com/example/FooTest.java` ``). Never guess: show what grep found and let the
+   user decide; leave the section out if they list none.
+4. Check against the real code until clean:
+
+```
+noir spec check <tmpdir>/body.md --title "<title>" --repo .
+```
+
 ## 5. Check, approve, publish
 
 Run the mechanical check with the agreed title and fix every problem it reports (one per line),
@@ -176,16 +201,20 @@ repeating until it prints `OK`:
 noir spec check <tmpdir>/body.md --title "<title>"
 ```
 
-Then confirm every stub is a new file. Find the default branch with
-`gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`, run
-`git fetch origin <default-branch>` once, and for each `### <path>` in `## API contract` run:
+If the spec has modify entries or tests to update, add `--repo .` so noir checks them against the
+default branch (see section 4d); `--repo .` needs `origin/HEAD`, and if the check says it is not
+set, run `git remote set-head origin --auto` and check again. The rule is: new-file stubs must not exist; modify targets must exist.
+For the new-file stubs, confirm that by hand as well. Find the default
+branch with `gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`, run
+`git fetch origin <default-branch>` once, and for each stub without `(modify)` run:
 
 ```
 git cat-file -e origin/<default-branch>:<path>
 ```
 
-It succeeds when the file exists. If any stub path exists, noir would reject the spec: revise the
-API with the user so that path becomes a new class, and check again.
+It succeeds when the file exists. If a new-file stub path exists, noir would reject the spec:
+either make that entry a `(modify)` entry with the user's agreement, or revise the API so the
+path becomes a new class, and check again.
 
 Show the user the exact title and the full body and ask them to approve **that exact text**.
 Make any changes they ask for, re-check, and show it again. Do not publish without explicit
@@ -214,8 +243,9 @@ section 7.
    comment on the issue (`gh issue view N --repo <repo> --comments`): read it and address its
    problems.
 3. Revise with the user, one question at a time, using the guidance in section 4. Check with
-   `noir spec check <tmpdir>/body.md --title "<title>"` until `OK`, then confirm every stub
-   path is a new file with the `git cat-file -e` check from section 5.
+   `noir spec check <tmpdir>/body.md --title "<title>"` until `OK` (add `--repo .` when the
+   spec modifies files), then confirm every new-file stub path is new with the `git cat-file -e`
+   check from section 5.
 4. Show the user a diff of `original.md` against `body.md`, and on explicit approval run
    `gh issue edit N --repo <repo> --body-file <tmpdir>/body.md` (add `--title "<title>"` if the
    title changed). Delete the scratch directory (`rm -rf <tmpdir>`).

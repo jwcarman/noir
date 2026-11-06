@@ -19,7 +19,15 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    `## API contract` (the public API stubs), numbered `## Requirements`
    (R1, R2, … each with given/when/then examples), `## Constraints` and a
    `## Quality bar`. The issue title is the spec title. Drafts carry the
-   `noir:draft` label.
+   `noir:draft` label. A spec can also **modify existing Java files**: an
+   `### <path> (modify)` entry under `## API contract` holds a fragment with
+   only the new and changed members (bodies throw
+   `UnsupportedOperationException`), which noir splices into the file on the
+   default branch. An optional `## Tests to update` section lists existing
+   tests the build may change. **Lock rule:** for every spec, a build may
+   change only the files the spec lists (modify targets and tests to update)
+   plus new files; any other change rejects the attempt. Check a spec against
+   a local clone with `noir spec check <file> --title <t> --repo .`.
 2. **Approve.** A human reviews the issue and adds `noir:ready`. Only humans
    add that label; it is the approval.
 3. **Seal.** The server asks a separate *Examiner* agent to write a
@@ -147,6 +155,8 @@ Formatting is enforced with Spotless (google-java-format).
 - [`docs/superpowers/specs/2026-11-05-noir-approval-flow-design.md`](docs/superpowers/specs/2026-11-05-noir-approval-flow-design.md):
   approval with `noir:ready` and sealing on the server, which replace the
   v1 desktop seal flow.
+- [`docs/superpowers/specs/2026-11-05-noir-modify-existing-code-design.md`](docs/superpowers/specs/2026-11-05-noir-modify-existing-code-design.md):
+  modifying existing Java files (Plan 6).
 
 ## License
 

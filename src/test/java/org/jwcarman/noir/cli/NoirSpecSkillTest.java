@@ -179,17 +179,42 @@ class NoirSpecSkillTest {
   void skillOnlyOffersNewStubFilesAndChecksThemBeforePublishing() throws IOException {
     var skill = SkillCommandTest.skillResource();
 
-    // The server rejects any stub whose path exists on the default branch (STUB_EXISTS).
+    // New-file stubs must not exist; modify targets must exist (Plan 6).
     assertThat(skill)
+        .contains("new-file stubs must not exist; modify targets must exist")
         .doesNotContainIgnoringCase("complete current content")
         .doesNotContainIgnoringCase("replaces that whole file")
         .doesNotContainIgnoringCase("stub for an existing file")
         .doesNotContainIgnoringCase("extend an existing class, the stub")
         .doesNotContainIgnoringCase("prefer new files")
+        .doesNotContainIgnoringCase("stubs are new files only")
         .contains("git fetch origin <default-branch>")
         .contains("git cat-file -e origin/<default-branch>:<path>");
     assertThat(skill.indexOf("git cat-file -e"))
         .as("checked before the issue is created")
         .isLessThan(skill.indexOf("gh issue create"));
+  }
+
+  @Test
+  void skillDescribesModifySpecs() throws IOException {
+    var skill = SkillCommandTest.skillResource();
+
+    assertThat(skill)
+        .contains("(modify)")
+        .contains("## Tests to update")
+        .contains("git show origin/<default-branch>:<path>")
+        .contains("noir spec check <tmpdir>/body.md --title \"<title>\" --repo .")
+        .contains("src/test/java");
+    assertThat(skill).containsIgnoringCase("grep");
+  }
+
+  @Test
+  void skillNeverGuessesTestsToUpdate() throws IOException {
+    var skill = SkillCommandTest.skillResource();
+    var from = skill.indexOf("Changing existing code");
+    assertThat(from).isNotNegative();
+    var section = skill.substring(from);
+
+    assertThat(section).contains("ask").containsIgnoringCase("never guess");
   }
 }

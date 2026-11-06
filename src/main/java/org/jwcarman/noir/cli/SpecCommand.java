@@ -3,13 +3,20 @@ package org.jwcarman.noir.cli;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.regex.Pattern;
+import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.factory.Secrets;
+import org.jwcarman.noir.git.GitCli;
+import org.jwcarman.noir.git.GitException;
+import org.jwcarman.noir.git.GitPort;
 import org.jwcarman.noir.render.SpecRenderer;
 import org.jwcarman.noir.spec.IssueSpec;
 import org.jwcarman.noir.spec.IssueSpecException;
+import org.jwcarman.noir.spec.SpliceException;
+import org.jwcarman.noir.spec.StubSplicer;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
@@ -44,6 +51,15 @@ final class SpecCommand implements Runnable {
 
     @Option(names = "--issue", description = "Check a GitHub issue: owner/repo#number.")
     String issue;
+
+    @Option(
+        names = "--repo",
+        description = "Also check the spec against origin/HEAD of this local clone.")
+    Path repo;
+
+    private List<String> checkAgainstRepo(IssueSpec parsed) {
+      return checkAgainstRepoWith(new GitCli(new ProcessCommandRunner()), repo, parsed);
+    }
 
     @Override
     public Integer call() {
@@ -89,9 +105,16 @@ final class SpecCommand implements Runnable {
       }
       List<String> problems;
       try {
-        problems = IssueSpec.lint(IssueSpec.parse(useTitle, body));
+        var parsed = IssueSpec.parse(useTitle, body);
+        problems = new ArrayList<>(IssueSpec.lint(parsed));
+        if (repo != null) {
+          problems.addAll(checkAgainstRepo(parsed));
+        }
       } catch (IssueSpecException e) {
         problems = e.problems();
+      } catch (RepoNotReadyException | GitException e) {
+        out.println(e.getMessage());
+        return 1;
       }
       if (problems.isEmpty()) {
         out.println("OK");
@@ -100,6 +123,46 @@ final class SpecCommand implements Runnable {
       problems.forEach(out::println);
       return 1;
     }
+  }
+
+  private static final class RepoNotReadyException extends RuntimeException {
+    RepoNotReadyException(String message) {
+      super(message);
+    }
+  }
+
+  private static List<String> checkAgainstRepoWith(GitPort git, Path repo, IssueSpec parsed) {
+    String base;
+    try {
+      base = git.revParse(repo, "origin/HEAD");
+    } catch (GitException e) {
+      throw new RepoNotReadyException(
+          "origin/HEAD is not set; run `git remote set-head origin --auto`");
+    }
+    var problems = new ArrayList<String>();
+    for (var stub : parsed.stubs()) {
+      var path = stub.path();
+      if (parsed.modifies().contains(path)) {
+        var source = git.show(repo, base, path);
+        if (source.isEmpty()) {
+          problems.add("modify target " + path + " does not exist on the default branch");
+          continue;
+        }
+        try {
+          StubSplicer.splice(path, source.get(), stub.content());
+        } catch (SpliceException e) {
+          problems.add("modify target " + path + ": " + e.getMessage());
+        }
+      } else if (git.exists(repo, base, path)) {
+        problems.add("API stub " + path + " already exists on the default branch");
+      }
+    }
+    for (var test : parsed.testsToUpdate()) {
+      if (!git.exists(repo, base, test)) {
+        problems.add("test to update " + test + " does not exist on the default branch");
+      }
+    }
+    return problems;
   }
 
   @Command(name = "template", description = "Print a starting spec body.")
