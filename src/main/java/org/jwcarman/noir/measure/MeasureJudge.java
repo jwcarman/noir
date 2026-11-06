@@ -260,6 +260,7 @@ public final class MeasureJudge {
         new MeasureOutcome.Metrics(
             lines == 0 ? 1.0 : covered / (double) lines,
             mutants == 0 ? 1.0 : detected / (double) mutants,
+            mutants,
             maxCrap,
             changedClasses);
     if (failing.isEmpty()) {

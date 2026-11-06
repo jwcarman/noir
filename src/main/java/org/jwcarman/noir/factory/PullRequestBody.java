@@ -15,7 +15,8 @@ import org.jwcarman.noir.feedback.RequirementResult;
  */
 public final class PullRequestBody {
   /** Aggregate measurement across the changed classes. */
-  public record Metrics(double lineCoverage, double mutationScore, double maxCrap) {}
+  /** {@code mutationScore} is {@code null} when there was nothing to mutate. */
+  public record Metrics(double lineCoverage, Double mutationScore, double maxCrap) {}
 
   /**
    * Where the delivered work came from. Null values render as {@code unknown}. The costs are the
@@ -52,7 +53,11 @@ public final class PullRequestBody {
         .append(metrics.map(m -> pct(m.lineCoverage())).orElse("n/a"))
         .append(" |\n");
     sb.append("| Mutation score | ")
-        .append(metrics.map(m -> pct(m.mutationScore())).orElse("n/a"))
+        .append(
+            metrics
+                .map(m ->
+                    m.mutationScore() == null ? "n/a (nothing to mutate)" : pct(m.mutationScore()))
+                .orElse("n/a"))
         .append(" |\n");
     sb.append("| Max CRAP (changed classes) | ")
         .append(metrics.map(m -> String.format(Locale.ROOT, "%.1f", m.maxCrap())).orElse("n/a"))

@@ -464,7 +464,11 @@ class MeasureJudgeTest {
     assertThat(r).isInstanceOf(MeasureOutcome.Passed.class);
     assertThat(r.m().lineCoverage()).isEqualTo(1.0);
     assertThat(r.m().mutationScore()).isEqualTo(1.0);
+    assertThat(r.m().mutants()).isEqualTo(1);
     assertThat(r.m().maxCrap()).isEqualTo(1.0);
+    // Line 4 only: nothing on it can be mutated, which the PR shows as "n/a", not 100%.
+    var none = MeasureJudge.judge(a, BAR, CHANGED, Map.of("com.example.Calc", Set.of(4)));
+    assertThat(none.m().mutants()).isZero();
     // Lines 3 and 7: one of two changed lines covered, one of two mutants killed.
     var half = MeasureJudge.judge(a, BAR, CHANGED, Map.of("com.example.Calc", Set.of(3, 7)));
     assertThat(half.m().lineCoverage()).isEqualTo(0.5);

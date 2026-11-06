@@ -437,6 +437,7 @@ public final class Factory implements ItemDriver {
       var m = outcome.m();
       data.put("lineCoverage", m.lineCoverage());
       data.put("mutationScore", m.mutationScore());
+      data.put("mutants", m.mutants());
       data.put("maxCrap", m.maxCrap());
       data.put("changedClasses", m.changedClasses());
     }
@@ -614,7 +615,10 @@ public final class Factory implements ItemDriver {
             .map(e ->
                 new PullRequestBody.Metrics(
                     num(e.data().get("lineCoverage")),
-                    num(e.data().get("mutationScore")),
+                    // No mutants to score: not applicable rather than 100%.
+                    Integer.valueOf(0).equals(e.data().get("mutants"))
+                        ? null
+                        : num(e.data().get("mutationScore")),
                     num(e.data().get("maxCrap"))));
     var files =
         retry.call(

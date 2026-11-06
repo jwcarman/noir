@@ -24,6 +24,21 @@ class PullRequestBodyTest {
   static final List<RequirementResult> RESULTS =
       List.of(new RequirementResult("R1", 4, 4), new RequirementResult("R2", 3, 3));
 
+  /** A change with nothing PIT can mutate (a message, a constant) is not a 100% score. */
+  @Test
+  void mutationScoreWithoutMutantsIsNotApplicable() {
+    var body =
+        PullRequestBody.render(
+            1,
+            Optional.of(new PullRequestBody.Metrics(1.0, null, 2.0)),
+            RESULTS,
+            PROV,
+            List.of(),
+            List.of(),
+            false);
+    assertThat(body).contains("| Mutation score | n/a (nothing to mutate) |");
+  }
+
   @Test
   void rendersExactSections() {
     var body =
