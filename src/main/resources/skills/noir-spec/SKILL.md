@@ -211,8 +211,9 @@ noir spec check <tmpdir>/body.md --title "<title>"
 ```
 
 If the spec has modify entries or tests to update, add `--repo .` so noir checks them against the
-default branch (see section 4d); `--repo .` needs `origin/HEAD`, and if the check says it is not
-set, run `git remote set-head origin --auto` and check again. The rule is:
+default branch (see section 4d); `--repo .` uses `origin/HEAD`, falling back to `origin/main` or
+`origin/master`, and if the check says none exists, run the commands it names and check again. The
+rule is:
 new-file stubs must not exist; modify targets must exist.
 For the new-file stubs, confirm that by hand as well. Find the default
 branch with `gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`, run

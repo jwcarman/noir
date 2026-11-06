@@ -132,17 +132,29 @@ final class SpecCommand implements Runnable {
     }
   }
 
+  /**
+   * The commit of {@code origin}'s default branch: {@code origin/HEAD}, or {@code origin/main} or
+   * {@code origin/master} when that is not set (a clone made by {@code gh repo create --source} has
+   * no {@code origin/HEAD}).
+   */
+  private static String defaultBranchCommit(GitPort git, Path repo) {
+    for (var ref : List.of("origin/HEAD", "origin/main", "origin/master")) {
+      try {
+        return git.revParse(repo, ref);
+      } catch (GitException e) {
+        // try the next one
+      }
+    }
+    throw new RepoNotReadyException(
+        "none of origin/HEAD, origin/main or origin/master exists; run `git fetch origin` and"
+            + " `git remote set-head origin --auto`");
+  }
+
   private static List<String> checkAgainstRepoWith(GitPort git, Path repo, IssueSpec parsed) {
     if (!Files.isDirectory(repo.resolve(".git")) && !Files.isRegularFile(repo.resolve(".git"))) {
       throw new RepoNotReadyException("--repo " + repo + " is not a git repository");
     }
-    String base;
-    try {
-      base = git.revParse(repo, "origin/HEAD");
-    } catch (GitException e) {
-      throw new RepoNotReadyException(
-          "origin/HEAD is not set; run `git remote set-head origin --auto`");
-    }
+    var base = defaultBranchCommit(git, repo);
     var problems = new ArrayList<String>();
     for (var stub : parsed.stubs()) {
       var path = stub.path();

@@ -188,16 +188,30 @@ class SpecCommandTest {
                 + "` already exists on the default branch; stubs may only add new files");
   }
 
+  /** A clone made by {@code gh repo create --source} has no origin/HEAD (noir-bookmarks). */
   @Test
-  void repoOptionWithoutOriginHeadFails() throws IOException {
+  void repoOptionWithoutOriginHeadFallsBackToOriginMain() throws IOException {
     var repo = cloneRepo();
     GitFixtures.git(repo, "remote", "set-head", "origin", "-d");
     var file = write(cleanBody());
 
     assertThat(run("spec", "check", file.toString(), "--title", "t", "--repo", repo.toString()))
+        .isZero();
+  }
+
+  @Test
+  void repoOptionWithoutAnyDefaultBranchFails() throws IOException {
+    var repo = cloneRepo();
+    GitFixtures.git(repo, "remote", "set-head", "origin", "-d");
+    GitFixtures.git(repo, "update-ref", "-d", "refs/remotes/origin/main");
+    var file = write(cleanBody());
+
+    assertThat(run("spec", "check", file.toString(), "--title", "t", "--repo", repo.toString()))
         .isEqualTo(1);
     assertThat(out.toString() + err)
-        .contains("origin/HEAD is not set; run `git remote set-head origin --auto`");
+        .contains(
+            "none of origin/HEAD, origin/main or origin/master exists; run `git fetch origin`"
+                + " and `git remote set-head origin --auto`");
   }
 
   @Test
