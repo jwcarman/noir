@@ -101,7 +101,7 @@ public final class SpecRenderer {
                     "TODO: one testable statement of behaviour.",
                     List.of(new Example("TODO given", "TODO when", "TODO then")))),
             List.of("TODO"),
-            new QualityBar(0.80, 0.70, 30),
+            QualityBar.DEFAULT,
             List.of(path),
             List.of(),
             List.of());

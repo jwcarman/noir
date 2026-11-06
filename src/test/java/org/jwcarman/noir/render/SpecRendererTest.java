@@ -76,7 +76,9 @@ class SpecRendererTest {
   void templateIsASkeleton() {
     assertThat(SpecRenderer.template("Add X"))
         .startsWith("## Intent\n")
-        .contains("### src/main/java/TODO.java", "### R1", "TODO");
+        .contains("### src/main/java/TODO.java", "### R1", "TODO")
+        .contains(
+            "- Line coverage ≥ 90%\n- Mutation score ≥ 80%\n- Max CRAP score per method ≤ 15\n");
   }
 
   @Test

@@ -20,7 +20,7 @@ class ConfigLoaderTest {
     var c = ConfigLoader.load(tmp.resolve("config.yaml"));
     assertThat(c).isEqualTo(NoirConfig.defaults());
     assertThat(c.repos()).isEmpty();
-    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.80, 0.70, 30));
+    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.90, 0.80, 15));
     assertThat(c.sealDiscrimination()).isEqualTo(0.70);
     assertThat(c.budgets())
         .isEqualTo(new NoirConfig.Budgets(200, Duration.ofMinutes(60), new BigDecimal("10.00")));
@@ -48,7 +48,7 @@ class ConfigLoaderTest {
         """);
     var c = ConfigLoader.load(tmp.resolve("config.yaml"));
     assertThat(c.repos()).containsExactly("jwcarman/demo");
-    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.80, 0.6, 30));
+    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.90, 0.6, 15));
     assertThat(c.budgets().wallClock()).isEqualTo(Duration.ofMinutes(30));
     assertThat(c.budgets().turns()).isEqualTo(200);
     assertThat(c.pollInterval()).isEqualTo(Duration.ofMinutes(2));
@@ -62,7 +62,7 @@ class ConfigLoaderTest {
     var c = ConfigLoader.load(tmp.resolve("config.yaml"));
     assertThat(c.examiner())
         .isEqualTo(new NoirConfig.Examiner("claude-opus-5-5", 100, Duration.ofMinutes(30), 2));
-    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.80, 0.70, 15));
+    assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.90, 0.80, 15));
   }
 
   @Test

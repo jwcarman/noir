@@ -75,7 +75,7 @@ public record NoirConfig(
   public static NoirConfig defaults() {
     return new NoirConfig(
         List.of(),
-        new QualityBar(0.80, 0.70, 30),
+        QualityBar.DEFAULT,
         0.70,
         new Budgets(200, Duration.ofMinutes(60), new BigDecimal("10.00")),
         3,
