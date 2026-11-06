@@ -152,11 +152,21 @@ real_dir() {
 
 # copy_tree <src> <dst>: regular files and directories only; symlinks, FIFOs and the like are
 # dropped. A missing or symlinked source gives an empty tree.
+# Contents are written with cat, never cp: on Docker Desktop's macOS file sharing, cp's chmod of
+# a freshly written file into the bind mount intermittently fails with "Operation not permitted"
+# (noir-bookmarks #3, #5), which failed the step although every byte was copied.
 copy_tree() {
   mkdir -p "$2" || return 1
   real_dir "$1" || return 0
-  cp -R --no-preserve=all -- "$1/." "$2/" || return 1
-  find "$2" ! -type f ! -type d -delete
+  (
+    cd -- "$1" || exit 1
+    find . -type d -print0 | while IFS= read -r -d '' d; do
+      mkdir -p -- "$2/$d" || exit 1
+    done || exit 1
+    find . -type f -print0 | while IFS= read -r -d '' f; do
+      cat -- "$f" >"$2/$f" || exit 1
+    done
+  )
 }
 
 clone() {
