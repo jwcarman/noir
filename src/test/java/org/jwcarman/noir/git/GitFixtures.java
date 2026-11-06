@@ -24,6 +24,11 @@ public final class GitFixtures {
         <dependencies>
           <dependency>
             <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>6.1.3</version>
+          </dependency>
+          <dependency>
+            <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <version>6.1.3</version>
             <scope>test</scope>

@@ -44,10 +44,24 @@ class LockCheckTest {
   }
 
   @Test
-  void renameOfAllowedPathNeedsBothPathsAllowed() {
+  void renamingAnAllowedPathAwayIsAViolation() {
     var r = new FileChange(Status.RENAMED, "new.txt", "src/main/java/Csv.java", 0, 0);
     assertThat(LockCheck.violation(csv, List.of(r)))
         .hasValueSatisfying(t -> assertThat(t).startsWith("You deleted `src/main/java/Csv.java`."));
+  }
+
+  @Test
+  void modifyTargetDeletedIsAViolation() {
+    assertThat(LockCheck.violation(csv, List.of(change(Status.DELETED, "src/main/java/Csv.java"))))
+        .hasValueSatisfying(t -> assertThat(t).startsWith("You deleted `src/main/java/Csv.java`."));
+  }
+
+  @Test
+  void listedTestDeletedIsAViolation() {
+    assertThat(
+            LockCheck.violation(csv, List.of(change(Status.DELETED, "src/test/java/CsvTest.java"))))
+        .hasValueSatisfying(
+            t -> assertThat(t).startsWith("You deleted `src/test/java/CsvTest.java`."));
   }
 
   @Test

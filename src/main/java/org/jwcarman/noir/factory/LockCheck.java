@@ -11,8 +11,8 @@ import org.jwcarman.noir.spec.Spec;
 
 /**
  * Rejects an attempt that changes an existing file the spec does not allow. Only the files in
- * {@code modifies} and {@code testsToUpdate} may change; new files are always allowed. Applies to
- * every spec.
+ * {@code modifies} and {@code testsToUpdate} may be modified, and none may be deleted or renamed;
+ * new files are always allowed. Applies to every spec.
  */
 final class LockCheck {
 
@@ -33,16 +33,8 @@ final class LockCheck {
             modified.add(c.path());
           }
         }
-        case DELETED -> {
-          if (!allowed.contains(c.path())) {
-            deleted.add(c.path());
-          }
-        }
-        case RENAMED -> {
-          if (!allowed.contains(c.oldPath()) || !allowed.contains(c.path())) {
-            deleted.add(c.oldPath());
-          }
-        }
+        case DELETED -> deleted.add(c.path());
+        case RENAMED -> deleted.add(c.oldPath());
       }
     }
     if (modified.isEmpty() && deleted.isEmpty()) {

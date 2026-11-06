@@ -41,11 +41,6 @@ record SealedItemFixture(
   }
 
   static SealedItemFixture create(Path root) {
-    return create(root, List.of());
-  }
-
-  /** {@code modifies} lists the existing files the builder is allowed to change. */
-  static SealedItemFixture create(Path root, List<String> modifies) {
     var home = new NoirHome(root.resolve("home"));
     var store = new Store(home);
     var github = new FakeGitHub().withNoirLabels("jwcarman/demo");
@@ -59,7 +54,6 @@ record SealedItemFixture(
             .withTitle("Counter")
             .withBaseSha(baseSha)
             .withApiStubs(List.of(COUNTER_PATH))
-            .withModifies(modifies)
             .withRequirements(
                 List.of(
                     new Requirement(

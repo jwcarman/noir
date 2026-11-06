@@ -28,6 +28,7 @@ import org.jwcarman.noir.build.BuildRunner;
 import org.jwcarman.noir.commit.Commitments;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.deliver.FakeBranchPublisher;
+import org.jwcarman.noir.deliver.FileChange;
 import org.jwcarman.noir.deliver.PatchTooLargeException;
 import org.jwcarman.noir.docker.DockerException;
 import org.jwcarman.noir.feedback.FeedbackInput;
@@ -210,10 +211,7 @@ class FactoryTest {
 
   @Test
   void lockViolationIsContractViolationRework() throws IOException {
-    bundles.changes =
-        List.of(
-            new org.jwcarman.noir.deliver.FileChange(
-                org.jwcarman.noir.deliver.FileChange.Status.MODIFIED, "pom.xml", null, 1, 0));
+    bundles.changes = List.of(new FileChange(FileChange.Status.MODIFIED, "pom.xml", null, 1, 0));
 
     drive();
 
@@ -990,7 +988,7 @@ class FactoryTest {
   static final class FakeBundles implements Bundles {
     String patch = "+class Counter {}\n";
     boolean tooLarge;
-    java.util.List<org.jwcarman.noir.deliver.FileChange> changes = java.util.List.of();
+    List<FileChange> changes = List.of();
 
     @Override
     public List<String> commitsSince(Path bundle, String baseSha, String branch) {
@@ -998,8 +996,7 @@ class FactoryTest {
     }
 
     @Override
-    public java.util.List<org.jwcarman.noir.deliver.FileChange> fileChanges(
-        Path bundle, String baseSha, String branch) {
+    public List<FileChange> fileChanges(Path bundle, String baseSha, String branch) {
       return changes;
     }
 
