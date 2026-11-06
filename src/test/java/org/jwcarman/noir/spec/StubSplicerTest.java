@@ -987,6 +987,52 @@ class StubSplicerTest {
             "only interfaces and abstract classes can declare a method without a body");
   }
 
+  static final String SHAPE_BASE =
+      "package com.example;\n\npublic abstract class Shape {\n"
+          + "  /** Old. */\n  public abstract double area();\n\n"
+          + "  public String name() {\n    return \"shape\";\n  }\n}\n";
+
+  static String shapeFragment(String body) {
+    return "package com.example;\n\npublic abstract class Shape {\n" + body + "}\n";
+  }
+
+  @Test
+  void changedAbstractMethodInAbstractClassKeepsDeclarationTakesJavadoc() {
+    var result =
+        StubSplicer.splice(
+            PATH,
+            SHAPE_BASE,
+            shapeFragment("  /** New docs. */\n  public abstract double area();\n"));
+
+    assertThat(result.changed()).containsExactly("area()");
+    assertThat(result.content())
+        .contains("  /** New docs. */\n  public abstract double area();")
+        .contains("return \"shape\";")
+        .doesNotContain("Old.");
+  }
+
+  @Test
+  void abstractVersusConcreteMismatchInAbstractClassRejected() {
+    assertThatThrownBy(() ->
+            StubSplicer.splice(
+                PATH, SHAPE_BASE, shapeFragment("  public abstract String name();\n")))
+        .isInstanceOf(SpliceException.class)
+        .hasMessageContaining("name() is abstract in the fragment but not in the file");
+    assertThatThrownBy(() ->
+            StubSplicer.splice(
+                PATH, SHAPE_BASE, shapeFragment("  public double area() {\n" + UOE + "  }\n")))
+        .isInstanceOf(SpliceException.class)
+        .hasMessageContaining("area() is abstract in the file but not in the fragment");
+  }
+
+  @Test
+  void bodylessConcreteMethodInAbstractClassRejected() {
+    assertRejected(
+        SHAPE_BASE,
+        shapeFragment("  public double perimeter();\n"),
+        "perimeter() has no body; in an abstract class only an abstract method may omit its body");
+  }
+
   @Test
   void bodylessStaticMethodInInterfaceRejected() {
     assertThatThrownBy(

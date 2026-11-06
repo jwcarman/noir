@@ -351,6 +351,16 @@ public final class StubSplicer {
                   + " declare a method without a body",
               "Give it a body of '" + UOE + "' or declare it in an interface or abstract class.");
         }
+        if (callable instanceof MethodDeclaration method
+            && method.getBody().isEmpty()
+            && fragmentType instanceof ClassOrInterfaceDeclaration type
+            && !type.isInterface()) {
+          throw fail(
+              path,
+              display(callable)
+                  + " has no body; in an abstract class only an abstract method may omit its body",
+              "Declare it abstract, or give it a body of '" + UOE + "'.");
+        }
         throw fail(
             path,
             "the body of " + display(callable) + " in the fragment is not exactly '" + UOE + "'",
