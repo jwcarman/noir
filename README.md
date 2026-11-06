@@ -75,7 +75,7 @@ the way, mirrored as `noir:*` labels on the issue (`noir:draft`, `noir:ready`,
 
 ## Requirements
 
-- Java 21 and Maven (to build noir)
+- Java 21 or later and Maven (to build noir)
 - [`gh`](https://cli.github.com/) authenticated with `repo` scope
 
 The **server** additionally needs Docker (Docker Desktop is fine; give it
@@ -83,7 +83,7 @@ The **server** additionally needs Docker (Docker Desktop is fine; give it
 `CLAUDE_CODE_OAUTH_TOKEN`. The **desktop** needs neither Docker nor a
 credential.
 
-Target repositories must be single-module Maven projects on Java 21.
+Target repositories must be single-module Maven projects whose `maven.compiler.release` is 17 to 25; noir builds and tests them on JDK 25.
 
 ## Quick start
 
