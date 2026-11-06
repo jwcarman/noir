@@ -2,12 +2,16 @@ package org.jwcarman.noir.docker;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
 import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
 
@@ -89,5 +93,28 @@ class BuilderImageIT {
                 .withNetwork(false));
     assertThat(r.ok()).as(r.tail(60)).isTrue();
     assertThat(r.stdout()).contains("status='KILLED'");
+  }
+
+  @Test
+  void mavenResolvesThroughTheMirror(@TempDir Path tmp) throws IOException {
+    Files.writeString(
+        tmp.resolve("pom.xml"),
+        """
+        <project>
+          <modelVersion>4.0.0</modelVersion>
+          <groupId>x</groupId><artifactId>x</artifactId><version>1</version>
+        </project>
+        """);
+    var mirror = "http://mirror-it.invalid:9/releases";
+    var mirrored =
+        MirroredContainerPort.wrap(docker, TAG, Optional.of(mirror), tmp.resolve("noir"));
+    var r =
+        mirrored.run(
+            ContainerSpec.of(TAG, "sh", "-c", "cd /project && mvn -B compile; true")
+                .withMounts(List.of(Mount.ro(tmp.resolve("pom.xml"), "/project/pom.xml")))
+                .withLimits(NoirConfig.defaults().limits()));
+    // Plugin resolution fails (the host does not exist), and Maven names the mirror it used.
+    var out = r.stdout() + r.stderr();
+    assertThat(out).contains("noir-mirror").contains(mirror);
   }
 }

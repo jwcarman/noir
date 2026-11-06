@@ -2,8 +2,11 @@ package org.jwcarman.noir.config;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import org.jwcarman.noir.spec.QualityBar;
 
 /** noir configuration, loaded from {@code ~/.noir/config.yaml} (spec §9.2). */
@@ -18,7 +21,8 @@ public record NoirConfig(
     Limits limits,
     Images images,
     Timeouts timeouts,
-    Examiner examiner) {
+    Examiner examiner,
+    Maven maven) {
 
   public NoirConfig {
     repos = repos == null ? List.of() : List.copyOf(repos);
@@ -43,6 +47,29 @@ public record NoirConfig(
   /** Examiner agent settings. {@code model == null} means the Claude CLI default. */
   public record Examiner(String model, int maxTurns, Duration wallClock, int attempts) {}
 
+  /** Maven settings. {@code mirror}, when set, is an http(s) URL that serves Maven Central. */
+  public record Maven(String mirror) {
+    public Maven {
+      if (mirror != null && !isHttpUrl(mirror)) {
+        throw new IllegalArgumentException("maven.mirror must be an http or https URL");
+      }
+    }
+
+    public Optional<String> mirrorUrl() {
+      return Optional.ofNullable(mirror);
+    }
+
+    private static boolean isHttpUrl(String text) {
+      try {
+        var uri = new URI(text);
+        return ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
+            && uri.getHost() != null;
+      } catch (URISyntaxException e) {
+        return false;
+      }
+    }
+  }
+
   public static NoirConfig defaults() {
     return new NoirConfig(
         List.of(),
@@ -55,6 +82,7 @@ public record NoirConfig(
         new Limits(2.0, "4g", 512),
         new Images("noir-builder:0.1.0", "noir-grader:0.1.0"),
         new Timeouts(Duration.ofSeconds(10), Duration.ofMinutes(10)),
-        new Examiner(null, 100, Duration.ofMinutes(30), 3));
+        new Examiner(null, 100, Duration.ofMinutes(30), 3),
+        new Maven(null));
   }
 }

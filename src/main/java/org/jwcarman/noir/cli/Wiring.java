@@ -17,6 +17,7 @@ import org.jwcarman.noir.config.ConfigLoader;
 import org.jwcarman.noir.deliver.GitBranchPublisher;
 import org.jwcarman.noir.docker.DockerCli;
 import org.jwcarman.noir.docker.Images;
+import org.jwcarman.noir.docker.MirroredContainerPort;
 import org.jwcarman.noir.exec.ProcessCommandRunner;
 import org.jwcarman.noir.factory.Daemon;
 import org.jwcarman.noir.factory.Dispositions;
@@ -62,10 +63,14 @@ final class Wiring {
     var config = ConfigLoader.load(home.config());
     var runner = new ProcessCommandRunner();
     var runLabel = DockerCli.runLabel(home);
-    var docker = new DockerCli(runner, runLabel);
+    var dockerCli = new DockerCli(runner, runLabel);
+    var tmp = tempRoot(home);
+    // Builder-image containers get the optional Maven mirror; everything else is unchanged.
+    var docker =
+        MirroredContainerPort.wrap(
+            dockerCli, config.images().builder(), config.maven().mirrorUrl(), tmp);
     Images.ensureBuilder(docker, config.images().builder());
     var graderImageId = Images.ensureGrader(docker, config.images().grader());
-    var tmp = tempRoot(home);
     var store = new Store(home);
     var gh = new GhCli(runner);
     var clock = Clock.systemUTC();

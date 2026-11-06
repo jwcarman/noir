@@ -108,6 +108,20 @@ the same `--home`, e.g. `bin/noir --home ~/noir-server run` with
 `~/noir-server/config.yaml`. Restart `noir run` after rebuilding noir: the
 running server keeps the old code.
 
+Optionally, send Maven Central traffic from noir's containers to a caching
+proxy (useful when a large dependency tree draws HTTP 429 from Central):
+
+```yaml
+maven:
+  mirror: http://host.docker.internal:8081/releases
+```
+
+The value must be an `http` or `https` URL. noir writes a Maven settings file
+under its home and mounts it read-only into every builder-image container
+(`MAVEN_ARGS=-s /opt/noir/maven-settings.xml`); only `central` is mirrored, so
+repositories a project declares itself still go direct. Absent, nothing
+changes.
+
 Credentials are passed to containers through a private env file, never on the
 command line, and every outbound GitHub text is checked for them.
 

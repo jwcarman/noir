@@ -92,4 +92,28 @@ class ConfigLoaderTest {
     assertThatThrownBy(() -> ConfigLoader.load(tmp.resolve("config.yaml")))
         .hasMessageContaining("soon");
   }
+
+  @Test
+  void mirrorAbsentByDefault() {
+    assertThat(ConfigLoader.load(tmp.resolve("none.yaml")).maven().mirrorUrl()).isEmpty();
+  }
+
+  @Test
+  void mirrorIsParsed() throws IOException {
+    Files.writeString(
+        tmp.resolve("config.yaml"),
+        "maven:\n  mirror: http://host.docker.internal:8081/releases\n");
+    assertThat(ConfigLoader.load(tmp.resolve("config.yaml")).maven().mirrorUrl())
+        .contains("http://host.docker.internal:8081/releases");
+  }
+
+  @Test
+  void mirrorMustBeHttpOrHttpsUrl() throws IOException {
+    for (var bad : new String[] {"ftp://x", "not a url", "http://"}) {
+      Files.writeString(tmp.resolve("config.yaml"), "maven:\n  mirror: \"" + bad + "\"\n");
+      assertThatThrownBy(() -> ConfigLoader.load(tmp.resolve("config.yaml")))
+          .as(bad)
+          .hasMessageContaining("maven.mirror must be an http or https URL");
+    }
+  }
 }

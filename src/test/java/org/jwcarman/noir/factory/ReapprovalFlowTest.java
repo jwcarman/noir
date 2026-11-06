@@ -249,7 +249,8 @@ class ReapprovalFlowTest {
         d.limits(),
         d.images(),
         d.timeouts(),
-        d.examiner());
+        d.examiner(),
+        d.maven());
   }
 
   static BuildRunner unusedBuilder() {
