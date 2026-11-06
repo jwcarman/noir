@@ -210,8 +210,12 @@ class ApprovalSealerTest {
 
   void assertRejected(SealOutcome outcome, SealRejection reason, String comment, int problems) {
     assertThat(outcome).isEqualTo(new SealOutcome.Rejected(reason, comment));
-    assertThat(event("seal_rejected").data())
-        .isEqualTo(Map.of("reason", reason.eventValue(), "problems", problems));
+    var data = event("seal_rejected").data();
+    assertThat(data)
+        .containsEntry("reason", reason.eventValue())
+        .containsEntry("problems", problems)
+        .containsOnlyKeys("reason", "problems", "details");
+    assertThat(data.get("details")).asList().hasSize(problems);
     assertThat(github.comments(issue)).as("the caller posts rejection comments").isEmpty();
     assertThat(eventTypes()).doesNotContain("sealed", "commitment_posted");
     for (var leftover :
@@ -446,6 +450,12 @@ class ApprovalSealerTest {
     assertThat(outcome.reason()).isEqualTo(SealRejection.SUITE_TOO_WEAK);
     assertThat(outcome.comment()).isEqualTo(expected);
     assertRejected(outcome, SealRejection.SUITE_TOO_WEAK, expected, 1);
+    // The public comment only summarizes; the server's own event keeps the full problems.
+    assertThat(event("seal_rejected").data().get("details"))
+        .asList()
+        .singleElement()
+        .asString()
+        .startsWith("holdout test passes against the stubs (vacuous): ");
     assertThat(itemDir().resolve("examiner/attempt-1")).isDirectory();
     assertThat(itemDir().resolve("examiner/attempt-3")).isDirectory();
     assertThat(itemDir().resolve("events.jsonl")).exists();

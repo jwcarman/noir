@@ -99,7 +99,7 @@ public final class ApprovalSealer implements ApprovalSealing {
           itemDir,
           SealRejection.EDITED_AFTER_APPROVAL,
           ApprovalComments.editedAfterApproval(),
-          1);
+          List.of("the issue was edited after noir:ready was added"));
     }
     var bodySha = Commitments.sha256Hex(IssueSpec.normalize(snapshot.body()));
     recordApproval(item, snapshot, approval.get(), bodySha);
@@ -119,7 +119,7 @@ public final class ApprovalSealer implements ApprovalSealing {
           itemDir,
           SealRejection.INVALID_SPEC,
           ApprovalComments.invalidSpec(problems),
-          problems.size());
+          problems);
     }
 
     var branch = gh.defaultBranch(item.repo());
@@ -162,7 +162,7 @@ public final class ApprovalSealer implements ApprovalSealing {
           itemDir,
           SealRejection.INVALID_SPEC,
           ApprovalComments.invalidSpec(spliceProblems),
-          spliceProblems.size());
+          spliceProblems);
     }
 
     var existing = new ArrayList<String>();
@@ -177,7 +177,7 @@ public final class ApprovalSealer implements ApprovalSealing {
           itemDir,
           SealRejection.STUB_EXISTS,
           ApprovalComments.stubExists(existing),
-          existing.size());
+          existing);
     }
 
     var spec = parsed.toSpec(item.id(), item.repo(), baseSha);
@@ -199,7 +199,7 @@ public final class ApprovalSealer implements ApprovalSealing {
           itemDir,
           SealRejection.CONFLICTS_WITH_EXISTING_TESTS,
           ApprovalComments.conflictsWithExistingTests(examination.conflictingTests()),
-          examination.problems().size());
+          examination.problems());
     }
     if (examination.problems() != null) {
       return reject(
@@ -208,7 +208,7 @@ public final class ApprovalSealer implements ApprovalSealing {
           SealRejection.SUITE_TOO_WEAK,
           ApprovalComments.suiteTooWeak(
               config.examiner().attempts(), SealProblems.publicSummary(examination.problems())),
-          examination.problems().size());
+          examination.problems());
     }
     Commitments.write(
         Commitments.create(spec, itemDir, examination.model(), bodySha), commitmentFile);
@@ -272,10 +272,25 @@ public final class ApprovalSealer implements ApprovalSealing {
     return Optional.ofNullable(found);
   }
 
+  /** The most characters of one problem kept in the {@code seal_rejected} event. */
+  static final int DETAIL_LIMIT = 4000;
+
+  /**
+   * Rejects the seal. The event keeps every problem in full (secrets masked, each cut to {@value
+   * #DETAIL_LIMIT} characters) for the operator; the issue comment is only a summary.
+   */
   private SealOutcome reject(
-      WorkItem item, Path itemDir, SealRejection reason, String comment, int problems) {
+      WorkItem item, Path itemDir, SealRejection reason, String comment, List<String> problems) {
     deleteSealFiles(itemDir);
-    append(item, "seal_rejected", Map.of("reason", reason.eventValue(), "problems", problems));
+    var details =
+        problems.stream()
+            .map(p -> Secrets.mask(p, secrets))
+            .map(p -> p.length() > DETAIL_LIMIT ? p.substring(0, DETAIL_LIMIT) + "…" : p)
+            .toList();
+    append(
+        item,
+        "seal_rejected",
+        Map.of("reason", reason.eventValue(), "problems", problems.size(), "details", details));
     return new SealOutcome.Rejected(reason, Secrets.mask(comment, secrets));
   }
 
