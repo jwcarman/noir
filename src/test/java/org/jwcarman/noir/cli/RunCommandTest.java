@@ -86,6 +86,17 @@ class RunCommandTest {
   }
 
   @Test
+  void printsTheItemItIsWorkingOn() {
+    int code =
+        run(
+            (once, listener) -> listener.working(A, "jwcarman/demo", 12, State.MEASURING),
+            "run",
+            "--once");
+    assertThat(code).isZero();
+    assertThat(out.toString()).isEqualTo(A + " jwcarman/demo#12: working (MEASURING)\n");
+  }
+
+  @Test
   void printsCreatedItems() {
     int code =
         run(

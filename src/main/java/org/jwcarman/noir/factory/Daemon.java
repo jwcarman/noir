@@ -62,6 +62,12 @@ public final class Daemon {
 
     /** {@link #runForever()} is starting its poll loop over {@code repos}. */
     default void started(java.util.List<String> repos, java.time.Duration pollInterval) {}
+
+    /**
+     * The daemon is picking up an item to drive it from {@code state}; its transitions follow. Sent
+     * once per drive, so an item resumed mid-phase (or after a restart) is visible.
+     */
+    default void working(String itemId, String repo, Integer issue, State state) {}
   }
 
   private final Store store;
@@ -354,6 +360,9 @@ public final class Daemon {
   private boolean drive(WorkItem item) {
     boolean moved = false;
     var current = item;
+    if (Factory.runnable(current.state())) {
+      listener.working(current.id(), current.repo(), current.issueNumber(), current.state());
+    }
     while (Factory.runnable(current.state()) && !interrupted()) {
       WorkItem next;
       try {

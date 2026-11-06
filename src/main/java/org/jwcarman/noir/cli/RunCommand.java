@@ -54,6 +54,13 @@ final class RunCommand implements Callable<Integer> {
       }
 
       @Override
+      public void working(
+          String itemId, String repo, Integer issue, org.jwcarman.noir.lifecycle.State state) {
+        out.println(itemId + " " + repo + "#" + issue + ": working (" + state + ")");
+        out.flush();
+      }
+
+      @Override
       public void transition(StateChange c) {
         out.println(ItemTriggers.line(c));
         out.flush();

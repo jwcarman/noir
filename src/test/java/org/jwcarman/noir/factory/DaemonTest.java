@@ -46,6 +46,7 @@ class DaemonTest {
   final FakeDriver driver = new FakeDriver();
   final List<Duration> sleeps = new ArrayList<>();
   final List<String> reported = new ArrayList<>();
+  final List<String> working = new ArrayList<>();
   Retry.Sleeper sleeper = sleeps::add;
   final FakeContainerPort docker = new FakeContainerPort(spec -> null);
   Delivery reconcileDelivery;
@@ -75,6 +76,12 @@ class DaemonTest {
         @Override
         public void started(List<String> repos, Duration pollInterval) {
           reported.add("started " + repos + " every " + pollInterval);
+        }
+
+        @Override
+        public void working(String itemId, String repo, Integer issue, State state) {
+          // Kept apart from reported; the suffix is how many lines were reported before it.
+          working.add(itemId + " " + repo + "#" + issue + " " + state + " @" + reported.size());
         }
       };
 
@@ -260,6 +267,22 @@ class DaemonTest {
     assertThat(store.readWorkItem(A).state()).isEqualTo(State.PR_OPEN);
     assertThat(store.readWorkItem(B).state()).isEqualTo(State.PR_OPEN);
     assertThat(store.readWorkItem(C).state()).isEqualTo(State.SEALED);
+  }
+
+  /**
+   * An item picked up mid-phase (resumed, or after a restart) is announced once before it is
+   * driven, so the operator sees the server working; its transitions follow as usual.
+   */
+  @Test
+  void announcesEachItemItDrivesOnce() {
+    freezeLabels();
+    int n = issue(REPO, "noir:building");
+    item(A, REPO, n, State.MEASURING);
+
+    daemon().runOnce();
+
+    assertThat(working).containsExactly(A + " " + REPO + "#" + n + " MEASURING @0");
+    assertThat(reported).first().isEqualTo(A + " MEASURING -> GRADING");
   }
 
   // ---- labels ------------------------------------------------------------------------------
