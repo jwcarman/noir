@@ -15,7 +15,12 @@ public record IssueSnapshot(
     boolean open,
     Instant createdAt,
     Instant editedAt,
-    Optional<Approval> approval) {
+    Optional<Approval> approval,
+    java.util.Set<String> labels) {
+
+  public IssueSnapshot {
+    labels = java.util.Set.copyOf(labels);
+  }
 
   /** Who added {@code noir:ready}, and when. */
   public record Approval(String actor, Instant at) {}

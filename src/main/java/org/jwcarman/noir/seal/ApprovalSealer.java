@@ -20,6 +20,7 @@ import org.jwcarman.noir.git.GitPort;
 import org.jwcarman.noir.git.RepoMirror;
 import org.jwcarman.noir.github.GitHubPort;
 import org.jwcarman.noir.github.IssueSnapshot;
+import org.jwcarman.noir.github.NoirLabels;
 import org.jwcarman.noir.lifecycle.SealRejection;
 import org.jwcarman.noir.render.StubSource;
 import org.jwcarman.noir.spec.IssueSpec;
@@ -199,6 +200,12 @@ public final class ApprovalSealer implements ApprovalSealing {
     var bundle = itemDir.resolve("base.bundle");
     git.bundle(repoDir, baseSha, bundle);
 
+    if (!config.hiddenTests() && !snapshot.labels().contains(NoirLabels.HIDDEN_TESTS)) {
+      // Hidden tests off: the spec is sealed (commitment to the issue text, base and stubs) with no
+      // Examiner, no holdout and no reference.
+      Commitments.write(Commitments.create(spec, itemDir, null, bodySha), commitmentFile);
+      return publish(item, commitmentFile);
+    }
     var inventory =
         suiteSealer.inventory(
             spec, parsed.stubs(), mainSources(repoDir, baseSha), testSources, itemDir, bundle);
@@ -261,7 +268,11 @@ public final class ApprovalSealer implements ApprovalSealing {
           item.repo(),
           item.issueNumber(),
           Secrets.mask(
-              ApprovalComments.sealed(sha, commitment.baseSha(), commitment.issueBodySha256()),
+              ApprovalComments.sealed(
+                  sha,
+                  commitment.baseSha(),
+                  commitment.issueBodySha256(),
+                  !commitment.files().isEmpty()),
               secrets));
       append(item, "commitment_posted", Map.of("commitmentSha256", sha));
     }

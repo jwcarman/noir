@@ -164,7 +164,14 @@ public final class FakeGitHub implements GitHubPort {
                 .map(e -> new IssueSnapshot.Approval(e.actor(), e.at()))
             : Optional.<IssueSnapshot.Approval>empty();
     return new IssueSnapshot(
-        number, i.title(), i.body() == null ? "" : i.body(), i.open(), created, edited, approval);
+        number,
+        i.title(),
+        i.body() == null ? "" : i.body(),
+        i.open(),
+        created,
+        edited,
+        approval,
+        java.util.Set.copyOf(i.labels()));
   }
 
   public List<Issue> issues() {

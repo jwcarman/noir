@@ -156,7 +156,19 @@ class GhCliTest {
                 "--color",
                 "fbca04",
                 "--description",
-                "noir is writing the hidden test suite",
+                "noir is sealing the spec",
+                "--force"),
+            List.of(
+                "gh",
+                "label",
+                "create",
+                "noir:hidden-tests",
+                "--repo",
+                "jwcarman/demo",
+                "--color",
+                "5319e7",
+                "--description",
+                "Seal a hidden test suite for this issue",
                 "--force"));
   }
 

@@ -10,6 +10,10 @@ import java.util.Optional;
 import org.jwcarman.noir.spec.QualityBar;
 
 /** noir configuration, loaded from {@code ~/.noir/config.yaml} (spec §9.2). */
+/**
+ * {@code hiddenTests}: whether every item gets a sealed hidden test suite; off by default (an issue
+ * can still opt in with the {@code noir:hidden-tests} label).
+ */
 public record NoirConfig(
     List<String> repos,
     QualityBar qualityBar,
@@ -22,7 +26,8 @@ public record NoirConfig(
     Images images,
     Timeouts timeouts,
     Examiner examiner,
-    Maven maven) {
+    Maven maven,
+    boolean hiddenTests) {
 
   public NoirConfig {
     repos = repos == null ? List.of() : List.copyOf(repos);
@@ -85,6 +90,25 @@ public record NoirConfig(
         new Images("noir-builder:0.1.0", "noir-grader:0.1.0"),
         new Timeouts(Duration.ofSeconds(10), Duration.ofMinutes(10)),
         new Examiner(null, 100, Duration.ofMinutes(30), 3),
-        new Maven(null));
+        new Maven(null),
+        false);
+  }
+
+  /** This config with {@code hiddenTests} set. */
+  public NoirConfig withHiddenTests(boolean on) {
+    return new NoirConfig(
+        repos,
+        qualityBar,
+        sealDiscrimination,
+        budgets,
+        reworkRetries,
+        pollInterval,
+        infraRetries,
+        limits,
+        images,
+        timeouts,
+        examiner,
+        maven,
+        on);
   }
 }

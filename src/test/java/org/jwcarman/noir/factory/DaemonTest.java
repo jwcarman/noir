@@ -111,7 +111,8 @@ class DaemonTest {
             defaults.images(),
             defaults.timeouts(),
             defaults.examiner(),
-            defaults.maven());
+            defaults.maven(),
+            true);
     var reconciler = new Reconciler(store, gh, reconcileDelivery, clock, Set.of(SECRET));
     return new Daemon(
         store,

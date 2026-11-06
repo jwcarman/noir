@@ -52,6 +52,15 @@ public final class ApprovalComments {
   }
 
   public static String sealed(String sha, String baseSha, String bodySha) {
+    return sealed(sha, baseSha, bodySha, true);
+  }
+
+  /** The commitment comment; it ends with {@code ; hidden tests: off} when there is no holdout. */
+  public static String sealed(String sha, String baseSha, String bodySha, boolean hiddenTests) {
+    return sealedText(sha, baseSha, bodySha) + (hiddenTests ? "" : "; hidden tests: off");
+  }
+
+  private static String sealedText(String sha, String baseSha, String bodySha) {
     return "noir commitment `"
         + sha
         + "` (commitmentVersion "

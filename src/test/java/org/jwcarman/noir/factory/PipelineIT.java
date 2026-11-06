@@ -78,7 +78,8 @@ class PipelineIT {
           defaults.images(),
           defaults.timeouts(),
           defaults.examiner(),
-          defaults.maven());
+          defaults.maven(),
+          true);
   static final String BRANCH = "noir/1-counter";
   static final String SECRET = "sk-ant-pipeline-it-not-a-real-key";
 
@@ -509,7 +510,8 @@ class PipelineIT {
                 config.examiner().maxTurns(),
                 config.examiner().wallClock(),
                 s.examinerAttempts()),
-            config.maven());
+            config.maven(),
+            true);
     var clock = Clock.systemUTC();
     var git = new LocalOriginGit(new GitCli(runner), origin);
     var approvedId = new AtomicReference<String>();

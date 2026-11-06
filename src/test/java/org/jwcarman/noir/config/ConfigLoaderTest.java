@@ -22,6 +22,7 @@ class ConfigLoaderTest {
     assertThat(c.repos()).isEmpty();
     assertThat(c.qualityBar()).isEqualTo(new QualityBar(0.90, 0.80, 15));
     assertThat(c.sealDiscrimination()).isEqualTo(0.70);
+    assertThat(c.hiddenTests()).isFalse();
     assertThat(c.budgets())
         .isEqualTo(new NoirConfig.Budgets(200, Duration.ofMinutes(60), new BigDecimal("10.00")));
     assertThat(c.reworkRetries()).isEqualTo(3);
@@ -123,5 +124,12 @@ class ConfigLoaderTest {
           .as(bad)
           .hasMessageContaining("maven.mirror must be an http or https URL");
     }
+  }
+
+  @Test
+  void hiddenTestsCanBeTurnedOn() throws Exception {
+    var file = tmp.resolve("config.yaml");
+    java.nio.file.Files.writeString(file, "hiddenTests: true\n");
+    assertThat(ConfigLoader.load(file).hiddenTests()).isTrue();
   }
 }

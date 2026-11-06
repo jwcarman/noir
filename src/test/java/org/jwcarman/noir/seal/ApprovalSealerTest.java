@@ -121,26 +121,9 @@ class ApprovalSealerTest {
             return fixture.inventory(bundle, baseSha, out);
           }
         };
-    var clock = Clock.fixed(Instant.parse("2026-11-04T12:00:00Z"), ZoneOffset.UTC);
-    var config = NoirConfig.defaults();
-    var git = new LocalGit();
-    sealer =
-        new ApprovalSealer(
-            store,
-            github,
-            new RepoMirror(git, home.repos()),
-            git,
-            new SuiteSealer(
-                store,
-                new Examiner(agent, config),
-                checks,
-                git,
-                config,
-                clock,
-                Retry.forConfig(config, d -> {})),
-            config,
-            clock,
-            Set.of(SECRET));
+    this.checks = checks;
+    // Most tests here exercise the hidden-test path; the off path has its own tests below.
+    sealer = newSealer(NoirConfig.defaults().withHiddenTests(true));
     issue = openIssue(Specs.valid().withTitle("Add a bounded cache"));
     item = WorkItem.approved(ID, REPO, issue);
   }
@@ -196,6 +179,70 @@ class ApprovalSealerTest {
 
   static String bodyOf(Spec spec) {
     return SpecRenderer.issueBody(spec, Specs.stubsFor(spec));
+  }
+
+  SealCheckRunner checks;
+
+  ApprovalSealer newSealer(NoirConfig config) {
+    var clock = Clock.fixed(Instant.parse("2026-11-04T12:00:00Z"), ZoneOffset.UTC);
+    var git = new LocalGit();
+    return new ApprovalSealer(
+        store,
+        github,
+        new RepoMirror(git, home.repos()),
+        git,
+        new SuiteSealer(
+            store,
+            new Examiner(agent, config),
+            checks,
+            git,
+            config,
+            clock,
+            Retry.forConfig(config, d -> {})),
+        config,
+        clock,
+        Set.of(SECRET));
+  }
+
+  /**
+   * The default: no repository inventory, no Examiner, no seal checks; the spec is still sealed.
+   */
+  @Test
+  void hiddenTestsOffSealsWithoutTheExaminer() {
+    sealer = newSealer(NoirConfig.defaults());
+    var outcome = sealer.seal(item);
+
+    assertThat(outcome).isInstanceOf(SealOutcome.Passed.class);
+    assertThat(agent.requests()).isEmpty();
+    assertThat(inventoryCalls).isEmpty();
+    var commitment = Commitments.read(itemDir().resolve("commitment.json"));
+    assertThat(commitment.examinerModel()).isNull();
+    assertThat(commitment.files()).isEmpty();
+    assertThat(itemDir().resolve("spec.json")).exists();
+    assertThat(itemDir().resolve("stubs")).isDirectory();
+    assertThat(github.comments(issue))
+        .singleElement()
+        .asString()
+        .startsWith("noir commitment `")
+        .endsWith("; hidden tests: off");
+    assertThat(eventTypes())
+        .contains("sealed", "commitment_posted")
+        .doesNotContain("examiner_attempt");
+  }
+
+  @Test
+  void hiddenTestsLabelTurnsThemOn() {
+    github.addLabel(issue, NoirLabels.HIDDEN_TESTS, "alice", APPROVED);
+    sealer = newSealer(NoirConfig.defaults());
+    var outcome = sealer.seal(item);
+
+    assertThat(outcome).isInstanceOf(SealOutcome.Passed.class);
+    assertThat(agent.requests()).hasSize(1);
+    assertThat(Commitments.read(itemDir().resolve("commitment.json")).files()).isNotEmpty();
+    assertThat(github.comments(issue))
+        .singleElement()
+        .asString()
+        .doesNotContain("hidden tests: off");
   }
 
   int openIssue(Spec spec) {

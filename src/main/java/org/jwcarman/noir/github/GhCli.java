@@ -165,10 +165,11 @@ public final class GhCli implements GitHubPort {
       if (lastEdited.isTextual()) {
         editedAt = later(editedAt, Instant.parse(lastEdited.asText()));
       }
-      boolean readyPresent = false;
+      var labels = new java.util.LinkedHashSet<String>();
       for (var l : issue.path("labels").path("nodes")) {
-        readyPresent |= NoirLabels.READY.equals(l.path("name").asText());
+        labels.add(l.path("name").asText());
       }
+      boolean readyPresent = labels.contains(NoirLabels.READY);
       IssueSnapshot.Approval approval = null;
       for (var e : issue.path("timelineItems").path("nodes")) {
         var at = Instant.parse(e.required("createdAt").asText());
@@ -190,7 +191,8 @@ public final class GhCli implements GitHubPort {
           issue.required("state").asText().equals("OPEN"),
           createdAt,
           editedAt,
-          readyPresent ? Optional.ofNullable(approval) : Optional.empty());
+          readyPresent ? Optional.ofNullable(approval) : Optional.empty(),
+          labels);
     } catch (IOException | RuntimeException e) {
       if (e instanceof GitHubException g) {
         throw g;
