@@ -56,9 +56,29 @@ public final class PullRequestBody {
       List<String> testsToUpdate,
       boolean draft,
       boolean hiddenTests) {
+    return render(issue, metrics, results, p, files, testsToUpdate, draft, hiddenTests, null);
+  }
+
+  /**
+   * {@code whyFailed} (or null) is the {@link FailureExplanation} section, placed after the
+   * shortfall line of a draft.
+   */
+  public static String render(
+      int issue,
+      Optional<Metrics> metrics,
+      List<RequirementResult> results,
+      Provenance p,
+      List<FileChange> files,
+      List<String> testsToUpdate,
+      boolean draft,
+      boolean hiddenTests,
+      String whyFailed) {
     var sb = new StringBuilder();
     if (draft) {
       sb.append(shortfall(p.attempts())).append("\n\n");
+      if (whyFailed != null) {
+        sb.append(whyFailed).append('\n');
+      }
     }
     sb.append("Closes #").append(issue).append(".\n\n");
     sb.append("| Metric | Value |\n|---|---|\n");
@@ -172,8 +192,16 @@ public final class PullRequestBody {
   /** {@code hiddenTests} is false when the item was sealed without a hidden test suite. */
   public static String failureComment(
       int attempts, List<RequirementResult> results, boolean hiddenTests) {
+    return failureComment(attempts, results, hiddenTests, null);
+  }
+
+  /** {@code whyFailed} (or null) is the {@link FailureExplanation} section. */
+  public static String failureComment(
+      int attempts, List<RequirementResult> results, boolean hiddenTests, String whyFailed) {
     var sb = new StringBuilder(shortfall(attempts));
-    sb.append(" No attempt produced commits that could be delivered, so no pull request was")
+    // After a "Why it failed" section the sentence starts its own paragraph.
+    sb.append(whyFailed == null ? " " : "\n\n" + whyFailed + "\n")
+        .append("No attempt produced commits that could be delivered, so no pull request was")
         .append(" opened.\n\n");
     results(sb, results, hiddenTests);
     return sb.toString();

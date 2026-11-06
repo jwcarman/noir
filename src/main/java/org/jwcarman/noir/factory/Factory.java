@@ -644,8 +644,8 @@ public final class Factory implements ItemDriver {
             createDirectories(new AttemptPaths(ctx.itemDir(), next.attempt()).dir());
         case APPLY_LABEL -> retry.run(() -> delivery.label(next, next.state()));
         case WRITE_FEEDBACK -> writeFeedback(ctx, step);
-        case OPEN_PR -> deliver(ctx, next, ctx.attempt(), false);
-        case OPEN_DRAFT_PR_OR_COMMENT -> draftOrComment(ctx, next);
+        case OPEN_PR -> deliver(ctx, next, ctx.attempt(), false, null);
+        case OPEN_DRAFT_PR_OR_COMMENT -> draftOrComment(ctx, next, transition.failure());
         // The runners already extracted and exported; containers are --rm and phase-scoped.
         case REJECT_APPROVAL -> rejectApproval(next, step);
         // Only an external re-approval (Transitions.applyExternal) archives attempts.
@@ -676,8 +676,9 @@ public final class Factory implements ItemDriver {
     AtomicFiles.write(file, text.getBytes(UTF_8));
   }
 
-  private void deliver(Ctx ctx, WorkItem next, AttemptPaths attempt, boolean draft) {
-    var body = body(ctx, next, attempt, draft);
+  private void deliver(
+      Ctx ctx, WorkItem next, AttemptPaths attempt, boolean draft, String whyFailed) {
+    var body = body(ctx, next, attempt, draft, whyFailed);
     guard("pull_request", ctx.spec().title(), body);
     int pr = retry.call(() -> delivery.openPullRequest(next, ctx.spec(), attempt, body, draft));
     var data = new LinkedHashMap<String, Object>();
@@ -691,8 +692,11 @@ public final class Factory implements ItemDriver {
    * A draft PR from the newest attempt that produced commits and whose bundle has commits beyond
    * the base; with none, an issue comment carrying the per-requirement results.
    */
-  private void draftOrComment(Ctx ctx, WorkItem next) {
+  private void draftOrComment(Ctx ctx, WorkItem next, Optional<Category> failure) {
     var events = store.readEvents(next.id());
+    var whyFailed =
+        FailureExplanation.render(
+            events, bar(ctx.spec()), next.attempt(), failure.map(Enum::name).orElse(null));
     var producing =
         events.stream()
             .filter(e -> e.type().equals("build_attempt"))
@@ -708,7 +712,7 @@ public final class Factory implements ItemDriver {
           && !retry
               .call(() -> bundles.commitsSince(bundle, ctx.spec().baseSha(), ctx.branch()))
               .isEmpty()) {
-        deliver(ctx, next, attempt, true);
+        deliver(ctx, next, attempt, true, whyFailed);
         return;
       }
     }
@@ -716,7 +720,8 @@ public final class Factory implements ItemDriver {
         PullRequestBody.failureComment(
             next.attempt(),
             latestResults(events, null),
-            !Commitments.read(ctx.itemDir().resolve("commitment.json")).files().isEmpty());
+            !Commitments.read(ctx.itemDir().resolve("commitment.json")).files().isEmpty(),
+            whyFailed);
     guard("comment", comment);
     retry.run(() -> delivery.comment(next, comment));
     event(next.id(), "delivered", next.attempt(), Map.of("comment", true));
@@ -734,7 +739,8 @@ public final class Factory implements ItemDriver {
     return total;
   }
 
-  private String body(Ctx ctx, WorkItem next, AttemptPaths delivered, boolean draft) {
+  private String body(
+      Ctx ctx, WorkItem next, AttemptPaths delivered, boolean draft, String whyFailed) {
     int attempt = delivered.attempt();
     var events = store.readEvents(next.id());
     var commitment = Commitments.read(ctx.itemDir().resolve("commitment.json"));
@@ -772,7 +778,8 @@ public final class Factory implements ItemDriver {
         files,
         ctx.spec().testsToUpdate(),
         draft,
-        !Commitments.read(ctx.itemDir().resolve("commitment.json")).files().isEmpty());
+        !Commitments.read(ctx.itemDir().resolve("commitment.json")).files().isEmpty(),
+        whyFailed);
   }
 
   /** Text bound for GitHub carried a credential; nothing has been posted. */

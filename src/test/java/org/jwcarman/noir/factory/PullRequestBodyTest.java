@@ -192,4 +192,33 @@ class PullRequestBodyTest {
         .contains("### Hidden tests\n\nOff for this item")
         .doesNotContain("Holdout results");
   }
+
+  static final String WHY = "### Why it failed\n\n- Attempt 1: the build failed.\n";
+
+  @Test
+  void draftBodyCarriesWhyItFailed() {
+    var body =
+        PullRequestBody.render(
+            1, Optional.empty(), RESULTS, PROV, List.of(), List.of(), true, false, WHY);
+    assertThat(body)
+        .startsWith(
+            "**noir could not satisfy every requirement within 2 attempts.**\n\n"
+                + WHY
+                + "\nCloses #1.\n");
+  }
+
+  @Test
+  void failureCommentCarriesWhyItFailed() {
+    assertThat(PullRequestBody.failureComment(4, RESULTS, false, WHY))
+        .startsWith(
+            "**noir could not satisfy every requirement within 4 attempts.**\n\n"
+                + WHY
+                + "\nNo attempt produced commits");
+  }
+
+  @Test
+  void withoutWhyItFailedTheTextIsUnchanged() {
+    assertThat(PullRequestBody.failureComment(4, RESULTS, false, null))
+        .isEqualTo(PullRequestBody.failureComment(4, RESULTS, false));
+  }
 }

@@ -449,6 +449,43 @@ class FactoryTest {
         .startsWith("You modified `pom.xml`.");
   }
 
+  @Test
+  void failedItemExplainsItself() throws IOException {
+    TestInventory.write(
+        List.of("com.example.CalcTest#adds()"), itemDir.resolve("baseline-tests.json"));
+    measure.modes = n -> MeasureMode.BUILD_FAILED;
+    measure.testReports = n -> report(ADDS_FAILED);
+    build.produces = n -> n == 1;
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.FAILED);
+    assertThat(gh.pullRequests())
+        .singleElement()
+        .satisfies(pr ->
+            assertThat(pr.body())
+                .contains("### Why it failed")
+                .contains("- Attempt 1: the build failed.")
+                .contains(
+                    "- Attempts 2\u20134: no commits; the builder stopped without changing anything.")
+                .contains("Existing tests that failed: `com.example.CalcTest#adds()`")
+                .contains(
+                    "list `src/test/java/com/example/CalcTest.java` under `## Tests to update`"));
+  }
+
+  @Test
+  void failureCommentExplainsItselfToo() {
+    build.produces = n -> false;
+
+    drive();
+
+    assertThat(gh.comments(1))
+        .last()
+        .asString()
+        .contains("### Why it failed")
+        .contains("- Attempts 1\u20134: no commits");
+  }
+
   Event firstEvent(String type, int attempt) {
     return store.readEvents(Specs.ID).stream()
         .filter(e -> e.type().equals(type) && e.attempt() == attempt)
