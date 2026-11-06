@@ -13,8 +13,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.IntFunction;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -362,12 +366,62 @@ class PipelineIT {
       Store store,
       FakeGitHub github,
       ScriptedAgent examiner,
+      ScriptedAgent builder,
       String itemId,
       int issue,
       Path origin) {
     String path() {
       return pathOf(store.readEvents(itemId));
     }
+
+    Path attempt(int n) {
+      return new AttemptPaths(store.itemDir(itemId), n).dir();
+    }
+  }
+
+  /** Every regular file under {@code dir}, keyed by its slash-separated relative path. */
+  static Map<String, String> treeOf(Path dir) {
+    try (var paths = Files.walk(dir)) {
+      var files = new TreeMap<String, String>();
+      for (var p : paths.filter(Files::isRegularFile).toList()) {
+        files.put(dir.relativize(p).toString().replace('\\', '/'), readFile(p));
+      }
+      return files;
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  /**
+   * One approval scenario: the base tree ({@code null} for the GitFixtures placeholder base), the
+   * issue body, the Examiner's holdout and reference fixtures, the builder script, and the number
+   * of Examiner attempts.
+   */
+  record Scenario(
+      Path base,
+      String title,
+      String body,
+      Path holdout,
+      Path reference,
+      BiConsumer<Integer, Path> builder,
+      int examinerAttempts) {}
+
+  /** A builder that copies {@code files} into its working tree, plus an attempt marker. */
+  static BiConsumer<Integer, Path> copying(Path files) {
+    return copying(n -> files);
+  }
+
+  /** A builder that copies the tree {@code filesFor} names for each attempt, plus a marker. */
+  static BiConsumer<Integer, Path> copying(IntFunction<Path> filesFor) {
+    return (n, work) -> {
+      var repo = work.resolve("repo");
+      SealedItemFixture.copyTree(filesFor.apply(n), repo);
+      try {
+        Files.writeString(repo.resolve("ATTEMPT.txt"), "attempt " + n + "\n");
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+    };
   }
 
   /**
@@ -375,18 +429,6 @@ class PipelineIT {
    * then lets the real daemon discover, seal, and build it with the real Examiner flow scripted.
    */
   Approval approve(Instant editedAt) {
-    var runner = new ProcessCommandRunner();
-    var home = new NoirHome(tmp.resolve("home"));
-    var store = new Store(home);
-    var github = new FakeGitHub().withNoirLabels("jwcarman/demo");
-    var origin = GitFixtures.originWithCommit(tmp.resolve("remotes"), SealedItemFixture.REPO);
-    var scratch = tmp.resolve("scratch").toAbsolutePath();
-    try {
-      Files.createDirectories(scratch);
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
-
     var spec =
         Specs.valid()
             .withTitle("Counter")
@@ -408,14 +450,43 @@ class PipelineIT {
                 readFile(
                     SealedItemFixture.sealFixture("stubs")
                         .resolve(SealedItemFixture.COUNTER_PATH))));
-    int issue =
-        github.createIssue(
-            SealedItemFixture.REPO, spec.title(), SpecRenderer.issueBody(spec, stubs), List.of());
+    var body = SpecRenderer.issueBody(spec, stubs);
+    return approve(
+        new Scenario(
+            null,
+            spec.title(),
+            body,
+            SealedItemFixture.sealFixture("holdout-good"),
+            SealedItemFixture.sealFixture("reference"),
+            copying(SealedItemFixture.resource("/fixtures/builders/correct")),
+            config.examiner().attempts()),
+        editedAt == null ? null : body + "\nedited\n",
+        editedAt);
+  }
+
+  /** Approves the scenario's issue and runs one daemon pass over it (see above). */
+  Approval approve(Scenario s, String editedBody, Instant editedAt) {
+    var runner = new ProcessCommandRunner();
+    var home = new NoirHome(tmp.resolve("home"));
+    var store = new Store(home);
+    var github = new FakeGitHub().withNoirLabels("jwcarman/demo");
+    var origin =
+        s.base() == null
+            ? GitFixtures.originWithCommit(tmp.resolve("remotes"), SealedItemFixture.REPO)
+            : GitFixtures.originWithFiles(
+                tmp.resolve("remotes"), SealedItemFixture.REPO, treeOf(s.base()));
+    var scratch = tmp.resolve("scratch").toAbsolutePath();
+    try {
+      Files.createDirectories(scratch);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+
+    int issue = github.createIssue(SealedItemFixture.REPO, s.title(), s.body(), List.of());
     github.createdAt(issue, Instant.parse("2026-11-01T00:00:00Z"));
     github.addLabel(issue, NoirLabels.READY, "alice", Instant.parse("2026-11-02T00:00:00Z"));
     if (editedAt != null) {
-      github.editIssue(
-          issue, spec.title(), SpecRenderer.issueBody(spec, stubs) + "\nedited\n", editedAt);
+      github.editIssue(issue, s.title(), editedBody, editedAt);
     }
 
     var cfg =
@@ -430,7 +501,11 @@ class PipelineIT {
             config.limits(),
             config.images(),
             config.timeouts(),
-            config.examiner());
+            new NoirConfig.Examiner(
+                config.examiner().model(),
+                config.examiner().maxTurns(),
+                config.examiner().wallClock(),
+                s.examinerAttempts()));
     var clock = Clock.systemUTC();
     var git = new LocalOriginGit(new GitCli(runner), origin);
     var approvedId = new AtomicReference<String>();
@@ -439,19 +514,19 @@ class PipelineIT {
           // The holdout package is named for the item; the daemon picks the id, so rename the
           // fixture.
           var holdout = work.resolve("out/holdout");
-          SealedItemFixture.copyTree(SealedItemFixture.sealFixture("holdout-good"), holdout);
+          SealedItemFixture.copyTree(s.holdout(), holdout);
           var fixtureId = "nr_01jbx4zq8k3v0m7n2p5r6s9t1w";
           var id = ItemId.holdoutPackage(approvedId.get()).substring("noir.holdout.".length());
           var dir = holdout.resolve("noir/holdout");
-          try {
-            var test = dir.resolve(fixtureId).resolve("CounterTest.java");
-            Files.writeString(test, readFile(test).replace(fixtureId, id), UTF_8);
+          try (var tests = Files.list(dir.resolve(fixtureId))) {
+            for (var test : tests.toList()) {
+              Files.writeString(test, readFile(test).replace(fixtureId, id), UTF_8);
+            }
             Files.move(dir.resolve(fixtureId), dir.resolve(id));
           } catch (IOException e) {
             throw new UncheckedIOException(e);
           }
-          SealedItemFixture.copyTree(
-              SealedItemFixture.sealFixture("reference"), work.resolve("out/reference"));
+          SealedItemFixture.copyTree(s.reference(), work.resolve("out/reference"));
         });
     var sealer =
         new ApprovalSealer(
@@ -469,17 +544,7 @@ class PipelineIT {
             cfg,
             clock,
             Set.of(SECRET));
-    var files = SealedItemFixture.resource("/fixtures/builders/correct");
-    var builder =
-        new ScriptedAgent((n, work) -> {
-          var repo = work.resolve("repo");
-          SealedItemFixture.copyTree(files, repo);
-          try {
-            Files.writeString(repo.resolve("ATTEMPT.txt"), "attempt " + n + "\n");
-          } catch (IOException e) {
-            throw new UncheckedIOException(e);
-          }
-        });
+    var builder = new ScriptedAgent(s.builder());
     var delivery =
         new GitHubDelivery(github, LocalBranchPublishers.pushingTo(runner, scratch, origin));
     var factory =
@@ -535,7 +600,8 @@ class PipelineIT {
     daemon.runOnce();
     assertThat(errors).isEmpty();
     assertThat(created).hasSize(1);
-    var result = new Approval(store, github, examinerAgent, created.getFirst(), issue, origin);
+    var result =
+        new Approval(store, github, examinerAgent, builder, created.getFirst(), issue, origin);
     System.out.printf("[PipelineIT] approval: %s%n", result.path());
     return result;
   }
@@ -566,6 +632,159 @@ class PipelineIT {
         .doesNotContain(NoirLabels.READY)
         .contains("noir:draft");
     assertThat(a.examiner().requests()).isEmpty();
+    assertThat(a.github().pullRequests()).isEmpty();
+  }
+
+  static final String COUNTER_TEST_PATH = "src/test/java/com/example/api/CounterTest.java";
+
+  static Path modifyFixture(String name) {
+    return SealedItemFixture.resource("/fixtures/modify/" + name);
+  }
+
+  /**
+   * The modify issue: {@code Counter.java (modify)} with a changed {@code increment} (it stops at
+   * {@code limit}) and an added {@code reset()}, listing {@code testsToUpdate}.
+   */
+  static String modifyBody(String limit, List<String> testsToUpdate) {
+    var spec =
+        Specs.valid()
+            .withTitle("Counter")
+            .withIntent("The counter must not run past " + limit + ", and callers need a reset.")
+            .withApiStubs(List.of(SealedItemFixture.COUNTER_PATH))
+            .withModifies(List.of(SealedItemFixture.COUNTER_PATH))
+            .withTestsToUpdate(testsToUpdate)
+            .withSchemaVersion(2)
+            .withRequirements(
+                List.of(
+                    new Requirement(
+                        "R1",
+                        "increment adds one but never takes the count above " + limit,
+                        List.of(
+                            new Example(
+                                "a counter at " + limit, "increment()", "get() returns " + limit))),
+                    new Requirement(
+                        "R2",
+                        "reset sets the count to zero",
+                        List.of(new Example("a counter at 2", "reset()", "get() returns 0")))));
+    var fragment =
+        readFile(modifyFixture("fragments").resolve(SealedItemFixture.COUNTER_PATH))
+            .replace("three", limit);
+    return SpecRenderer.issueBody(
+        spec, List.of(new StubSource(SealedItemFixture.COUNTER_PATH, fragment)));
+  }
+
+  Approval approveModify(
+      String body, String examiner, BiConsumer<Integer, Path> builder, int examinerAttempts) {
+    var a =
+        approve(
+            new Scenario(
+                modifyFixture("base"),
+                "Counter",
+                body,
+                modifyFixture(examiner + "/holdout"),
+                modifyFixture(examiner + "/reference"),
+                builder,
+                examinerAttempts),
+            null,
+            null);
+    var feedback = a.attempt(1).resolve("FEEDBACK.md");
+    if (Files.isRegularFile(feedback)) {
+      System.out.printf("[PipelineIT] attempt 1 feedback:%n%s%n", readFile(feedback));
+    }
+    return a;
+  }
+
+  @Test
+  void modifySpecFixesExistingClass() {
+    var a =
+        approveModify(
+            modifyBody("three", List.of(COUNTER_TEST_PATH)),
+            "examiner-cap",
+            copying(modifyFixture("builders/fix")),
+            config.examiner().attempts());
+
+    assertThat(a.path())
+        .as(String.valueOf(a.github().comments(a.issue())))
+        .isEqualTo("SEALING > SEALED > BUILDING > MEASURING > GRADING > PR_OPEN");
+    assertThat(a.examiner().requests()).hasSize(1);
+    assertThat(a.examiner().requests().getFirst().prompt()).contains("## Current source");
+    var branch = "noir/" + a.issue() + "-counter";
+    assertThat(originFile(a.origin(), branch, SealedItemFixture.COUNTER_PATH))
+        .contains("if (count < 3)");
+    assertThat(originFile(a.origin(), branch, COUNTER_TEST_PATH)).contains("incrementStopsAtThree");
+    assertThat(a.github().pullRequests())
+        .singleElement()
+        .satisfies(pr -> {
+          assertThat(pr.draft()).isFalse();
+          assertThat(pr.body())
+              .contains("### Files")
+              .contains("- Modified: `" + SealedItemFixture.COUNTER_PATH + "` (+")
+              .contains("- Tests updated: `" + COUNTER_TEST_PATH + "` (+")
+              .doesNotContain(SECRET);
+        });
+  }
+
+  @Test
+  void builderEditingLockedTestIsReworked() {
+    var a =
+        approveModify(
+            modifyBody("three", List.of()),
+            "examiner-cap",
+            copying(n -> modifyFixture("builders/edits-locked-test/attempt-" + n)),
+            config.examiner().attempts());
+
+    assertThat(a.path())
+        .as(String.valueOf(a.github().comments(a.issue())))
+        .isEqualTo(
+            "SEALING > SEALED > BUILDING > MEASURING > REWORK(CONTRACT_VIOLATION)"
+                + " > BUILDING > MEASURING > GRADING > PR_OPEN");
+    assertThat(readFile(a.attempt(1).resolve("FEEDBACK.md")))
+        .contains(
+            "You modified `"
+                + COUNTER_TEST_PATH
+                + "`. This spec allows changes only to: `"
+                + SealedItemFixture.COUNTER_PATH
+                + "`, and new files. Restore those files and make the change another way.");
+    assertThat(a.builder().requests()).hasSize(2);
+    var branch = "noir/" + a.issue() + "-counter";
+    assertThat(originFile(a.origin(), branch, COUNTER_TEST_PATH))
+        .isEqualTo(readFile(modifyFixture("base").resolve(COUNTER_TEST_PATH)));
+    assertThat(a.github().pullRequests())
+        .singleElement()
+        .satisfies(pr -> {
+          assertThat(pr.draft()).isFalse();
+          assertThat(pr.body())
+              .contains("- Modified: `" + SealedItemFixture.COUNTER_PATH + "` (+")
+              .doesNotContain("Tests updated:");
+        });
+  }
+
+  @Test
+  void specConflictingWithLockedTestIsRejected() {
+    var a =
+        approveModify(
+            modifyBody("one", List.of()),
+            "examiner-conflict",
+            (n, work) -> {
+              throw new AssertionError("building not expected");
+            },
+            1);
+
+    assertThat(a.path())
+        .as(String.valueOf(a.github().comments(a.issue())))
+        .isEqualTo("SEALING > DRAFT");
+    assertThat(a.github().comments(a.issue()))
+        .containsExactly(
+            ApprovalComments.conflictsWithExistingTests(List.of("com.example.api.CounterTest")));
+    assertThat(a.store().readEvents(a.itemId()))
+        .filteredOn(e -> e.type().equals("seal_rejected"))
+        .singleElement()
+        .satisfies(
+            e -> assertThat(e.data()).containsEntry("reason", "conflicts_with_existing_tests"));
+    assertThat(a.github().labels(a.issue()))
+        .doesNotContain(NoirLabels.READY)
+        .contains("noir:draft");
+    assertThat(a.examiner().requests()).hasSize(1);
     assertThat(a.github().pullRequests()).isEmpty();
   }
 }
