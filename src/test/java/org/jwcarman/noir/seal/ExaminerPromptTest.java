@@ -122,4 +122,21 @@ class ExaminerPromptTest {
                 + " implementation of that file is the complete file: keep every public member,"
                 + " and change only what the requirements say.");
   }
+
+  /**
+   * A changed member's stub keeps today's body, so "fails against the stubs" means "fails against
+   * today's behavior": a test of behavior the change keeps would be rejected as vacuous.
+   */
+  @Test
+  void systemPromptSaysChangedMembersRunTodaysCode() {
+    var prompt = ExaminerPrompt.system().replaceAll("\\s+", " ");
+    assertThat(prompt)
+        .contains(
+            "A changed member keeps today's body in the stubs, so every test must fail against"
+                + " today's behavior.")
+        .contains(
+            "Behavior the change keeps, such as a round trip that already works, may be asserted"
+                + " only inside a test that also checks changed behavior.")
+        .doesNotContain("whose method bodies throw `UnsupportedOperationException`. A test");
+  }
 }

@@ -72,17 +72,17 @@ public final class SealJudge {
         problems.add("holdout test passes against the stubs (vacuous): " + o.testId());
       }
     }
-    if (!problems.isEmpty()) {
-      return problems;
-    }
+    // A vacuous suite still lets the reference build and the existing tests run: report a
+    // conflict with them too, so one attempt does not hide it.
     if (!compiled(a, "ref-build", "reference implementation does not compile", problems)) {
       return problems;
     }
-    checkReferenceRuns(a, stubOutcomes, problems);
-    if (!problems.isEmpty()) {
-      return problems;
+    if (problems.isEmpty()) {
+      checkReferenceRuns(a, stubOutcomes, problems);
+      if (problems.isEmpty()) {
+        checkDiscrimination(a, discriminationThreshold, changedLinesByClass, problems);
+      }
     }
-    checkDiscrimination(a, discriminationThreshold, changedLinesByClass, problems);
     checkExistingTests(a, problems);
     return problems;
   }

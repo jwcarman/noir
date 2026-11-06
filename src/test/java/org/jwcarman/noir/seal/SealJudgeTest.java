@@ -371,6 +371,23 @@ class SealJudgeTest {
             "existing test fails with the reference: com.example.api.LegacyCounterTest#incrementAddsTwo");
   }
 
+  /**
+   * The existing tests run against the reference whatever the holdout tests did, so a vacuous suite
+   * must not hide a conflict: the Examiner needs both problems to fix its next attempt.
+   */
+  @Test
+  void existingTestFailuresAreReportedWithVacuousTests() {
+    junit("stub-run", "a()", true, "b()", false);
+    exit("existing-tests", 1);
+    file(
+        "existing-tests/TEST-com.example.api.LegacyCounterTest.xml",
+        "<testsuite>" + existing("incrementAddsTwo", false) + "</testsuite>");
+    assertThat(judge())
+        .containsExactly(
+            "holdout test passes against the stubs (vacuous): noir.holdout.x.T#a()",
+            "existing test fails with the reference: com.example.api.LegacyCounterTest#incrementAddsTwo");
+  }
+
   @Test
   void existingTestsIgnoredWhenTheReferenceFails() {
     exit("ref-build", 1);

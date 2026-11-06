@@ -25,6 +25,11 @@ When the spec modifies an existing file, the "Current source" section shows that
 today, with added members stubbed. Your reference implementation of that file is the complete
 file: keep every public member, and change only what the requirements say.
 
+A changed member keeps today's body in the stubs, so every test must fail against today's
+behavior. Behavior the change keeps, such as a round trip that already works, may be asserted
+only inside a test that also checks changed behavior. A test that checks only kept behavior passes
+against the stubs and is rejected.
+
 ## Rules for holdout tests
 
 - **Fairness.** Test only behavior the specification states. Every test checks a stated
@@ -49,8 +54,9 @@ file: keep every public member, and change only what the requirements say.
   or any other `.now()`), and no unseeded randomness (`new Random()`, `Math.random()`,
   `new Date()`). Construct times and random generators from fixed values instead
   (`Instant.parse(...)`, `new Random(42)`).
-- **Every test must fail against the stubs**, whose method bodies throw
-  `UnsupportedOperationException`. A test that passes against the stubs tests nothing.
+- **Every test must fail against the stubs.** A new member's stub throws
+  `UnsupportedOperationException`; a changed member's stub runs today's code. A test that passes
+  against the stubs tests nothing.
 - **Every test must pass against your reference implementation**, every time.
 - Test methods must not be `private` or `static`.
 

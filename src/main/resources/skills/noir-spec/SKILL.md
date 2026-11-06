@@ -185,7 +185,10 @@ targets and the tests under `## Tests to update`) plus new files may change.
    parameter types, return type, modifiers, type parameters, throws) and only gets new Javadoc; a
    different parameter list adds an overload instead. Members cannot be removed or renamed. A
    changed member's current body stays in the stub, so each requirement on it must describe
-   behaviour that differs from what the code does today. Fragments contain only methods and
+   behaviour that differs from what the code does today. An example that already holds today (a
+   round trip that works, an empty input that already gives `""`) cannot seal: every hidden test
+   must fail against today's code. Leave such examples out, or state what must stay the same under
+   `## Constraints`. Fragments contain only methods and
    constructors, keep the same type kind and modifiers, and add the imports their signatures need.
 4. Search `src/test/java` with grep for the names of the changed members and for the type itself,
    and **ask** the user which of the files you found belong under `## Tests to update` (a
