@@ -92,15 +92,20 @@ restore_tests() {
 }
 
 # Deletes the EXCLUDE_TESTS files (the spec's tests to update) from the repository.
+# exclude_tests: the files listed under "Tests to update" stay in place, so a listed helper still
+# compiles for the tests that use it; surefire just does not run them. Writes the excludes file
+# (one source path relative to src/test/java per line) that the existing-test steps pass on.
+EXCLUDES_FILE=/tmp/noir-excluded-tests.txt
 exclude_tests() {
   local path
   local -a excluded=()
+  : >"$EXCLUDES_FILE"
   IFS=, read -ra excluded <<<"${EXCLUDE_TESTS:-}"
   for path in "${excluded[@]}"; do
     case "$path" in
       "" | /* | *..*) continue ;;
+      src/test/java/*) printf '%s\n' "${path#src/test/java/}" >>"$EXCLUDES_FILE" ;;
     esac
-    rm -f -- "$REPO/$path"
   done
 }
 
@@ -110,7 +115,7 @@ exclude_tests() {
 test_deps() {
   restore_tests || return 1
   exclude_tests
-  cd "$REPO" && mvn -B "${MVN_REPO[@]}" test \
+  cd "$REPO" && mvn -B "${MVN_REPO[@]}" test "-Dsurefire.excludesFile=$EXCLUDES_FILE" \
     '-Dtest=*#noirResolveProvidersOnly' -Dsurefire.failIfNoSpecifiedTests=false
 }
 
@@ -121,7 +126,7 @@ existing_tests() {
   exclude_tests
   cd "$REPO" || return 1
   rm -rf target/surefire-reports
-  mvn -B -o "${MVN_REPO[@]}" -Dsurefire.timeout=600 test
+  mvn -B -o "${MVN_REPO[@]}" -Dsurefire.timeout=600 "-Dsurefire.excludesFile=$EXCLUDES_FILE" test
   local rc=$?
   if [ -d target/surefire-reports ]; then
     cp -R target/surefire-reports "$OUT/existing-tests"

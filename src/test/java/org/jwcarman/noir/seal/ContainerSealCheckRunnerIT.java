@@ -84,6 +84,9 @@ class ContainerSealCheckRunnerIT {
   static final String COUNTER = "src/main/java/com/example/api/Counter.java";
   static final String LEGACY_TEST = "src/test/java/com/example/api/LegacyCounterTest.java";
 
+  /** A test helper, not a test class, that another existing test uses. */
+  static final String HELPER = "src/test/java/com/example/api/Counters.java";
+
   /**
    * A base whose {@code Counter} counts by two, with a test pinning that (which the reference,
    * counting by one, breaks) and a test the reference keeps passing.
@@ -163,7 +166,17 @@ class ContainerSealCheckRunnerIT {
         class CounterBasicsTest {
           @Test
           void startsAtZero() {
-            assertEquals(0, new Counter().get());
+            assertEquals(0, Counters.fresh().get());
+          }
+        }
+        """;
+    var helper =
+        """
+        package com.example.api;
+
+        final class Counters {
+          static Counter fresh() {
+            return new Counter();
           }
         }
         """;
@@ -179,7 +192,9 @@ class ContainerSealCheckRunnerIT {
                 LEGACY_TEST,
                 legacy,
                 "src/test/java/com/example/api/CounterBasicsTest.java",
-                basics));
+                basics,
+                HELPER,
+                helper));
     var clone = GitFixtures.cloneOf(origin, tmp.resolve("legacy-clone"));
     var head = git.revParse(clone, "origin/main");
     var b = tmp.resolve("legacy.bundle");
@@ -265,6 +280,22 @@ class ContainerSealCheckRunnerIT {
 
     var listed = tmp.resolve("listed");
     assertThat(judgeModify(legacyBundle, listed, List.of(LEGACY_TEST))).isEmpty();
+    assertThat(new SealArtifacts(listed).exit("existing-tests")).contains(0);
+    assertThat(listed.resolve("existing-tests/TEST-com.example.api.CounterBasicsTest.xml"))
+        .exists();
+    assertThat(listed.resolve("existing-tests/TEST-com.example.api.LegacyCounterTest.xml"))
+        .doesNotExist();
+  }
+
+  /**
+   * A listed file may be a helper other tests use, so listed files are still compiled; only the
+   * test classes in them are left out of the run (noir-bookmarks #5).
+   */
+  @Test
+  void listedHelperStillCompilesForTheOtherTests(@TempDir Path tmp) throws Exception {
+    var legacyBundle = modifyBaseBundle(tmp);
+    var listed = tmp.resolve("listed-helper");
+    assertThat(judgeModify(legacyBundle, listed, List.of(LEGACY_TEST, HELPER))).isEmpty();
     assertThat(new SealArtifacts(listed).exit("existing-tests")).contains(0);
     assertThat(listed.resolve("existing-tests/TEST-com.example.api.CounterBasicsTest.xml"))
         .exists();
