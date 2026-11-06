@@ -145,4 +145,23 @@ class FeedbackRendererTest {
     assertThat(new FeedbackInput.BehaviorFailure(List.of()).category())
         .isEqualTo(Category.BEHAVIOR_FAILURE);
   }
+
+  @Test
+  void buildFailedNamesLockedTests() {
+    var text =
+        FeedbackRenderer.render(
+            1,
+            new FeedbackInput.BuildFailed("[ERROR] BUILD FAILURE", List.of("a.T#x()", "b.U#y()")));
+    assertThat(text)
+        .endsWith(
+            "\n\nThese failing tests are locked: `a.T#x()`, `b.U#y()`. If the spec cannot be met"
+                + " without changing them, write `/work/SPEC-PROBLEMS.json` (see the prompt) instead"
+                + " of working around them.\n");
+  }
+
+  @Test
+  void buildFailedWithoutLockedTestsHasNoHint() {
+    assertThat(FeedbackRenderer.render(1, new FeedbackInput.BuildFailed("boom")))
+        .doesNotContain("locked");
+  }
 }

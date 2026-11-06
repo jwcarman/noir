@@ -9,7 +9,16 @@ import org.jwcarman.noir.spec.QualityBar;
 public sealed interface FeedbackInput {
   Category category();
 
-  record BuildFailed(String mavenOutput) implements FeedbackInput {
+  /** {@code lockedTestsFailed}: existing tests the spec does not let change that failed. */
+  record BuildFailed(String mavenOutput, List<String> lockedTestsFailed) implements FeedbackInput {
+    public BuildFailed {
+      lockedTestsFailed = List.copyOf(lockedTestsFailed);
+    }
+
+    public BuildFailed(String mavenOutput) {
+      this(mavenOutput, List.of());
+    }
+
     public Category category() {
       return Category.BUILD_FAILED;
     }

@@ -25,6 +25,16 @@ public final class FeedbackRenderer {
       case FeedbackInput.BuildFailed b -> {
         sb.append("`mvn verify` failed. Last lines of output:\n\n```\n");
         sb.append(tail(b.mavenOutput(), MAX_BUILD_LINES)).append("\n```\n");
+        if (!b.lockedTestsFailed().isEmpty()) {
+          sb.append("\nThese failing tests are locked: ")
+              .append(
+                  String.join(
+                      ", ", b.lockedTestsFailed().stream().map(t -> "`" + t + "`").toList()))
+              .append(
+                  ". If the spec cannot be met without changing them, write"
+                      + " `/work/SPEC-PROBLEMS.json` (see the prompt) instead of working around"
+                      + " them.\n");
+        }
       }
       case FeedbackInput.ContractViolation c -> {
         sb.append(

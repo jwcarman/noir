@@ -102,4 +102,19 @@ class TestInventoryTest {
             " Existing tests are locked: they must run and pass. Find what stops them running and"
                 + " remove it.");
   }
+
+  @Test
+  void failedLockedListsLockedFailures() {
+    assertThat(
+            TestInventory.failedLocked(
+                List.of("a.T#x", "a.T#y", "b.U#z", "c.V#w"),
+                List.of(
+                    t("a.T#x", Result.FAILED),
+                    t("a.T#y", Result.PASSED),
+                    t("b.U#z", Result.TIMED_OUT),
+                    t("c.V#w", Result.FAILED),
+                    t("d.New#n", Result.FAILED)),
+                List.of("src/test/java/c/V.java")))
+        .containsExactly("a.T#x", "b.U#z");
+  }
 }

@@ -398,6 +398,64 @@ class FactoryTest {
                 + " `com.example.CalcTest#subtracts()`.");
   }
 
+  static final String ADDS_FAILED =
+      "<testcase classname=\"com.example.CalcTest\" name=\"adds()\"><failure message=\"no\"/>"
+          + "</testcase>";
+
+  @Test
+  void lockedTestFailureIsRecordedAndFedBack() throws IOException {
+    TestInventory.write(
+        List.of("com.example.CalcTest#adds()"), itemDir.resolve("baseline-tests.json"));
+    measure.modes = n -> n == 1 ? MeasureMode.BUILD_FAILED : MeasureMode.PASS;
+    measure.testReports = n -> n == 1 ? report(ADDS_FAILED) : report(ADDS_PASSED);
+
+    drive();
+
+    var m = firstEvent("measurement", 1);
+    assertThat(m.data()).containsEntry("lockedTestsFailed", List.of("com.example.CalcTest#adds()"));
+    assertThat(Files.readString(attempt(1).feedback()))
+        .contains("These failing tests are locked: `com.example.CalcTest#adds()`.");
+  }
+
+  @Test
+  void noOutputRecordsTheBuildersLastMessage() {
+    build.produces = n -> n > 1;
+    var text =
+        java.util.stream.IntStream.rangeClosed(1, 15)
+            .mapToObj(i -> "line " + i)
+            .collect(java.util.stream.Collectors.joining("\n"));
+    build.agent =
+        n ->
+            new AgentResult(
+                0, false, false, new BigDecimal("0.10"), 3, "m", text, "sha256:builder");
+
+    drive();
+
+    assertThat(firstEvent("build_attempt", 1).data().get("lastMessage"))
+        .isEqualTo(
+            java.util.stream.IntStream.rangeClosed(6, 15)
+                .mapToObj(i -> "line " + i)
+                .collect(java.util.stream.Collectors.joining("\n")));
+    assertThat(firstEvent("build_attempt", 2).data()).doesNotContainKey("lastMessage");
+  }
+
+  @Test
+  void contractViolationRecordsItsFirstMessage() {
+    bundles.changes = List.of(new FileChange(FileChange.Status.MODIFIED, "pom.xml", null, 1, 0));
+
+    drive();
+
+    assertThat((String) firstEvent("measurement", 1).data().get("violation"))
+        .startsWith("You modified `pom.xml`.");
+  }
+
+  Event firstEvent(String type, int attempt) {
+    return store.readEvents(Specs.ID).stream()
+        .filter(e -> e.type().equals(type) && e.attempt() == attempt)
+        .findFirst()
+        .orElseThrow();
+  }
+
   @Test
   void testsInATestToUpdateMayStopRunning() throws IOException {
     spec = spec.withTestsToUpdate(List.of("src/test/java/com/example/CalcTest.java"));

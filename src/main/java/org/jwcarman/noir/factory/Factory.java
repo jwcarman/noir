@@ -310,6 +310,9 @@ public final class Factory implements ItemDriver {
     data.put("imageId", orUnknown(agent.imageId()));
     data.put("agentError", agent.error());
     data.put("timedOut", agent.timedOut());
+    if (!outcome.producedCommits()) {
+      data.put("lastMessage", mask(lastMessage(agent.resultText())));
+    }
     event(ctx.item().id(), "build_attempt", n, data);
     var report =
         SpecProblems.read(
@@ -442,7 +445,13 @@ public final class Factory implements ItemDriver {
           ctx.item().id(),
           "measurement",
           ctx.item().attempt(),
-          Map.of("passed", false, "category", Category.CONTRACT_VIOLATION.name()));
+          Map.of(
+              "passed",
+              false,
+              "category",
+              Category.CONTRACT_VIOLATION.name(),
+              "violation",
+              mask(cut(violation.get(), VIOLATION_CHARS))));
       return new Step(
           new Trigger.MeasurementFailed(Category.CONTRACT_VIOLATION),
           new FeedbackInput.ContractViolation(List.of(violation.get())));
@@ -484,8 +493,21 @@ public final class Factory implements ItemDriver {
     }
     var data = new LinkedHashMap<String, Object>();
     data.put("passed", outcome instanceof MeasureOutcome.Passed);
+    if (outcome instanceof MeasureOutcome.Shortfall s
+        && s.input() instanceof FeedbackInput.BuildFailed b) {
+      var locked = lockedTestsFailed(ctx, artifacts);
+      if (!locked.isEmpty()) {
+        data.put("lockedTestsFailed", locked);
+        outcome =
+            new MeasureOutcome.Shortfall(
+                new FeedbackInput.BuildFailed(b.mavenOutput(), locked), outcome.m());
+      }
+    }
     if (outcome instanceof MeasureOutcome.Shortfall s) {
       data.put("category", s.input().category().name());
+      if (s.input() instanceof FeedbackInput.ContractViolation cv && !cv.mismatches().isEmpty()) {
+        data.put("violation", mask(cut(cv.mismatches().getFirst(), VIOLATION_CHARS)));
+      }
     }
     // Metrics are meaningful only when coverage and mutation were actually measured.
     boolean measured =
@@ -506,6 +528,37 @@ public final class Factory implements ItemDriver {
       case MeasureOutcome.Shortfall s ->
           new Step(new Trigger.MeasurementFailed(s.input().category()), s.input());
     };
+  }
+
+  static final int VIOLATION_CHARS = 300;
+  static final int LAST_MESSAGE_LINES = 10;
+  static final int LAST_MESSAGE_CHARS = 1000;
+
+  static String cut(String s, int max) {
+    return s.length() > max ? s.substring(0, max) : s;
+  }
+
+  /** The last {@value #LAST_MESSAGE_LINES} lines of the builder's final message, capped. */
+  static String lastMessage(String resultText) {
+    var lines = Objects.requireNonNullElse(resultText, "").strip().lines().toList();
+    var tail =
+        String.join(
+            "\n", lines.subList(Math.max(0, lines.size() - LAST_MESSAGE_LINES), lines.size()));
+    return tail.length() > LAST_MESSAGE_CHARS
+        ? tail.substring(tail.length() - LAST_MESSAGE_CHARS)
+        : tail;
+  }
+
+  /** The locked baseline tests that failed in this attempt's build (empty without a baseline). */
+  private static List<String> lockedTestsFailed(Ctx ctx, MeasureArtifacts artifacts) {
+    var baseline = ctx.itemDir().resolve(TestInventory.BASELINE_FILE);
+    if (!Files.isRegularFile(baseline, LinkOption.NOFOLLOW_LINKS)) {
+      return List.of();
+    }
+    var changeable = new ArrayList<String>(ctx.spec().modifies());
+    changeable.addAll(ctx.spec().testsToUpdate());
+    return TestInventory.failedLocked(
+        TestInventory.read(baseline), artifacts.testOutcomes(), changeable);
   }
 
   /**

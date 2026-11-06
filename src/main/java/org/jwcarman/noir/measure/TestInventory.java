@@ -59,6 +59,19 @@ public final class TestInventory {
     return result;
   }
 
+  /**
+   * The baseline tests that failed or timed out in {@code outcomes}, in baseline order, except
+   * those in files the spec lets change. Tests that were skipped or did not run are not listed.
+   */
+  public static List<String> failedLocked(
+      List<String> baselinePassed, List<TestOutcome> outcomes, Collection<String> changeablePaths) {
+    var failed = new HashSet<>(failing(outcomes));
+    var exempt = Set.copyOf(changeablePaths);
+    return baselinePassed.stream()
+        .filter(id -> failed.contains(id) && !exempt.contains(sourcePath(id)))
+        .toList();
+  }
+
   /** Builder feedback naming the tests (at most {@value #FEEDBACK_LIMIT}). */
   public static String feedback(List<String> notPassing) {
     var shown =
@@ -93,7 +106,7 @@ public final class TestInventory {
   }
 
   /** {@code a.b.C$Inner#m} → {@code src/test/java/a/b/C.java}. */
-  static String sourcePath(String id) {
+  public static String sourcePath(String id) {
     var hash = id.indexOf('#');
     var cls = hash < 0 ? id : id.substring(0, hash);
     var dollar = cls.indexOf('$');
