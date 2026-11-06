@@ -539,7 +539,7 @@ public final class Factory implements ItemDriver {
   }
 
   private void deliver(Ctx ctx, WorkItem next, AttemptPaths attempt, boolean draft) {
-    var body = body(ctx, next, attempt.attempt(), draft);
+    var body = body(ctx, next, attempt, draft);
     guard("pull_request", ctx.spec().title(), body);
     int pr = retry.call(() -> delivery.openPullRequest(next, ctx.spec(), attempt, body, draft));
     var data = new LinkedHashMap<String, Object>();
@@ -592,7 +592,8 @@ public final class Factory implements ItemDriver {
     return total;
   }
 
-  private String body(Ctx ctx, WorkItem next, int attempt, boolean draft) {
+  private String body(Ctx ctx, WorkItem next, AttemptPaths delivered, boolean draft) {
+    int attempt = delivered.attempt();
     var events = store.readEvents(next.id());
     var commitment = Commitments.read(ctx.itemDir().resolve("commitment.json"));
     var built = latest(events, "build_attempt", attempt);
@@ -615,8 +616,17 @@ public final class Factory implements ItemDriver {
                     num(e.data().get("lineCoverage")),
                     num(e.data().get("mutationScore")),
                     num(e.data().get("maxCrap"))));
+    var files =
+        retry.call(
+            () -> bundles.fileChanges(delivered.bundle(), ctx.spec().baseSha(), ctx.branch()));
     return PullRequestBody.render(
-        next.issueNumber(), metrics, latestResults(events, attempt), provenance, draft);
+        next.issueNumber(),
+        metrics,
+        latestResults(events, attempt),
+        provenance,
+        files,
+        ctx.spec().testsToUpdate(),
+        draft);
   }
 
   /** Text bound for GitHub carried a credential; nothing has been posted. */

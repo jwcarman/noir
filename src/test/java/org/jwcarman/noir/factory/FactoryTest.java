@@ -129,6 +129,8 @@ class FactoryTest {
 
   @Test
   void happyPathOpensOnePullRequest() {
+    bundles.changes =
+        List.of(new FileChange(FileChange.Status.ADDED, "src/main/java/A.java", null, 5, 0));
     var first = factory().advance(Specs.ID);
     assertThat(first.state()).isEqualTo(State.BUILDING);
     assertThat(first.attempt()).isEqualTo(1);
@@ -145,6 +147,7 @@ class FactoryTest {
     assertThat(pr.head()).isEqualTo("noir/1-add-a-bounded-cache");
     assertThat(pr.body())
         .contains("Closes #1.")
+        .contains("### Files\n\n- Added: `src/main/java/A.java` (+5)\n")
         .contains("R1: 3/3 passed")
         .contains("Builder model: claude-test")
         .contains("Examiner model: examiner-model")

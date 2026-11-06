@@ -2,9 +2,11 @@ package org.jwcarman.noir.factory;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import org.jwcarman.noir.deliver.FileChange;
 import org.jwcarman.noir.feedback.RequirementResult;
 
 /**
@@ -37,6 +39,8 @@ public final class PullRequestBody {
       Optional<Metrics> metrics,
       List<RequirementResult> results,
       Provenance p,
+      List<FileChange> files,
+      List<String> testsToUpdate,
       boolean draft) {
     var sb = new StringBuilder();
     if (draft) {
@@ -54,6 +58,7 @@ public final class PullRequestBody {
         .append(metrics.map(m -> String.format(Locale.ROOT, "%.1f", m.maxCrap())).orElse("n/a"))
         .append(" |\n\n");
     results(sb, results);
+    files(sb, files, testsToUpdate);
     sb.append("\n### Provenance\n\n");
     sb.append("- Base SHA: `").append(line(p.baseSha())).append("`\n");
     sb.append("- Attempts: ").append(p.attempts()).append('\n');
@@ -68,6 +73,42 @@ public final class PullRequestBody {
     sb.append("- Grader image: `").append(line(p.graderImageId())).append("`\n");
     sb.append("- Cost: ").append(cost(p.builderCostUsd(), p.examinerCostUsd())).append('\n');
     return sb.toString();
+  }
+
+  /**
+   * Grouped Added, Modified, Tests updated; path order within each group. Deleted files are never
+   * listed (the lock check forbids deleting files). Omitted when nothing qualifies.
+   */
+  private static void files(StringBuilder sb, List<FileChange> files, List<String> testsToUpdate) {
+    var added = new ArrayList<String>();
+    var modified = new ArrayList<String>();
+    var tests = new ArrayList<String>();
+    for (var f : files) {
+      if (f.status() == FileChange.Status.DELETED) {
+        continue;
+      }
+      var entry = "`" + line(f.path()) + "` (" + counts(f) + ")";
+      if (testsToUpdate.contains(f.path())) {
+        tests.add(entry);
+      } else if (f.status() == FileChange.Status.ADDED) {
+        added.add(entry);
+      } else {
+        modified.add(entry);
+      }
+    }
+    if (added.isEmpty() && modified.isEmpty() && tests.isEmpty()) {
+      return;
+    }
+    sb.append("\n### Files\n\n");
+    added.forEach(e -> sb.append("- Added: ").append(e).append('\n'));
+    modified.forEach(e -> sb.append("- Modified: ").append(e).append('\n'));
+    tests.forEach(e -> sb.append("- Tests updated: ").append(e).append('\n'));
+  }
+
+  private static String counts(FileChange f) {
+    return f.status() == FileChange.Status.ADDED
+        ? "+" + f.added()
+        : "+" + f.added() + " \u2212" + f.deleted();
   }
 
   private static String cost(BigDecimal builder, BigDecimal examiner) {

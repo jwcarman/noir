@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.jwcarman.noir.deliver.FileChange;
 import org.jwcarman.noir.feedback.RequirementResult;
 
 class PullRequestBodyTest {
@@ -27,7 +28,13 @@ class PullRequestBodyTest {
   void rendersExactSections() {
     var body =
         PullRequestBody.render(
-            1, Optional.of(new PullRequestBody.Metrics(0.85, 0.725, 6.0)), RESULTS, PROV, false);
+            1,
+            Optional.of(new PullRequestBody.Metrics(0.85, 0.725, 6.0)),
+            RESULTS,
+            PROV,
+            List.of(),
+            List.of(),
+            false);
     assertThat(body)
         .isEqualTo(
             """
@@ -62,7 +69,8 @@ class PullRequestBodyTest {
     var prov =
         new PullRequestBody.Provenance(
             "abc", 1, "f00d", "m", "e", "b", "g", new BigDecimal("1.255"), null);
-    assertThat(PullRequestBody.render(1, Optional.empty(), RESULTS, prov, false))
+    assertThat(
+            PullRequestBody.render(1, Optional.empty(), RESULTS, prov, List.of(), List.of(), false))
         .contains("- Cost: $1.26 (builder $1.26, Examiner unknown; as reported by Claude Code)\n");
   }
 
@@ -74,6 +82,8 @@ class PullRequestBodyTest {
             Optional.empty(),
             List.of(),
             new PullRequestBody.Provenance("abc", 4, "f00d", null, null, null, "g", null, null),
+            List.of(),
+            List.of(),
             true);
     assertThat(body)
         .startsWith(
@@ -95,6 +105,8 @@ class PullRequestBodyTest {
             RESULTS,
             new PullRequestBody.Provenance(
                 "abc", 1, "f00d", "m`\n### Injected", "e", "id`x\ny", "g", null, null),
+            List.of(),
+            List.of(),
             false);
     assertThat(body)
         .contains("- Builder model: m ### Injected\n")
@@ -115,5 +127,40 @@ class PullRequestBodyTest {
             R1: 4/4 passed
             R2: 3/3 passed
             """);
+  }
+
+  @Test
+  void rendersFilesSection() {
+    var files =
+        List.of(
+            new FileChange(FileChange.Status.MODIFIED, "src/Calc.java", null, 12, 3),
+            new FileChange(FileChange.Status.MODIFIED, "src/CalcTest.java", null, 2, 2),
+            new FileChange(FileChange.Status.ADDED, "src/Helper.java", null, 40, 0),
+            new FileChange(FileChange.Status.DELETED, "src/Gone.java", null, 0, 9),
+            new FileChange(FileChange.Status.RENAMED, "src/New.java", "src/Old.java", 1, 1));
+    var body =
+        PullRequestBody.render(
+            1, Optional.empty(), RESULTS, PROV, files, List.of("src/CalcTest.java"), false);
+    assertThat(body)
+        .contains(
+            """
+            ### Files
+
+            - Added: `src/Helper.java` (+40)
+            - Modified: `src/Calc.java` (+12 \u22123)
+            - Modified: `src/New.java` (+1 \u22121)
+            - Tests updated: `src/CalcTest.java` (+2 \u22122)
+
+            ### Provenance
+            """)
+        .doesNotContain("Gone");
+    assertThat(body.indexOf("### Files")).isGreaterThan(body.indexOf("### Holdout results"));
+  }
+
+  @Test
+  void noFilesSectionWhenEmpty() {
+    var body =
+        PullRequestBody.render(1, Optional.empty(), RESULTS, PROV, List.of(), List.of(), false);
+    assertThat(body).doesNotContain("### Files");
   }
 }
