@@ -68,6 +68,10 @@ and `/noir-spec` in a desktop session with no credential.
 - The builder's commit was always `noir: attempt work`. Fixed in 5a5a7c4:
   `<issue title> (#<n>)`, `, attempt <k>` for rework (`CommitMessage`,
   `COMMIT_MESSAGE` env to `build-post.sh`).
+- Deferred minor M1 fixed in 340de20: `SuiteSealer` retries each seal step in
+  place (checks against the existing suite; a failed Examiner container re-runs
+  only that attempt), so a transient Docker failure no longer re-pays earlier
+  Examiner attempts.
 - Idea for Plan 6: comment commands on issues (e.g. `/noir build`), found by
   the existing poll, restricted to users with write access. `@noir` is avoided
   because it is a real GitHub username.
