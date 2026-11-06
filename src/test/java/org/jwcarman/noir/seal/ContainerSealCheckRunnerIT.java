@@ -348,6 +348,13 @@ class ContainerSealCheckRunnerIT {
     assertThat(SealJudge.judge(artifacts, config.sealDiscrimination()))
         .as(artifacts.logTail("holdout-compile", 40))
         .isEmpty();
+    var jars = artifacts.read("deps.txt").lines().toList();
+    assertThat(jars).anyMatch(n -> n.startsWith("assertj-core-") && n.endsWith(".jar"));
+    assertThat(jars)
+        .noneMatch(n ->
+            n.startsWith("junit-")
+                || n.startsWith("opentest4j-")
+                || n.startsWith("apiguardian-api-"));
   }
 
   @Test

@@ -60,7 +60,8 @@ stub_build() {
       -DincludeScope=runtime -DoutputDirectory="$OUT/deps" \
     && mvn -B "${MVN_REPO[@]}" "$DEPENDENCY_PLUGIN:copy-dependencies" \
       -DincludeScope=test -DoutputDirectory="$OUT/deps" \
-    && drop_junit_jars "$OUT/deps"
+    && drop_junit_jars "$OUT/deps" \
+    && ls "$OUT/deps" >"$OUT/deps.txt"
 }
 
 # JUnit's own jars never go on a hidden-test classpath from the repository; noir's launcher
