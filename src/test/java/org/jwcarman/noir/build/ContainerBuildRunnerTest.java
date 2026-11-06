@@ -54,7 +54,14 @@ class ContainerBuildRunnerTest {
 
   BuildOutcome run() {
     return new ContainerBuildRunner(port, agent, NoirConfig.defaults())
-        .run(Specs.valid(), List.of(), input, "noir/1-x", Optional.empty(), tmp.resolve("attempt"));
+        .run(
+            Specs.valid(),
+            List.of(),
+            input,
+            "noir/1-x",
+            "Add a Counter (#1)",
+            Optional.empty(),
+            tmp.resolve("attempt"));
   }
 
   @Test
@@ -67,7 +74,9 @@ class ContainerBuildRunnerTest {
           assertThat(s.network()).isFalse();
           assertThat(s.env())
               .containsOnly(
-                  Map.entry("BRANCH", "noir/1-x"), Map.entry("BASE_SHA", Specs.valid().baseSha()));
+                  Map.entry("BRANCH", "noir/1-x"),
+                  Map.entry("BASE_SHA", Specs.valid().baseSha()),
+                  Map.entry("COMMIT_MESSAGE", "Add a Counter (#1)"));
         });
     assertThat(agent.requests()).hasSize(1);
   }
@@ -155,7 +164,7 @@ class ContainerBuildRunnerTest {
       Files.createSymbolicLink(attempt.resolve(name), outside);
     }
     new ContainerBuildRunner(port, agent, NoirConfig.defaults())
-        .run(Specs.valid(), List.of(), input, "noir/1-x", Optional.of("fb"), attempt);
+        .run(Specs.valid(), List.of(), input, "noir/1-x", "msg", Optional.of("fb"), attempt);
     assertThat(outside).hasContent("original");
     for (var name : List.of("SPEC.md", "FEEDBACK.md", "input.bundle")) {
       assertThat(Files.isSymbolicLink(attempt.resolve(name))).as(name).isFalse();
@@ -191,7 +200,8 @@ class ContainerBuildRunnerTest {
           return new ContainerResult(0, "", "", false, "sha");
         });
     new ContainerBuildRunner(recording, tampering, NoirConfig.defaults())
-        .run(Specs.valid(), List.of(), input, "noir/1-x", Optional.empty(), tmp.resolve("a"));
+        .run(
+            Specs.valid(), List.of(), input, "noir/1-x", "msg", Optional.empty(), tmp.resolve("a"));
     assertThat(seen).containsExactly("# v2 git bundle\n", "# v2 git bundle\n");
   }
 }

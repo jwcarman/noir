@@ -166,6 +166,7 @@ import java.time.Duration;
             BuildFixtures.stubs(),
             base.bundle(),
             BRANCH,
+            BuildFixtures.MESSAGE,
             Optional.empty(),
             tmp.resolve("attempt"))
         .bundle();

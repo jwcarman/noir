@@ -22,6 +22,10 @@ import org.jwcarman.noir.spec.Specs;
 /** Shared inputs for the builder and measurement container tests. */
 public final class BuildFixtures {
   public static final String BRANCH = "noir/1-counter";
+
+  /** Quotes, an apostrophe and a $ prove the post step passes the message to git verbatim. */
+  public static final String MESSAGE = "Add a \"Counter\" that isn't $HOME-aware (#1)";
+
   public static final String COUNTER_PATH = "src/main/java/com/example/api/Counter.java";
   public static final String COUNTER_TEST_PATH = "src/test/java/com/example/api/CounterTest.java";
 

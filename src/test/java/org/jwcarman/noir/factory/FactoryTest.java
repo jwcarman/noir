@@ -155,6 +155,7 @@ class FactoryTest {
             new FakeBranchPublisher.Push(REPO, attempt(1).bundle(), "noir/1-add-a-bounded-cache"));
     assertThat(build.calls.get(0).inputBundle()).isEqualTo(itemDir.resolve("base.bundle"));
     assertThat(build.calls.get(0).attemptDir()).isEqualTo(attempt(1).build());
+    assertThat(build.calls.get(0).commitMessage()).isEqualTo(spec.title() + " (#1)");
     assertThat(eventTypes())
         .containsExactly(
             "transition",
@@ -201,6 +202,7 @@ class FactoryTest {
     assertThat(build.calls.get(0).feedback()).isEmpty();
     assertThat(build.calls.get(1).feedback()).contains(expected);
     assertThat(build.calls.get(1).inputBundle()).isEqualTo(attempt(1).bundle());
+    assertThat(build.calls.get(1).commitMessage()).isEqualTo(spec.title() + " (#1), attempt 2");
     assertThat(delivery.labels)
         .containsExactly("noir:building", "noir:building", "noir:building", "noir:pr-open");
   }
@@ -829,7 +831,8 @@ class FactoryTest {
     }
   }
 
-  record BuildCall(Path inputBundle, Optional<String> feedback, Path attemptDir) {}
+  record BuildCall(
+      Path inputBundle, String commitMessage, Optional<String> feedback, Path attemptDir) {}
 
   static final class FakeBuild implements BuildRunner {
     final List<BuildCall> calls = new ArrayList<>();
@@ -843,9 +846,10 @@ class FactoryTest {
         List<StubSource> stubs,
         Path inputBundle,
         String branch,
+        String commitMessage,
         Optional<String> feedback,
         Path attemptDir) {
-      calls.add(new BuildCall(inputBundle, feedback, attemptDir));
+      calls.add(new BuildCall(inputBundle, commitMessage, feedback, attemptDir));
       var bundle = attemptDir.resolve("out.bundle");
       write(bundle, "# v2 git bundle\nattempt " + calls.size() + "\n");
       var result =

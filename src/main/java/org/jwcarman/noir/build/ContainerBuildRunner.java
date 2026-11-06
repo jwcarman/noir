@@ -59,12 +59,18 @@ public final class ContainerBuildRunner implements BuildRunner {
       List<StubSource> stubs,
       Path inputBundle,
       String branch,
+      String commitMessage,
       Optional<String> feedback,
       Path attemptDir) {
     if (spec.baseSha() == null) {
       throw new IllegalArgumentException("spec " + spec.id() + " has no baseSha");
     }
-    var env = Map.of("BRANCH", branch, "BASE_SHA", spec.baseSha());
+    if (commitMessage == null
+        || commitMessage.isBlank()
+        || commitMessage.chars().anyMatch(Character::isISOControl)) {
+      throw new IllegalArgumentException("commit message must be one non-blank line");
+    }
+    var env = Map.of("BRANCH", branch, "BASE_SHA", spec.baseSha(), "COMMIT_MESSAGE", commitMessage);
     try {
       Files.createDirectories(attemptDir);
       deleteRecursively(attemptDir.resolve("repo"));

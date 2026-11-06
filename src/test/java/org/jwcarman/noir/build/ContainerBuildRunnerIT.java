@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.jwcarman.noir.build.BuildFixtures.BRANCH;
 import static org.jwcarman.noir.build.BuildFixtures.COUNTER_PATH;
 import static org.jwcarman.noir.build.BuildFixtures.COUNTER_TEST_PATH;
+import static org.jwcarman.noir.build.BuildFixtures.MESSAGE;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -57,6 +58,7 @@ class ContainerBuildRunnerIT {
                 BuildFixtures.stubs(),
                 base.bundle(),
                 BRANCH,
+                MESSAGE,
                 Optional.of("fix the counter"),
                 attempt);
 
@@ -70,7 +72,7 @@ class ContainerBuildRunnerIT {
             tmp.resolve("inspect").toAbsolutePath())) {
       assertThat(repo.commitsSince(base.sha(), BRANCH)).hasSize(1);
       assertThat(repo.patchSince(base.sha(), BRANCH))
-          .contains("noir: attempt work")
+          .contains(MESSAGE)
           .contains("+++ b/" + COUNTER_PATH)
           .contains("+++ b/" + COUNTER_TEST_PATH)
           .contains("Author: noir <noir@noir.invalid>");
@@ -111,6 +113,7 @@ class ContainerBuildRunnerIT {
                 BuildFixtures.stubs(),
                 base.bundle(),
                 BRANCH,
+                MESSAGE,
                 Optional.empty(),
                 tmp.resolve("a1"));
     assertThat(outcome.producedCommits()).isTrue();
@@ -128,6 +131,7 @@ class ContainerBuildRunnerIT {
                 BuildFixtures.stubs(),
                 outcome.bundle(),
                 BRANCH,
+                MESSAGE,
                 Optional.empty(),
                 tmp.resolve("a2"));
     try (var repo =
@@ -156,6 +160,7 @@ class ContainerBuildRunnerIT {
                 BuildFixtures.stubs(),
                 first.bundle(),
                 BRANCH,
+                MESSAGE,
                 Optional.empty(),
                 tmp.resolve("a2"));
     assertThat(second.producedCommits()).isFalse();
@@ -176,6 +181,7 @@ class ContainerBuildRunnerIT {
                 BuildFixtures.stubs(),
                 base.bundle(),
                 BRANCH,
+                MESSAGE,
                 Optional.empty(),
                 tmp.resolve("attempt"));
     assertThat(outcome.producedCommits()).isFalse();
@@ -212,7 +218,7 @@ class ContainerBuildRunnerIT {
     var outcome = buildWith(agent, tmp.resolve("attempt"));
     assertThat(outcome.producedCommits()).isTrue();
     assertThat(onlyNewCommit(outcome))
-        .contains("noir: attempt work")
+        .contains(MESSAGE)
         .contains("+++ b/" + COUNTER_PATH)
         .doesNotContain("fresh history");
   }
@@ -247,7 +253,7 @@ class ContainerBuildRunnerIT {
     var outcome = buildWith(agent, tmp.resolve("attempt"));
     assertThat(outcome.producedCommits()).isTrue();
     assertThat(onlyNewCommit(outcome))
-        .contains("noir: attempt work")
+        .contains(MESSAGE)
         .contains("+++ b/" + COUNTER_PATH)
         .contains("+++ b/" + COUNTER_TEST_PATH)
         .contains("+++ b/NOTES.txt")
@@ -337,6 +343,7 @@ class ContainerBuildRunnerIT {
             BuildFixtures.stubs(),
             base.bundle(),
             BRANCH,
+            MESSAGE,
             Optional.empty(),
             attempt);
   }
@@ -374,7 +381,7 @@ class ContainerBuildRunnerIT {
             outcome.bundle(),
             tmp.resolve("inspect").toAbsolutePath())) {
       assertThat(repo.patchSince(base.sha(), BRANCH))
-          .contains("noir: attempt work")
+          .contains(MESSAGE)
           .contains("+++ b/" + COUNTER_PATH)
           .contains("+  public void reset() {");
     }

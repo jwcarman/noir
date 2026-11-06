@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # noir builder handoff (spec §6.4). Runs after the agent, with no network and no credentials.
-# Captures the agent's working tree as ONE commit, "noir: attempt work", on $BRANCH, and writes
+# Captures the agent's working tree as ONE commit, with message $COMMIT_MESSAGE, on $BRANCH, and writes
 # /work/out.bundle (that branch) and /work/commits.txt (commits this attempt added beyond its input
 # head: the branch tip in input.bundle, or $BASE_SHA when the bundle has no such branch; 0 or 1).
 #
@@ -16,7 +16,8 @@
 # If this cannot complete, it writes /work/post-error.txt instead of a bundle and exits 0: the
 # builder's failure (NO_OUTPUT), not an infrastructure error.
 #
-# Mount: the attempt directory at /work (rw). Env: BRANCH, BASE_SHA.
+# Mount: the attempt directory at /work (rw). Env: BRANCH, BASE_SHA, COMMIT_MESSAGE (one line, from
+# noir: the issue title and number).
 set -uo pipefail
 
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0
@@ -75,7 +76,7 @@ tar -C "$REPO" -S --ignore-case --exclude=.git --no-ignore-case --exclude=./targ
 # 3. One commit with everything that changed.
 g add -A -- . ':(exclude)target' || fail "git add failed"
 if ! g diff --cached --quiet --no-ext-diff; then
-  g commit -q --no-verify -m "noir: attempt work" || fail "git commit failed"
+  g commit -q --no-verify -m "${COMMIT_MESSAGE:?}" || fail "git commit failed"
 fi
 g bundle create -q /work/out.bundle "refs/heads/$BRANCH" || fail "git bundle failed"
 g rev-list --count "$INPUT_HEAD..refs/heads/$BRANCH" >/work/commits.txt || fail "git rev-list failed"

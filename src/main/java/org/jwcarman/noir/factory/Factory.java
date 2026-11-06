@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.jwcarman.noir.agent.AgentResult;
 import org.jwcarman.noir.build.BuildRunner;
+import org.jwcarman.noir.build.CommitMessage;
 import org.jwcarman.noir.commit.Commitments;
 import org.jwcarman.noir.config.NoirConfig;
 import org.jwcarman.noir.deliver.PatchTooLargeException;
@@ -274,10 +275,12 @@ public final class Factory implements ItemDriver {
     var stubs = SpecRenderer.loadStubs(ctx.spec(), ctx.itemDir());
     var input = inputBundle(ctx.itemDir(), n);
     var feedback = previousFeedback(ctx.itemDir(), n);
+    var message = CommitMessage.of(ctx.item().issueNumber(), ctx.spec().title(), n);
     var outcome =
         retry.call(() -> {
           var o =
-              builder.run(ctx.spec(), stubs, input, ctx.branch(), feedback, ctx.attempt().build());
+              builder.run(
+                  ctx.spec(), stubs, input, ctx.branch(), message, feedback, ctx.attempt().build());
           if (consumedNothing(o.agent()) && !o.producedCommits()) {
             throw new DockerException(
                 "builder agent failed before doing any work (exit "
