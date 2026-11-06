@@ -129,3 +129,37 @@ open: problems the Examiner cannot fix (existing tests that cannot run) still us
 4. F5 and F9: abstract members in fragments, and Examiner-supplied versions of listed test helpers.
 5. F6: show referenced type signatures to the Examiner.
 6. F1: a shared read-only dependency cache or a Maven proxy.
+
+## Grader spike (2026-11-06)
+
+Question: can hidden tests that start a Spring Boot test context run in the grader, under its
+Security Manager policy, with no network?
+
+Probe: noir-bookmarks' compiled classes and all its dependencies (test scope included), three
+throwaway hidden tests (plain JUnit, `@DataJpaTest`, `@WebMvcTest` with MockMvc and
+`@MockitoBean`), run with the real `noir-grader` image and `docker run` flags.
+
+Results:
+1. The forbidden-file scan rejected the run first: test-scope dependencies include JUnit's own
+   jars, whose service registrations it treats as an attempt to take over the launcher. Hidden-test
+   libraries need a trusted path of their own.
+2. With the current policy, both Spring tests failed at once: Spring in `/work/deps` lacks
+   `accessDeclaredMembers`.
+3. Trusting `/work/deps` fully made `@WebMvcTest` pass. `@DataJpaTest` still failed: Spring's
+   CGLIB proxy of the builder's `@Transactional` class is defined in the builder's protection
+   domain and reflects on itself.
+4. Adding `accessDeclaredMembers` for the builder's classes made all three pass (`@DataJpaTest`
+   0.13 s, MockMvc 0.10 s).
+5. Replacing full trust for `/work/deps` with only what Spring asks for needed 24 grants and was
+   not done: writing system properties, reading environment variables, reading `application.*`
+   from the working directory, adding shutdown hooks. Full trust, on the other hand, lets Spring,
+   steered by builder-controlled configuration such as a new `application.yaml`, read files the
+   builder's code may not.
+6. Hidden tests live outside the application's package, so they must name the configuration class
+   (`@ContextConfiguration(classes = ...)`).
+
+Decision (agreed): drop the Security Manager from the grader. It is deprecated since Java 17 and
+permanently disabled in Java 24, and a Spring-compatible policy would be long and weak. noir's
+protection rests on the builder never seeing the sealed tests, the commitment, the grader
+container (no network, read-only mounts) and the forbidden-file scan. Lost: protection against
+builder code tampering with the test JVM at run time.
