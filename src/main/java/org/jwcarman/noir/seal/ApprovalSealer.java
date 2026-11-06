@@ -50,6 +50,9 @@ public final class ApprovalSealer implements ApprovalSealing {
    */
   static final String SEALED_EDITED_AT = "sealedEditedAt";
 
+  /** The base commit's files, one path per line, sorted: what a spec-problem report may cite. */
+  public static final String BASE_FILES = "base-files.txt";
+
   /** Where the base build's container output (logs, reports) is kept for the operator. */
   static final String BASELINE_DIR = "baseline";
 
@@ -64,6 +67,7 @@ public final class ApprovalSealer implements ApprovalSealing {
           "reference",
           BASELINE_DIR,
           TestInventory.BASELINE_FILE,
+          BASE_FILES,
           "commitment.json");
 
   private static final String MAIN_JAVA = "src/main/java/";
@@ -214,6 +218,7 @@ public final class ApprovalSealer implements ApprovalSealing {
         parsed.stubs().stream().filter(s -> spliced.contains(s.path())).toList());
     var bundle = itemDir.resolve("base.bundle");
     git.bundle(repoDir, baseSha, bundle);
+    writeBaseFiles(itemDir, git.listFiles(repoDir, baseSha, "."));
     var failing = pinBaseline(item, itemDir, bundle);
     if (!failing.isEmpty()) {
       return reject(
@@ -290,6 +295,27 @@ public final class ApprovalSealer implements ApprovalSealing {
       TestInventory.write(passed, itemDir.resolve(TestInventory.BASELINE_FILE));
     }
     return failing;
+  }
+
+  /** The base file list written at sealing; empty for an item sealed before it existed. */
+  public static Set<String> baseFiles(Path itemDir) {
+    var file = itemDir.resolve(BASE_FILES);
+    if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+      return Set.of();
+    }
+    try {
+      return Set.copyOf(Files.readAllLines(file));
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  private static void writeBaseFiles(Path itemDir, List<String> files) {
+    try {
+      Files.write(itemDir.resolve(BASE_FILES), files.stream().sorted().toList());
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   /** The base commit's {@code src/main/java} Java sources, keyed by path. */

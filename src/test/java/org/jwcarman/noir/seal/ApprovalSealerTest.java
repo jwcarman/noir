@@ -267,6 +267,18 @@ class ApprovalSealerTest {
   }
 
   @Test
+  void baseFileListIsWrittenAtSealing() {
+    sealer = newSealer(NoirConfig.defaults());
+    assertThat(sealer.seal(item)).isInstanceOf(SealOutcome.Passed.class);
+    assertThat(ApprovalSealer.baseFiles(itemDir())).contains("pom.xml");
+  }
+
+  @Test
+  void baseFilesOfAnItemSealedWithoutTheListAreEmpty() {
+    assertThat(ApprovalSealer.baseFiles(itemDir())).isEmpty();
+  }
+
+  @Test
   void baseTestsArePinnedWithHiddenTestsOnToo() {
     assertThat(sealer.seal(item)).isInstanceOf(SealOutcome.Passed.class);
     assertThat(baselineCalls).hasSize(1);
@@ -379,6 +391,7 @@ class ApprovalSealerTest {
             "reference",
             "baseline",
             TestInventory.BASELINE_FILE,
+            ApprovalSealer.BASE_FILES,
             "commitment.json")) {
       assertThat(itemDir().resolve(leftover)).doesNotExist();
     }
