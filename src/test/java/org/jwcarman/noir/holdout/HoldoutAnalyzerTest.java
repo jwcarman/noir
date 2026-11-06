@@ -208,6 +208,103 @@ class HoldoutAnalyzerTest {
     assertThat(analyze().problems()).containsExactly("sub/T.java#a: test has no requirement tag");
   }
 
+  private static final String SPRING_DEP = "org.springframework.boot.test.autoconfigure.orm.jpa";
+
+  private HoldoutReport analyzeWith(Set<String> subpackages, Set<String> exact) {
+    return HoldoutAnalyzer.analyze(Specs.valid(), dir, subpackages, exact);
+  }
+
+  private void springTest(String imports, String annotation) {
+    source(
+        "SpringT",
+        imports
+            + "\nimport org.junit.jupiter.api.*;\n"
+            + annotation
+            + "\nclass SpringT { @Test @Tag(\"R1\") void a() {} @Test @Tag(\"R2\") void b() {} }");
+  }
+
+  @Test
+  void springImportsAllowedWhenInTheInventory() {
+    springTest("import " + SPRING_DEP + ".DataJpaTest;", "@DataJpaTest");
+    assertThat(analyzeWith(Set.of(), Set.of(SPRING_DEP)).problems()).isEmpty();
+    assertThat(analyzeWith(Set.of(), Set.of()).problems())
+        .containsExactly("SpringT.java: import not allowed: " + SPRING_DEP + ".DataJpaTest");
+  }
+
+  @Test
+  void dependencyPackagesAreExactMatchOnly() {
+    springTest("import " + SPRING_DEP + ".internal.Hidden;", "");
+    assertThat(analyzeWith(Set.of(), Set.of(SPRING_DEP)).problems()).hasSize(1);
+  }
+
+  @Test
+  void staticNestedAndWildcardImportsResolveToTheirPackage() {
+    springTest(
+        "import static "
+            + SPRING_DEP
+            + ".Foo.bar;\nimport "
+            + SPRING_DEP
+            + ".Foo.Inner;\nimport "
+            + SPRING_DEP
+            + ".*;",
+        "");
+    assertThat(analyzeWith(Set.of(), Set.of(SPRING_DEP)).problems()).isEmpty();
+  }
+
+  @Test
+  void mainPackagesAdmitSubpackages() {
+    springTest("import com.acme.app.sub.Thing;", "");
+    assertThat(analyzeWith(Set.of("com.acme.app"), Set.of()).problems()).isEmpty();
+  }
+
+  @Test
+  void deniedPackagesStayDenied() {
+    springTest("import java.net.URI;", "");
+    assertThat(analyzeWith(Set.of("java.net"), Set.of("java.net")).problems())
+        .contains("SpringT.java: import not allowed: java.net.URI");
+  }
+
+  @Test
+  void dependencyPackagesNeverWidenJunitPlatform() {
+    springTest("import org.junit.platform.launcher.Launcher;", "");
+    assertThat(analyzeWith(Set.of(), Set.of("org.junit.platform.launcher")).problems())
+        .containsExactly("SpringT.java: import not allowed: org.junit.platform.launcher.Launcher");
+  }
+
+  @Test
+  void realServerRejected() {
+    for (var v : new String[] {"RANDOM_PORT", "DEFINED_PORT"}) {
+      springTest(
+          "import org.springframework.boot.test.context.SpringBootTest;",
+          "@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment." + v + ")");
+      assertThat(analyzeWith(Set.of(), Set.of("org.springframework.boot.test.context")).problems())
+          .containsExactly("SpringT.java: a real server is not allowed: webEnvironment = " + v);
+    }
+    springTest(
+        "import org.springframework.boot.test.context.SpringBootTest;\nimport org.springframework.boot.test.context.SpringBootTest.WebEnvironment;",
+        "@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)");
+    assertThat(analyzeWith(Set.of(), Set.of("org.springframework.boot.test.context")).problems())
+        .containsExactly(
+            "SpringT.java: a real server is not allowed: webEnvironment = RANDOM_PORT");
+  }
+
+  @Test
+  void mockMvcAllowed() {
+    springTest(
+        "import org.springframework.boot.test.context.SpringBootTest;\nimport org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;\nimport org.springframework.test.web.servlet.MockMvc;\nimport static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;",
+        "@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK) @AutoConfigureMockMvc");
+    assertThat(
+            analyzeWith(
+                    Set.of(),
+                    Set.of(
+                        "org.springframework.boot.test.context",
+                        "org.springframework.boot.test.autoconfigure.web.servlet",
+                        "org.springframework.test.web.servlet",
+                        "org.springframework.test.web.servlet.request"))
+                .problems())
+        .isEmpty();
+  }
+
   private HoldoutReport analyze() {
     return HoldoutAnalyzer.analyze(Specs.valid(), dir, Set.of("com.example.api"));
   }

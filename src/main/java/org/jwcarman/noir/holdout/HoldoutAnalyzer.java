@@ -35,6 +35,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.jwcarman.noir.spec.ItemId;
 import org.jwcarman.noir.spec.Requirement;
@@ -73,7 +74,23 @@ public final class HoldoutAnalyzer {
     return DENIED_PREFIXES;
   }
 
+  /** Analyzes with only {@code stubPackages} (and their subpackages) beyond the JDK and JUnit. */
   public static HoldoutReport analyze(Spec spec, Path holdoutDir, Set<String> stubPackages) {
+    return analyze(spec, holdoutDir, stubPackages, Set.of());
+  }
+
+  /**
+   * Analyzes a holdout suite. Besides {@code java} and {@code org.junit.jupiter}, an import may use
+   * a package in {@code subpackageAllowed} (stub and main packages: the package and everything
+   * under it) or in {@code exactAllowed} (repository dependency packages: that package only, so a
+   * library's internals stay out of reach). Denied packages are never allowed, and {@code
+   * org.junit} packages in {@code exactAllowed} are ignored so a shaded jar cannot widen the JUnit
+   * platform.
+   */
+  public static HoldoutReport analyze(
+      Spec spec, Path holdoutDir, Set<String> subpackageAllowed, Set<String> exactAllowed) {
+    var exact =
+        exactAllowed.stream().filter(p -> !under(p, "org.junit")).collect(Collectors.toSet());
     var problems = new ArrayList<String>();
     var counts = new LinkedHashMap<String, Integer>();
     spec.requirements().forEach(r -> counts.put(r.id(), 0));
@@ -126,7 +143,7 @@ public final class HoldoutAnalyzer {
         problems.add(rel + ": package must be " + expectedPackage);
       }
       for (var imp : cu.getImports()) {
-        if (!importAllowed(imp.getNameAsString(), stubPackages)) {
+        if (!importAllowed(imp.getNameAsString(), subpackageAllowed, exact)) {
           problems.add(rel + ": import not allowed: " + importText(imp));
         }
       }
@@ -161,6 +178,7 @@ public final class HoldoutAnalyzer {
         }
       }
       checkDeterminism(cu, rel, problems);
+      checkNoRealServer(cu, rel, problems);
     }
 
     // Coverage is unknowable if any file failed to parse; report only the parse failure(s) in that
@@ -245,6 +263,24 @@ public final class HoldoutAnalyzer {
     }
   }
 
+  private static void checkNoRealServer(CompilationUnit cu, String rel, List<String> problems) {
+    for (var a : cu.findAll(AnnotationExpr.class)) {
+      if (!simpleName(a).equals("SpringBootTest") || !(a instanceof NormalAnnotationExpr n)) {
+        continue;
+      }
+      for (var pair : n.getPairs()) {
+        if (!pair.getNameAsString().equals("webEnvironment")) {
+          continue;
+        }
+        var text = pair.getValue().toString();
+        var value = text.substring(text.lastIndexOf('.') + 1);
+        if (value.equals("RANDOM_PORT") || value.equals("DEFINED_PORT")) {
+          problems.add(rel + ": a real server is not allowed: webEnvironment = " + value);
+        }
+      }
+    }
+  }
+
   private static boolean bannedCall(String owner, String name) {
     return (owner.equals("Thread") && THREAD_METHODS.contains(name))
         || (owner.equals("System") && (name.equals("currentTimeMillis") || name.equals("nanoTime")))
@@ -262,12 +298,28 @@ public final class HoldoutAnalyzer {
         .orElse(rel);
   }
 
-  private static boolean importAllowed(String name, Set<String> stubPackages) {
+  private static boolean importAllowed(
+      String name, Set<String> subpackageAllowed, Set<String> exactAllowed) {
     if (DENIED_PREFIXES.stream().anyMatch(p -> under(name, p))) {
       return false;
     }
     return ALLOWED_PREFIXES.stream().anyMatch(p -> under(name, p))
-        || stubPackages.stream().anyMatch(p -> under(name, p));
+        || subpackageAllowed.stream().anyMatch(p -> under(name, p))
+        || exactAllowed.contains(packageOf(name));
+  }
+
+  /**
+   * The package an import name lives in: the segments before the first one that starts with an
+   * upper-case letter, so a nested class or a static member resolves to its package. A wildcard
+   * import of a package ({@code a.b.*}, name {@code a.b}) is its own package.
+   */
+  private static String packageOf(String name) {
+    var segments = name.split("\\.");
+    var end = 0;
+    while (end < segments.length && !Character.isUpperCase(segments[end].charAt(0))) {
+      end++;
+    }
+    return String.join(".", java.util.Arrays.copyOf(segments, end));
   }
 
   private static boolean under(String name, String prefix) {

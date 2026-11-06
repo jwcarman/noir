@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -124,7 +125,9 @@ public final class SuiteSealer {
         out =
             retry.call(
                 () -> examiner.attempt(spec, contract, stubs, previous, attemptDir, itemDir));
-        problems = checkSuite(spec, baseSources, itemDir, bundle, stubPackages, out, attemptDir);
+        problems =
+            checkSuite(
+                spec, baseSources, itemDir, bundle, stubPackages, inventory, out, attemptDir);
       } catch (SealedFileException e) {
         out = null;
         problems = List.of(e.getMessage());
@@ -160,10 +163,16 @@ public final class SuiteSealer {
       Path itemDir,
       Path bundle,
       Set<String> stubPackages,
+      RepoInventory inventory,
       ExaminerOutput out,
       Path attemptDir) {
     var problems = new ArrayList<>(strayReferenceFiles(spec, out.referenceDir()));
-    problems.addAll(HoldoutAnalyzer.analyze(spec, out.holdoutDir(), stubPackages).problems());
+    var subpackageAllowed = new HashSet<>(stubPackages);
+    subpackageAllowed.addAll(inventory.mainPackages());
+    problems.addAll(
+        HoldoutAnalyzer.analyze(
+                spec, out.holdoutDir(), subpackageAllowed, inventory.dependencyPackages())
+            .problems());
     if (!problems.isEmpty()) {
       return problems;
     }
