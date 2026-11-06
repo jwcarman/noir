@@ -34,6 +34,7 @@ import org.jwcarman.noir.grade.GradeOutcome;
 import org.jwcarman.noir.grade.GradeRunner;
 import org.jwcarman.noir.holdout.HoldoutAnalyzer;
 import org.jwcarman.noir.holdout.TagIndex;
+import org.jwcarman.noir.lifecycle.Category;
 import org.jwcarman.noir.lifecycle.Lifecycle;
 import org.jwcarman.noir.lifecycle.State;
 import org.jwcarman.noir.lifecycle.Transition;
@@ -369,6 +370,18 @@ public final class Factory implements ItemDriver {
     if (secrets.stream().anyMatch(patch::contains)) {
       event(ctx.item().id(), "secret_found", ctx.item().attempt(), Map.of());
       return Step.of(new Trigger.SecretFound());
+    }
+    var changes = retry.call(() -> bundles.fileChanges(bundle, spec.baseSha(), ctx.branch()));
+    var violation = LockCheck.violation(spec, changes);
+    if (violation.isPresent()) {
+      event(
+          ctx.item().id(),
+          "measurement",
+          ctx.item().attempt(),
+          Map.of("passed", false, "category", Category.CONTRACT_VIOLATION.name()));
+      return new Step(
+          new Trigger.MeasurementFailed(Category.CONTRACT_VIOLATION),
+          new FeedbackInput.ContractViolation(List.of(violation.get())));
     }
     var artifacts =
         retry.call(() ->

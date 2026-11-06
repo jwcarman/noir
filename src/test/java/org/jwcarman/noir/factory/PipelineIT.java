@@ -148,7 +148,10 @@ class PipelineIT {
    * work to commit).
    */
   Run drive(String builder) {
-    var item = SealedItemFixture.create(tmp);
+    // Every builder fixture adds the JUnit dependency to pom.xml, so the spec allows that change;
+    // the pom-cheat builder is the one that must be rejected, so it gets a locked pom.xml.
+    var item =
+        SealedItemFixture.create(tmp, builder.equals("pom-cheat") ? List.of() : List.of("pom.xml"));
     var runner = new ProcessCommandRunner();
     var scratch = tmp.resolve("scratch").toAbsolutePath();
     try {
@@ -325,13 +328,14 @@ class PipelineIT {
     var run = drive("pom-cheat");
 
     assertThat(run.finalItem().state()).as(run.path()).isEqualTo(State.FAILED);
+    // The lock check now rejects the pom change before measurement, so the POM never gets to
+    // run and the grader is never reached (no grade event).
     assertThat(run.path())
         .isEqualTo(
-            "SEALED > BUILDING > MEASURING > REWORK(QUALITY_SHORTFALL)"
-                + " > BUILDING > MEASURING > FAILED(QUALITY_SHORTFALL)");
-    assertThat(run.ofType("measurement").get(0).data()).containsEntry("lineCoverage", 0.0);
-    assertThat(run.read(run.attempt(1).resolve("FEEDBACK.md")))
-        .contains("| com.example.api.Counter | 0.0% |");
+            "SEALED > BUILDING > MEASURING > REWORK(CONTRACT_VIOLATION)"
+                + " > BUILDING > MEASURING > FAILED(CONTRACT_VIOLATION)");
+    assertThat(run.ofType("grade")).isEmpty();
+    assertThat(run.read(run.attempt(1).resolve("FEEDBACK.md"))).contains("`pom.xml`");
     assertThat(run.item().github().pullRequests())
         .singleElement()
         .satisfies(pr -> assertThat(pr.draft()).isTrue());

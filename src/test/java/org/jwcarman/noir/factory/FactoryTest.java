@@ -209,6 +209,23 @@ class FactoryTest {
   }
 
   @Test
+  void lockViolationIsContractViolationRework() throws IOException {
+    bundles.changes =
+        List.of(
+            new org.jwcarman.noir.deliver.FileChange(
+                org.jwcarman.noir.deliver.FileChange.Status.MODIFIED, "pom.xml", null, 1, 0));
+
+    drive();
+
+    assertThat(transitionsTo("REWORK").getFirst()).containsEntry("category", "CONTRACT_VIOLATION");
+    assertThat(Files.readString(attempt(1).feedback()))
+        .contains(
+            "You modified `pom.xml`. This spec allows changes only to: new files. Restore those"
+                + " files and make the change another way.");
+    assertThat(measure.calls).isZero();
+  }
+
+  @Test
   void measurementReworkTransitionCarriesItsCategory() {
     measure.modes = n -> n == 1 ? MeasureMode.SHORTFALL : MeasureMode.PASS;
 
@@ -973,6 +990,7 @@ class FactoryTest {
   static final class FakeBundles implements Bundles {
     String patch = "+class Counter {}\n";
     boolean tooLarge;
+    java.util.List<org.jwcarman.noir.deliver.FileChange> changes = java.util.List.of();
 
     @Override
     public List<String> commitsSince(Path bundle, String baseSha, String branch) {
@@ -982,7 +1000,7 @@ class FactoryTest {
     @Override
     public java.util.List<org.jwcarman.noir.deliver.FileChange> fileChanges(
         Path bundle, String baseSha, String branch) {
-      return java.util.List.of();
+      return changes;
     }
 
     @Override
