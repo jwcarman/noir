@@ -182,4 +182,14 @@ Wall clock is seal start to PR (excluding time queued behind other items).
     artifacts were downloaded under. The real failure still fitted, but a longer log would push it
     out. Fix: give the mirror the id `central` in the generated settings.xml, or drop `[INFO]
     Artifact`/`Downloading`/`Downloaded` lines from feedback tails.
+13. **The builder prompt always promises hidden tests** (minor, found 2026-11-07 while designing
+    the spec-problems channel). `builder-system.md`'s "Acceptance" section says hidden acceptance
+    tests will check every requirement, even for items sealed with hidden tests off (the default).
+    The builder works toward a gate that doesn't exist and isn't told that the quality bar and the
+    locked tests are the gate. Covered by `docs/superpowers/specs/2026-11-07-noir-spec-problems-design.md`.
+14. **Live re-run of #75 as #77 (2026-11-07, after the locked-test fix).** The baseline step ran in
+    production: 920 base tests passing, 0 failing. The builder did not try to cheat. Attempt 1 failed
+    the build on the two locked `toRomanRejectsOutOfRange` cases, and attempts 2–4 each stopped
+    after 3–4 turns with no commits. The item failed with an unexplained draft PR (#78), which
+    confirms findings 2 and 3.
 
