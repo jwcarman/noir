@@ -29,7 +29,9 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    the server and never shown to the builder; a SHA-256 commitment to it is
    posted on the issue. If a seal is rejected, noir comments on the issue,
    removes `noir:ready` and labels it `noir:draft`; revise the spec and add
-   `noir:ready` again.
+   `noir:ready` again. The approval locks the text: an issue whose title or
+   body was edited after `noir:ready` was added is rejected the same way, and
+   edits after sealing never affect the build (noir comments once to say so).
 4. **Build.** The server runs Claude Code headlessly in a locked-down Docker
    container against the spec.
 5. **Measure.** In fresh containers noir measures line coverage (JaCoCo),
@@ -41,7 +43,9 @@ seals and builds the spec in that issue. The **desktop** only writes specs
    overfit to the test.
 7. **Deliver.** On a pass noir pushes a branch and opens a PR with the
    metrics, holdout results, and provenance (base SHA, commitment, models,
-   image digests). When attempts run out it opens a draft PR instead.
+   image digests). Each attempt is one commit titled after the issue, e.g.
+   `Add a Counter (#12)` (`…, attempt 2` for rework). When attempts run out it
+   opens a draft PR instead.
 
 Work items move through `DRAFT → SEALING → SEALED → BUILDING → MEASURING →
 GRADING → PR_OPEN`, with `REWORK`, `FAILED`, `BLOCKED`, and `CANCELLED` along
@@ -79,6 +83,11 @@ EOF
 bin/noir run               # keeps polling; `bin/noir run --once` for one pass
 bin/noir status
 ```
+
+To keep the server's state apart from a desktop's `~/.noir`, give every command
+the same `--home`, e.g. `bin/noir --home ~/noir-server run` with
+`~/noir-server/config.yaml`. Restart `noir run` after rebuilding noir: the
+running server keeps the old code.
 
 Credentials are passed to containers through a private env file, never on the
 command line, and every outbound GitHub text is checked for them.

@@ -1,7 +1,7 @@
 # noir approval flow — design
 
 Date: 2026-11-05
-Status: draft for review
+Status: implemented (Plan 5, accepted 2026-11-05)
 Builds on: `2026-11-03-noir-v1-design.md` (v1), Plan 4 (specifier and metrics)
 
 ## 1. Problem
@@ -197,6 +197,10 @@ retry up to `infraRetries`, then BLOCKED.
 
 **Commitment** covers the holdout suite, `bodySha256` and `baseSha`. Post it as
 an issue comment, transition SEALED, then pick up for BUILDING in the same pass.
+
+**Build commits** (added after acceptance). Each builder attempt is one commit
+whose message is `<issue title> (#<n>)`, with `, attempt <k>` from the second
+attempt on (title collapsed to one line, at most 200 chars).
 
 **Crash recovery.** In SEALING: if `commitment.json` exists, finish posting and
 continue; otherwise restart the seal from the lock check (correct, possibly

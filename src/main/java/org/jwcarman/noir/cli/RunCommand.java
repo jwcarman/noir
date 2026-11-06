@@ -11,7 +11,11 @@ import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.ParentCommand;
 
-@Command(name = "run", description = "Run the factory: pick up sealed work and drive it to a PR.")
+@Command(
+    name = "run",
+    description =
+        "Run the server: watch the configured repos, seal issues a human marked noir:ready,"
+            + " and drive them to a PR.")
 final class RunCommand implements Callable<Integer> {
   @ParentCommand NoirCli parent;
   @picocli.CommandLine.Spec CommandSpec spec;
