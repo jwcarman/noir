@@ -112,13 +112,31 @@ class LockCheckTest {
   }
 
   @Test
+  void testRuntimeConfigAnywhereOnTheClasspathIsAViolation() {
+    // JUnit reads these from the whole test classpath, main resources and classes included.
+    for (var path :
+        List.of(
+            "src/main/resources/junit-platform.properties",
+            "src/main/java/junit-platform.properties",
+            "src/main/resources/META-INF/services/org.junit.jupiter.api.extension.Extension",
+            "src/main/resources/META-INF/versions/21/META-INF/services/org.junit.platform.x",
+            "src/main/resources/META-INF/services/ORG.JUNIT.platform.x",
+            "src/main/resources/JUnit-Platform.properties")) {
+      assertThat(LockCheck.violation(csv, List.of(change(Status.ADDED, path))))
+          .as(path)
+          .hasValueSatisfying(t -> assertThat(t).startsWith("You added `" + path + "`."));
+    }
+  }
+
+  @Test
   void otherAddedResourcesAreAllowed() {
     assertThat(
             LockCheck.violation(
                 csv,
                 List.of(
                     change(Status.ADDED, "src/test/resources/data.csv"),
-                    change(Status.ADDED, "src/main/resources/junit-platform.properties"),
+                    change(Status.ADDED, "src/main/resources/META-INF/services/java.sql.Driver"),
+                    change(Status.ADDED, "src/main/resources/my-junit-platform.properties.txt"),
                     change(Status.ADDED, "src/test/java/META-INF/services/x"),
                     change(Status.ADDED, "docs/.mvn/notes.md"))))
         .isEmpty();
@@ -137,10 +155,10 @@ class LockCheckTest {
     assertThat(text)
         .contains(
             "You modified `pom.xml`, added `.mvn/maven.config` and deleted `B.java`. This spec"
-                + " allows changes only to: `A.java`, and new files outside `.mvn/`,"
-                + " `src/test/resources/junit-platform.properties` and"
-                + " `src/test/resources/META-INF/services/`. Undo those changes and make the"
-                + " change another way.");
+                + " allows changes only to: `A.java`, and new files other than `.mvn/` files,"
+                + " `junit-platform.properties` files and JUnit service registrations"
+                + " (`META-INF/services/org.junit.*`). Undo those changes and make the change"
+                + " another way.");
   }
 
   @Test

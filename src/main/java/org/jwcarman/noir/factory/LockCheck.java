@@ -3,6 +3,7 @@ package org.jwcarman.noir.factory;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -13,20 +14,22 @@ import org.jwcarman.noir.spec.Spec;
  * Rejects an attempt that changes an existing file the spec does not allow. Only the files in
  * {@code modifies} and {@code testsToUpdate} may be modified, and none may be deleted or renamed.
  * New files are allowed, except build and test-runtime configuration that could stop locked tests
- * from failing the build ({@code .mvn/**}, {@code src/test/resources/junit-platform.properties} and
- * {@code src/test/resources/META-INF/services/**}). Applies to every spec.
+ * from failing the build: anything under {@code .mvn/}, and, anywhere in the repository (JUnit
+ * reads them from the whole test classpath, main resources included), any file named {@code
+ * junit-platform.properties} and any JUnit service registration ({@code
+ * META-INF/services/org.junit.*}). Names are matched ignoring case. Applies to every spec.
  */
 final class LockCheck {
-
-  private static final String TEST_RESOURCES = "src/test/resources/";
 
   private LockCheck() {}
 
   /** An added file that could change how Maven or JUnit runs the locked tests. */
   static boolean lockedNewFile(String path) {
-    return path.startsWith(".mvn/")
-        || path.equals(TEST_RESOURCES + "junit-platform.properties")
-        || path.startsWith(TEST_RESOURCES + "META-INF/services/");
+    var p = path.toLowerCase(Locale.ROOT);
+    var name = p.substring(p.lastIndexOf('/') + 1);
+    return p.startsWith(".mvn/")
+        || name.equals("junit-platform.properties")
+        || p.contains("meta-inf/services/org.junit.");
   }
 
   /** The builder feedback for the locked files the attempt changed, or empty if it changed none. */
@@ -75,11 +78,8 @@ final class LockCheck {
     var newFiles =
         added.isEmpty()
             ? "new files"
-            : "new files outside `.mvn/`, `"
-                + TEST_RESOURCES
-                + "junit-platform.properties` and `"
-                + TEST_RESOURCES
-                + "META-INF/services/`";
+            : "new files other than `.mvn/` files, `junit-platform.properties` files and JUnit"
+                + " service registrations (`META-INF/services/org.junit.*`)";
     sb.append(allowed.isEmpty() ? newFiles : list(allowed) + ", and " + newFiles);
     sb.append(
         added.isEmpty()
