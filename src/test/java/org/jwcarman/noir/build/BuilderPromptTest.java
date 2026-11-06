@@ -61,4 +61,22 @@ class BuilderPromptTest {
         .contains("`/work/SPEC-PROBLEMS.json`")
         .contains("never disable, skip or weaken a test you may not change");
   }
+
+  @Test
+  void acceptanceWithHiddenTestsNamesThem() {
+    assertThat(BuilderPrompt.system(true))
+        .contains("hidden acceptance tests, which you cannot see")
+        .doesNotContain("There are no hidden tests");
+  }
+
+  @Test
+  void acceptanceWithoutHiddenTestsNamesTheRealGate() {
+    assertThat(BuilderPrompt.system(false))
+        .contains(
+            "Your work is accepted when `mvn -B verify` passes, every test that passed before your"
+                + " change still passes, and the quality bar is met. There are no hidden tests for"
+                + " this item, so your own tests are the only evidence that every requirement and"
+                + " example in `SPEC.md` is met: test each one.")
+        .doesNotContain("hidden acceptance tests");
+  }
 }

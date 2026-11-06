@@ -257,6 +257,21 @@ class FactoryTest {
           + " test.\"}]}";
 
   @Test
+  void builderIsToldTheItemHasHiddenTests() {
+    drive();
+    assertThat(build.hiddenTests).containsOnly(true); // the fixture commitment has a holdout
+  }
+
+  @Test
+  void builderIsToldTheItemHasNoHiddenTests() {
+    Commitments.write(
+        Commitments.create(spec, itemDir.resolve("no-such-dir"), null, "body"),
+        itemDir.resolve("commitment.json"));
+    drive();
+    assertThat(build.hiddenTests).containsOnly(false);
+  }
+
+  @Test
   void builderReportStopsTheItem() {
     build.report = n -> R1_REPORT;
     build.produces = n -> false;
@@ -1208,6 +1223,8 @@ class FactoryTest {
     String model = "claude-test";
     IntFunction<AgentResult> agent = null;
 
+    final List<Boolean> hiddenTests = new ArrayList<>();
+
     /** The SPEC-PROBLEMS.json each attempt writes, or null for none. */
     IntFunction<String> report = n -> null;
 
@@ -1219,7 +1236,9 @@ class FactoryTest {
         String branch,
         String commitMessage,
         Optional<String> feedback,
-        Path attemptDir) {
+        Path attemptDir,
+        boolean hiddenTests) {
+      this.hiddenTests.add(hiddenTests);
       calls.add(new BuildCall(inputBundle, commitMessage, feedback, attemptDir));
       var problems = report.apply(calls.size());
       if (problems != null) {

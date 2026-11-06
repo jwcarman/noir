@@ -258,7 +258,7 @@ class ReapprovalFlowTest {
   }
 
   static BuildRunner unusedBuilder() {
-    return (spec, stubs, input, branch, message, feedback, dir) -> {
+    return (spec, stubs, input, branch, message, feedback, dir, hiddenTests) -> {
       throw new AssertionError("builder must not run");
     };
   }

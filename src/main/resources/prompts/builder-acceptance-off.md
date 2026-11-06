@@ -1,0 +1,1 @@
+Your work is accepted when `mvn -B verify` passes, every test that passed before your change still passes, and the quality bar is met. There are no hidden tests for this item, so your own tests are the only evidence that every requirement and example in `SPEC.md` is met: test each one. Implement the specified behavior exactly, including edge cases and the documented exceptions.

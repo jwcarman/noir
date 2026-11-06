@@ -283,11 +283,21 @@ public final class Factory implements ItemDriver {
     var input = inputBundle(ctx.itemDir(), n);
     var feedback = previousFeedback(ctx.itemDir(), n);
     var message = CommitMessage.of(ctx.item().issueNumber(), ctx.spec().title(), n);
+    // The commitment's file list is empty exactly when the item was sealed without hidden tests.
+    boolean hiddenTests =
+        !Commitments.read(ctx.itemDir().resolve("commitment.json")).files().isEmpty();
     var outcome =
         retry.call(() -> {
           var o =
               builder.run(
-                  ctx.spec(), stubs, input, ctx.branch(), message, feedback, ctx.attempt().build());
+                  ctx.spec(),
+                  stubs,
+                  input,
+                  ctx.branch(),
+                  message,
+                  feedback,
+                  ctx.attempt().build(),
+                  hiddenTests);
           if (consumedNothing(o.agent()) && !o.producedCommits()) {
             throw new DockerException(
                 "builder agent failed before doing any work (exit "

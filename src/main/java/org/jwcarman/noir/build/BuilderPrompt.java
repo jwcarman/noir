@@ -13,11 +13,21 @@ import org.jwcarman.noir.spec.Spec;
 public final class BuilderPrompt {
   static final String FEEDBACK_HEADING = "\n\n# FEEDBACK.md\n\n";
   private static final String SYSTEM = load("/prompts/builder-system.md");
+  private static final String WITH_HIDDEN =
+      SYSTEM.replace("{{ACCEPTANCE}}", load("/prompts/builder-acceptance-hidden.md").strip());
+  private static final String WITHOUT_HIDDEN =
+      SYSTEM.replace("{{ACCEPTANCE}}", load("/prompts/builder-acceptance-off.md").strip());
 
   private BuilderPrompt() {}
 
+  /** The system prompt for an item with hidden tests. */
   public static String system() {
-    return SYSTEM;
+    return system(true);
+  }
+
+  /** The system prompt; its Acceptance section names the gate the item really has. */
+  public static String system(boolean hiddenTests) {
+    return hiddenTests ? WITH_HIDDEN : WITHOUT_HIDDEN;
   }
 
   /** {@code SPEC.md}, followed by the feedback from the previous attempt when there is one. */

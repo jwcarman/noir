@@ -61,7 +61,8 @@ public final class ContainerBuildRunner implements BuildRunner {
       String branch,
       String commitMessage,
       Optional<String> feedback,
-      Path attemptDir) {
+      Path attemptDir,
+      boolean hiddenTests) {
     if (spec.baseSha() == null) {
       throw new IllegalArgumentException("spec " + spec.id() + " has no baseSha");
     }
@@ -99,7 +100,7 @@ public final class ContainerBuildRunner implements BuildRunner {
         agent.run(
             new AgentRequest(
                     config.images().builder(),
-                    BuilderPrompt.system(),
+                    BuilderPrompt.system(hiddenTests),
                     BuilderPrompt.user(spec, stubs, feedback),
                     attemptDir,
                     null,

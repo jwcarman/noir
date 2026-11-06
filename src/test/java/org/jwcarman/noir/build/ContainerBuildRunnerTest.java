@@ -65,6 +65,27 @@ class ContainerBuildRunnerTest {
   }
 
   @Test
+  void systemPromptFollowsTheItemsHiddenTests() {
+    new ContainerBuildRunner(port, agent, NoirConfig.defaults())
+        .run(
+            Specs.valid(),
+            List.of(),
+            input,
+            "noir/1-x",
+            "Add a Counter (#1)",
+            Optional.empty(),
+            tmp.resolve("attempt"),
+            false);
+    assertThat(agent.requests().getFirst().systemPrompt()).isEqualTo(BuilderPrompt.system(false));
+  }
+
+  @Test
+  void hiddenTestsAreTheDefault() {
+    run();
+    assertThat(agent.requests().getFirst().systemPrompt()).isEqualTo(BuilderPrompt.system(true));
+  }
+
+  @Test
   void countsCommitsAndPassesBranchAndBase() throws IOException {
     var outcome = run();
     assertThat(outcome.producedCommits()).isTrue();
