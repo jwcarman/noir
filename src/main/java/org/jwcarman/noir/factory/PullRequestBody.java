@@ -43,6 +43,19 @@ public final class PullRequestBody {
       List<FileChange> files,
       List<String> testsToUpdate,
       boolean draft) {
+    return render(issue, metrics, results, p, files, testsToUpdate, draft, true);
+  }
+
+  /** {@code hiddenTests} is false when the item was sealed without a hidden test suite. */
+  public static String render(
+      int issue,
+      Optional<Metrics> metrics,
+      List<RequirementResult> results,
+      Provenance p,
+      List<FileChange> files,
+      List<String> testsToUpdate,
+      boolean draft,
+      boolean hiddenTests) {
     var sb = new StringBuilder();
     if (draft) {
       sb.append(shortfall(p.attempts())).append("\n\n");
@@ -62,7 +75,7 @@ public final class PullRequestBody {
     sb.append("| Max CRAP (changed classes) | ")
         .append(metrics.map(m -> String.format(Locale.ROOT, "%.1f", m.maxCrap())).orElse("n/a"))
         .append(" |\n\n");
-    results(sb, results);
+    results(sb, results, hiddenTests);
     files(sb, files, testsToUpdate);
     sb.append("\n### Provenance\n\n");
     sb.append("- Base SHA: `").append(line(p.baseSha())).append("`\n");
@@ -73,7 +86,9 @@ public final class PullRequestBody {
         .append(issue)
         .append(")\n");
     sb.append("- Builder model: ").append(line(p.builderModel())).append('\n');
-    sb.append("- Examiner model: ").append(line(p.examinerModel())).append('\n');
+    sb.append("- Examiner model: ")
+        .append(hiddenTests ? line(p.examinerModel()) : "none")
+        .append('\n');
     sb.append("- Builder image: `").append(line(p.builderImageId())).append("`\n");
     sb.append("- Grader image: `").append(line(p.graderImageId())).append("`\n");
     sb.append("- Cost: ").append(cost(p.builderCostUsd(), p.examinerCostUsd())).append('\n');
@@ -143,7 +158,7 @@ public final class PullRequestBody {
     var sb = new StringBuilder(shortfall(attempts));
     sb.append(" No attempt produced commits that could be delivered, so no pull request was")
         .append(" opened.\n\n");
-    results(sb, results);
+    results(sb, results, true);
     return sb.toString();
   }
 
@@ -151,7 +166,13 @@ public final class PullRequestBody {
     return "**noir could not satisfy every requirement within " + attempts + " attempts.**";
   }
 
-  private static void results(StringBuilder sb, List<RequirementResult> results) {
+  private static void results(StringBuilder sb, List<RequirementResult> results, boolean hidden) {
+    if (!hidden) {
+      sb.append("### Hidden tests\n\n")
+          .append("Off for this item (enable with the noir:hidden-tests label or")
+          .append(" hiddenTests: true).\n");
+      return;
+    }
     sb.append("### Holdout results\n\n");
     if (results.isEmpty()) {
       sb.append("Not graded.\n");

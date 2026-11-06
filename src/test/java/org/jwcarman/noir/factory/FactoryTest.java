@@ -127,6 +127,41 @@ class FactoryTest {
     return new AttemptPaths(itemDir, n);
   }
 
+  /** Sealed with hidden tests off: no holdout, so grading is skipped and the PR says so. */
+  @Test
+  void withoutHiddenTestsGradingIsSkipped() throws IOException {
+    deleteTree(itemDir.resolve("holdout"));
+    Commitments.write(
+        Commitments.create(spec, itemDir, null, "body"), itemDir.resolve("commitment.json"));
+
+    var item = drive();
+
+    assertThat(item.state()).isEqualTo(State.PR_OPEN);
+    assertThat(grade.calls).isZero();
+    var gradeEvent =
+        store.readEvents(Specs.ID).stream().filter(e -> e.type().equals("grade")).toList();
+    assertThat(gradeEvent)
+        .singleElement()
+        .satisfies(e -> assertThat(e.data()).containsEntry("result", "skipped"));
+    assertThat(gh.pullRequests().get(0).body())
+        .contains(
+            "### Hidden tests\n\nOff for this item (enable with the noir:hidden-tests label or"
+                + " hiddenTests: true).\n")
+        .doesNotContain("### Holdout results")
+        .contains("Examiner model: none");
+  }
+
+  static void deleteTree(Path root) throws IOException {
+    if (!Files.exists(root)) {
+      return;
+    }
+    try (var paths = Files.walk(root)) {
+      for (var p : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+        Files.delete(p);
+      }
+    }
+  }
+
   @Test
   void happyPathOpensOnePullRequest() {
     bundles.changes =

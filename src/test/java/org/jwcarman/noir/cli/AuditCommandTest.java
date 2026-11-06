@@ -52,6 +52,22 @@ class AuditCommandTest {
         new NoirHome(tmp), new PrintWriter(out), new PrintWriter(err), ops, args);
   }
 
+  /**
+   * An item sealed with hidden tests off has nothing to audit; say so instead of listing nothing.
+   */
+  @Test
+  void itemWithoutHiddenTestsSaysSo() throws IOException {
+    var dir = store.itemDir(ID).resolve("holdout");
+    try (var paths = java.nio.file.Files.walk(dir)) {
+      for (var p : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+        java.nio.file.Files.delete(p);
+      }
+    }
+    assertThat(run("audit", ID)).isEqualTo(1);
+    assertThat(err.toString())
+        .contains(ID + " has no hidden tests: it was sealed with hidden tests off");
+  }
+
   @Test
   void listGroupsTestsByRequirementInSpecOrder() {
     assertThat(run("audit", ID)).isZero();

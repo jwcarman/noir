@@ -454,6 +454,11 @@ public final class Factory implements ItemDriver {
   }
 
   private Step grade(Ctx ctx) {
+    if (Commitments.read(ctx.itemDir().resolve("commitment.json")).files().isEmpty()) {
+      // Sealed with hidden tests off: there is no holdout to grade against.
+      event(ctx.item().id(), "grade", ctx.item().attempt(), Map.of("result", "skipped"));
+      return Step.of(new Trigger.GradePassed());
+    }
     var spec = ctx.spec();
     var paths = ctx.attempt();
     var measured = new MeasureArtifacts(paths.measure());
@@ -630,7 +635,8 @@ public final class Factory implements ItemDriver {
         provenance,
         files,
         ctx.spec().testsToUpdate(),
-        draft);
+        draft,
+        !Commitments.read(ctx.itemDir().resolve("commitment.json")).files().isEmpty());
   }
 
   /** Text bound for GitHub carried a credential; nothing has been posted. */
