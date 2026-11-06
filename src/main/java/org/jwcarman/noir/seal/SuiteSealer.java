@@ -123,8 +123,8 @@ public final class SuiteSealer {
       try {
         var previous = problems;
         out =
-            retry.call(
-                () -> examiner.attempt(spec, contract, stubs, previous, attemptDir, itemDir));
+            retry.call(() ->
+                examiner.attempt(spec, contract, stubs, inventory, previous, attemptDir, itemDir));
         problems =
             checkSuite(
                 spec, baseSources, itemDir, bundle, stubPackages, inventory, out, attemptDir);

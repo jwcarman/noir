@@ -28,6 +28,7 @@ public final class Examiner {
       Spec spec,
       List<StubSource> contract,
       List<StubSource> stubs,
+      RepoInventory inventory,
       List<String> previousProblems,
       Path attemptDir,
       Path outDir) {
@@ -35,7 +36,7 @@ public final class Examiner {
       deleteRecursively(attemptDir);
       Files.createDirectories(attemptDir.resolve("out/holdout"));
       Files.createDirectories(attemptDir.resolve("out/reference"));
-      var prompt = ExaminerPrompt.user(spec, contract, stubs, previousProblems);
+      var prompt = ExaminerPrompt.user(spec, contract, stubs, inventory, previousProblems);
       Files.writeString(attemptDir.resolve("PROMPT.md"), prompt);
       var ex = config.examiner();
       var result =

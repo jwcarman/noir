@@ -40,8 +40,12 @@ against the stubs and is rejected.
   class. A test may carry several tags. Give each test a Javadoc comment citing the requirement
   statement or example it comes from.
 - **Several tests per requirement.** Cover each requirement's examples and its edge cases.
-- **Dependencies.** Use only JUnit Jupiter (`org.junit.jupiter.*`), the JDK, and the packages of
-  the API stubs. No AssertJ, Hamcrest, Mockito, or any other library.
+- **Dependencies.** Use only JUnit Jupiter (`org.junit.jupiter.*`), the JDK, the libraries listed
+  under "Test libraries", and the repository's own classes (the API stubs and the "Repository API"
+  section). No library that is not listed.
+- **No real servers.** A test must not start a real server or open network connections. Test in
+  process instead (for example a mock request against the code under test); noir rejects a suite
+  that starts a real server.
 - **Forbidden packages.** Never import or name anything from `java.util.concurrent`,
   `java.net`, `java.nio.channels` or `java.lang.reflect`, including their subpackages (so no
   `AtomicLong`, `AtomicInteger`, `ConcurrentHashMap`, `Executors`, `URL` or `Method`). noir
@@ -59,5 +63,12 @@ against the stubs and is rejected.
   against the stubs tests nothing.
 - **Every test must pass against your reference implementation**, every time.
 - Test methods must not be `private` or `static`.
+
+## Tests to update
+
+When the spec has a "Tests to update" section, it lists existing test helpers. If the change makes
+a listed helper stale, update a listed test helper by writing its complete updated version at the
+same path under `/work/out/reference/`. Change only what the requirements make necessary. Never
+write any other existing test file there. The builder never sees these files.
 
 If the "Problems with your previous attempt" section is present, fix every problem it lists.

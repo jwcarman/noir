@@ -22,10 +22,15 @@ public final class ExaminerPrompt {
   /**
    * The Examiner's input: the spec with the issue's {@code contract} view (fragments under their
    * {@code (modify)} headings) and, for a spec that modifies files, each modify target's complete
-   * spliced file from {@code stubs}.
+   * spliced file from {@code stubs}; then what the repository offers hidden tests: its test
+   * libraries, Spring guidance when the repository uses Spring, and its public API.
    */
   public static String user(
-      Spec spec, List<StubSource> contract, List<StubSource> stubs, List<String> previousProblems) {
+      Spec spec,
+      List<StubSource> contract,
+      List<StubSource> stubs,
+      RepoInventory inventory,
+      List<String> previousProblems) {
     var sb = new StringBuilder(SpecRenderer.specBody(spec, contract));
     sb.append("\n## Holdout package\n\n`").append(ItemId.holdoutPackage(spec.id())).append("`\n");
     if (!spec.modifies().isEmpty()) {
@@ -45,6 +50,34 @@ public final class ExaminerPrompt {
         }
       }
     }
+    sb.append("\n## Test libraries\n\n");
+    if (inventory.testLibraries().isEmpty()) {
+      sb.append("JUnit and the JDK only\n");
+    } else {
+      for (var library : inventory.testLibraries()) {
+        sb.append("- ").append(library).append('\n');
+      }
+    }
+    if (usesSpring(inventory)) {
+      sb.append("\n## Spring\n\n");
+      inventory
+          .applicationClass()
+          .ifPresent(application ->
+              sb.append("The application class is `")
+                  .append(application)
+                  .append("`. Name it in `@SpringBootTest(classes = ")
+                  .append(application)
+                  .append(".class)` or `@ContextConfiguration(classes = ")
+                  .append(application)
+                  .append(".class)`.\n\n"));
+      sb.append(
+          "Prefer test slices (`@WebMvcTest`, `@DataJpaTest` and the like) over a full context."
+              + " Never start a real server: use `MockMvc`, not `webEnvironment = RANDOM_PORT` or"
+              + " `DEFINED_PORT`. Replace collaborators with `@MockitoBean`.\n");
+    }
+    if (!inventory.repositoryApi().isBlank()) {
+      sb.append("\n## Repository API\n\n").append(inventory.repositoryApi().strip()).append('\n');
+    }
     if (!previousProblems.isEmpty()) {
       sb.append("\n## Problems with your previous attempt\n\n");
       for (var problem : previousProblems) {
@@ -60,6 +93,14 @@ public final class ExaminerPrompt {
       }
     }
     return sb.toString();
+  }
+
+  private static boolean usesSpring(RepoInventory inventory) {
+    return inventory.applicationClass().isPresent()
+        || inventory.testLibraries().stream()
+            .anyMatch(l ->
+                l.startsWith("org.springframework:spring-test:")
+                    || l.startsWith("org.springframework.boot:spring-boot-test:"));
   }
 
   private static String load(String resource) {
